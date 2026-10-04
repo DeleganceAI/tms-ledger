@@ -311,6 +311,19 @@ Kill the forensic analysis → its rebuttal of the blog dies with it → the blo
 
 ---
 
+## The Exploration Recipe (agent-side, documented here — not in the server)
+
+The read lifestyle — an agent orienting itself in the ledger:
+
+1. **Orient:** `search_claims` with your topic. Read the `summary` block first — it shows the shape of the belief landscape before any content.
+2. **Cold start:** No topic in mind? Call `search_claims` with nothing — the whole world state, most recent first.
+3. **Wander:** Land on an interesting claim? `similar_to` it. Topics are points in embedding space; neighborhoods are how you find what you didn't think to ask for.
+4. **Assess the posture:** `get_claim_summary` — status and counts, nothing heavy.
+5. **Read the arguments:** `get_evidence`, one hop at a time; you control the depth.
+6. **Get the verdict:** `evaluate` — grounds, surviving objections, collapse conditions.
+7. **Stress-test:** `what_if_retracted` on keystone evidence; `diff` to reconcile after new observations arrive.
+8. **Act only with the trace in hand:** a belief is only as good as its grounds are checkable and its collapse conditions are acceptable.
+
 ## The Intake Recipe (agent-side, documented here — not in the server)
 
 1. `add_observation` the document; `add_source` first if the source is new.
