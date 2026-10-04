@@ -128,23 +128,50 @@ Every query returns the same envelope: `total_count`, `page`, `page_size`, `item
 
 ### 8. `search_claims`
 
+**The front door.** Counts arrive before content: a `summary` block with per-status counts, then items ordered believed-first.
+
 ```json
-// request: "do we know anything about Tesseralia layoffs?"
+// request: "what do we believe about Tesseralia layoffs?"
 { "text": "Tesseralia layoffs", "page_size": 10 }
 
 // response
-{ "total_count": 1, "page": 1, "page_size": 10,
+{ "total_count": 2, "page": 1, "page_size": 10,
+  "summary": { "believed": 1, "contested": 0, "unresolved": 1, "disbelieved": 0 },
   "items": [
     { "id": "c1",
       "text": "Tesseralia laid off 15% of its staff in September 2026",
       "status": "believed",
-      "supporting": 2,
-      "rebutting": 1,
-      "qualifying": 0,
-      "asserted_at": "2026-10-01T09:01:00Z" } ] }
+      "supporting": 2, "rebutting": 1, "qualifying": 0,
+      "asserted_at": "2026-10-01T09:01:00Z" },
+    { "id": "c2",
+      "text": "Tesseralia has cut 15% of its workforce",
+      "status": "unresolved",
+      "supporting": 0, "rebutting": 0, "qualifying": 0,
+      "asserted_at": "2026-10-04T14:08:00Z" } ] }
 ```
 
-Counts, no reasons — an agent sees the unexpected rebuttal and drills in.
+Note `c2`: it is `SAME_AS` `c1` (call #5), yet its own status is `unresolved` — identity is *asserted*, not merged. An agent reading both plus the `SAME_AS` edge reconciles them in its own head. Counts, no reasons — an agent sees the unexpected rebuttal on `c1` and drills in.
+
+**Cold start** — no topic in mind, "what claims do we even have?":
+
+```json
+// request
+{ "page_size": 10 }
+
+// response
+{ "total_count": 2, "page": 1, "page_size": 10,
+  "summary": { "believed": 1, "contested": 0, "unresolved": 1, "disbelieved": 0 },
+  "items": [ "…claims, most recent first…" ] }
+```
+
+**Neighborhood wandering** — land on one claim, fan out to its semantic neighbors:
+
+```json
+// request: "what else is near c1?"
+{ "similar_to": "c1", "page_size": 10 }
+```
+
+The exploration lifestyle: search text → read the summary → paginate or filter by status → `similar_to` to wander — all counts-first, drilling only where it matters.
 
 ### 9. `get_claim_summary`
 
