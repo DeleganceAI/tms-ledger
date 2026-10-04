@@ -33,8 +33,14 @@
 --   * One clock: `asserted_at` on every row, same name everywhere (§6).
 --     Set by the system, never by an agent. (DEFAULT now() is the system.)
 --
--- Requirements: PostgreSQL 16+, pgvector (vector similarity for §5 retrieval).
--- Suggested image: pgvector/pgvector:pg18 (or equivalent).
+-- Requirements: PostgreSQL 16+, pgvector >= 0.7 (halfvec indexing) for §5
+--   retrieval. Suggested image: pgvector/pgvector:pg18 (or equivalent).
+-- Embeddings: Qwen/Qwen3-Embedding-8B — 4096 dims, L2-normalized, Apache-2.0.
+--   Column type is vector(4096) (stores up to 16k dims, no problem), but
+--   pgvector HNSW indexes cap at 2,000 dims on the vector type, so the
+--   indexes below cast to halfvec(4096) (up to 4,000 index dims). Queries
+--   must use the same cast: ORDER BY embedding::halfvec(4096) <=> :q::halfvec.
+--   embedding_model is stored on every row and is part of the data (§5).
 -- Usage: mounted as the container's /docker-entrypoint-initdb.d/init.sql,
 -- or applied manually: psql -f db/init.sql
 -- ============================================================================
@@ -50,7 +56,6 @@ CREATE TABLE sources (
     id           text        PRIMARY KEY,  -- minted by the server, e.g. 's1'
     name         text        NOT NULL,
     uri          text,
-    source_type  text        NOT NULL,     -- free text: 'news_wire', 'personal_blog'
     asserted_at  timestamptz NOT NULL DEFAULT now(),
 
     CONSTRAINT sources_name_not_empty CHECK (btrim(name) <> '')
@@ -65,11 +70,10 @@ CREATE TABLE observations (
     id              text        PRIMARY KEY,  -- app-minted, e.g. 'o1'
     source_id       text        NOT NULL REFERENCES sources(id),
     uri             text        NOT NULL,
-    doc_type        text,                    -- free text: 'news_article', ...
     content         text,                    -- full document text, opaque
     content_hash    text        NOT NULL,    -- e.g. 'sha256:9f3a...'
     asserted_at     timestamptz NOT NULL DEFAULT now(),
-    embedding       vector(1536),
+    embedding       vector(4096),   -- Qwen3-Embedding-8B native dimension
     embedding_model text,
 
     -- The hash binds content; integrity is attacked via REBUTS-an-Observation.
@@ -85,8 +89,12 @@ CREATE INDEX observations_source_idx       ON observations (source_id);
 CREATE INDEX observations_asserted_at_idx  ON observations (asserted_at);
 
 -- Semantic retrieval over documents ("have we seen this paper?").
+-- Semantic retrieval over documents ("have we seen this paper?").
+-- vector(4096) exceeds pgvector's 2,000-dim HNSW ceiling on the vector type;
+-- index at half precision instead (halfvec supports up to 4,000). Qwen3
+-- embeddings are L2-normalized, so the cast loses almost nothing.
 CREATE INDEX observations_embedding_hnsw
-    ON observations USING hnsw (embedding vector_cosine_ops);
+    ON observations USING hnsw (embedding::halfvec(4096) halfvec_cosine_ops);
 
 -- ===========================================================================
 -- 3. CLAIMS  (§2)
@@ -99,16 +107,20 @@ CREATE TABLE claims (
     id              text        PRIMARY KEY,   -- e.g. 'c1'
     text            text        NOT NULL CHECK (char_length(text) > 0),
     asserted_at     timestamptz NOT NULL DEFAULT now(),
-    embedding       vector(1536),
+    embedding       vector(4096),   -- Qwen3-Embedding-8B native dimension
     embedding_model text,
     CONSTRAINT claim_embedding_model_pinned
         CHECK ((embedding IS NULL) = (embedding_model IS NULL))
 );
 
 -- Semantic retrieval ("all claims about X") is embedding similarity, never
--- an entity join (§5). Cosine over the pinned model's space.
+-- an entity join (§5). Cosine over the pinned model's space; queries are
+-- embedded with Qwen3's task instruction prepended, documents without.
+-- Index at half precision: vector(4096) exceeds the 2,000-dim HNSW ceiling
+-- on vector; halfvec indexes up to 4,000 and is near-lossless here because
+-- the embeddings are unit-normalized.
 CREATE INDEX claims_embedding_hnsw
-    ON claims USING hnsw (embedding vector_cosine_ops);
+    ON claims USING hnsw (embedding::halfvec(4096) halfvec_cosine_ops);
 CREATE INDEX claims_asserted_at_idx ON claims (asserted_at);
 
 -- ===========================================================================
