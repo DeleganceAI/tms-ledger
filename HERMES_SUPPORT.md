@@ -1,135 +1,49 @@
-# tmsv2 × Hermes Agent
+# tmsv2 × Hermes Agent — Deferred Proposal
 
-**Status:** design notes, 2026-10-04. Hermes Agent moves fast (v0.21.5 as of this writing, pre-1.0, ~6 minors in the last 4 months) — treat every version fact below as *as-of*, and re-verify before relying on it.
+**Status:** deferred integration proposal, outside the current build. There is no Hermes package, supported installation recipe, or Hermes-specific acceptance checklist in current scope. This document records possible client-side integration ideas; it does not add server implementation requirements.
 
-tmsv2 is agent-agnostic by design: MCP is the only contract, and any capable MCP client should work. Hermes Agent (Nous Research) is the **first-class reference integration** — the agent we optimize for, document for, and test against. This document says what "first-class" costs, and why each requirement exists.
+## 1. Boundary
 
----
+The ledger is agent-agnostic. A future Hermes integration would consume the same proposed MCP tools as any other client, without a fork or Hermes-specific server behavior. Hermes version details, configuration keys, approval behavior, scheduling facilities, and extension compatibility would need verification when that work is explicitly resumed. No compatibility with a particular Hermes release is claimed here.
 
-## 0. The Posture: Add, Don't Fork
+Possible future client artifacts include intake and briefing skills and a memory-policy snippet. They are proposals, not shipped artifacts or current build deliverables. Packaging, commands, startup targets, diagnostics, read-only modes, scheduling, and catalog distribution are not specified here.
 
-We integrate with Hermes. We do not modify it, and we do not couple to it.
+## 2. Current Storage Contract
 
-- **The ledger is the product.** The agent is a disposable client, replaced whenever a better one ships. Defensibility lives in the ledger and the version-controlled skills — artifacts that survive agent churn, not in agent-specific code.
-- **Every layer we'd want to touch is already an extension surface:** MCP servers, skills, SOUL.md, cron prompts. A fork would buy tighter coupling at the cost of re-merging an aggressively moving upstream for zero functional gain.
-- **No Hermes-specific code paths in the server.** If the server works in Hermes because it works *everywhere*, the MCP spec is doing its job.
+`db/init.sql` is the authority for storage: PostgreSQL with pgvector, with four actual tables: `sources`, `observations`, `claims`, and `evidence`. Historical comments or triggers naming absent tables do not expand that contract.
 
-## 1. Why Hermes (and not the others)
+- Sources identify where observations came from; `observations.source_id` is the required foreign key.
+- Observations carry a URI and required `content_hash`; stored `content` is nullable. API examples may send content for the server to persist and hash.
+- Claim text and observation hashes are nonunique. Matching hashes do not imply an existing row must be returned, and repeated intake is not guaranteed to be idempotent. An interrupted or uncertain write must not be treated as safe to retry without considering another append.
+- Evidence comes from an observation and targets exactly one claim, evidence record, source, or observation. Relations are `SUPPORTS`, `REBUTS`, and `QUALIFIES`; `QUALIFIES` may target only claims. Evidence requires a nonblank `reason`; this is not a reason requirement on every foreign key.
+- Timestamps are assigned by the database's `DEFAULT now()`, not supplied by the agent through the API.
+- Observation and claim embeddings use the full **Qwen/Qwen3-Embedding-8B, 4096-dimensional** representation, without dimension reduction. `embedding` and `embedding_model` are paired nullable fields: both absent or both present.
 
-The comparison set was OpenClaw, Hermes Agent, and ZeroClaw. Hermes won on four grounds specific to tmsv2:
+**Unresolved implementation issue:** the SQL declares HNSW indexes over `halfvec(4096)` while documenting a 4,000-dimensional indexing ceiling. The 4,096-dimensional representation exceeds that ceiling; these index declarations are not a demonstrated working retrieval setup. The mismatch remains unresolved, not a reason to reduce embedding dimensions.
 
-1. **Its memory model doesn't fight the ledger.** Hermes keeps small, curated memory files (`MEMORY.md`, `USER.md`, ~2,200 / 1,375 chars) plus a searchable SQLite store. It does not feed whole transcripts back into context. This is the opposite of a problem for us — it forces the correct discipline: *the ledger is the memory; the agent queries, it doesn't cache.*
-2. **Cron runs in fresh, self-contained sessions.** Scheduled work starts cold, with no conversational context. Again a feature: the brief is the prompt plus ledger queries, nothing else. (The rest of the trigger story — event-driven, semantic flips — is the long-term plan; see §6.)
-3. **Python.** Same language as the DSPy/GEPA optimization stack. Not needed for black-box optimization, but it collapses friction the day we want to instrument the loop.
-4. **SKILL.md compatibility.** Hermes and OpenClaw share the AgentSkills format, and both ship migration tooling. Our skills are portable artifacts, which keeps the agent swappable.
+## 3. Proposed Shared MCP Surface
 
-Hermes is pre-1.0 and churning hard. Everything above is a reason to integrate *shallowly*, never deeply.
+A future client would use only the shared tool surface:
 
-## 2. What We Ship
-
-The integration is a package, not a server:
-
-| Artifact | Role |
+| Role | Tools |
 |---|---|
-| `tmsv2` MCP server (stdio) | The tools. Mechanical, per V1 §7. |
-| `skills/tms-intake/SKILL.md` | *When* to ingest, *how* to judge co-reference, evidence, reasons. |
-| `skills/tms-brief/SKILL.md` | The daily brief recipe: `diff` → tensions → fragile beliefs → gaps. |
-| SOUL.md snippet | The memory firewall (§5). |
+| Writes | `add_source`, `add_observation`, `add_claim`, `add_evidence` |
+| Reads | `search_claims`, `get_evidence`, `get_claim_summary`, `get_observation`, `get_source`, `evaluate`, `what_if_retracted`, `diff` |
 
-**The server provides tools. The skills say when to use them.** (The emerging ecosystem convention — the pattern You.com ships for Hermes.) Skills and tool descriptions are co-dependent and must be versioned together.
+Collection queries (`search_claims`, `get_evidence`, `diff`) use `total_count`, `page`, `page_size`, and `items` envelopes. Singleton reads and verdicts return objects as illustrated in EXAMPLES.md, not collection envelopes.
 
-## 3. Design Principles
+`support.chains` counts standing supporting evidence records, not graph paths. `distinct_sources` counts distinct source IDs among those records. It does not establish independence or detect syndication. Two supporting evidence records from the same source count as two chains and one distinct source.
 
-**Principle 1 — First contact is instant.**
-Hermes spawns stdio servers at startup; `hermes mcp test tmsv2` is how users first touch us. Boot time is UX. Target: the entire config entry is `uvx tmsv2`, connect-and-list happens in under a second, everything heavy (embeddings, DB pool) is lazy-initialized. Ship a `tmsv2 doctor` subcommand (Neo4j reachable, migrations current, embeddings configured) — Hermes users are trained to expect self-diagnostics.
+The SQL stores no belief status or standing result. Evaluation remains an application-layer concern. The effect of `SUPPORTS` targeting sources, observations, or evidence, cycle handling and status mapping, and the effect of `QUALIFIES` are unresolved evaluation rules. The noncyclic rebuttal sequence in EXAMPLES.md illustrates intended behavior, not a completed evaluator guaranteed by SQL. A future integration must not invent these rules in its client skills.
 
-**Principle 2 — Annotations are the trust ladder.**
-Hermes gates approvals on MCP tool annotations. Get them right and users get the correct trust gradient out of the box: Browsing is free; writing to the ledger requires approval.
+## 4. Possible Client Recipes
 
-| tmsv2 tool | `readOnlyHint` | `destructiveHint` |
-|---|---|---|
-| `search_claims`, `get_evidence`, `get_claim_summary`, `get_observation`, `get_source`, `evaluate`, `what_if_retracted`, `diff` | `true` | `false` |
-| `add_source`, `add_observation`, `add_claim`, `add_evidence`, `assert_same_as`, `mark_duplicate_of`, `mark_supersedes` | `false` | `true` |
+An intake recipe could find relevant existing claims, choose explicit IDs, append observations and evidence with specific reasons, and then query the resulting posture. Semantic matching is an agent judgment, not automatic merging or hash-based deduplication. Nothing in the storage contract guarantees that repeated writes reuse an existing ID.
 
-Also support `TMSV2_READ_ONLY=1` — the cautious-adopter trust ladder. A read-only tmsv2 is still a useful tmsv2.
+A briefing recipe could use `search_claims`, `get_claim_summary`, `evaluate`, and `diff` to identify changed conclusions, surviving objections, and gaps in evidence. A schedule could invoke such a recipe only as separately approved integration work. There is no current event dispatch, watch-rule, notification, or per-append evaluation commitment here.
 
-**Principle 3 — Every call is safe to abandon, and every call is safe to retry.**
-Two Hermes behaviors make this mandatory rather than polite: It interrupts in-progress work when the user sends a new message, and cron sessions start with no memory of anything. Therefore:
+## 5. Proposed Memory Policy
 
-- An intake run abandoned halfway is just a shorter ledger — never a corrupt one. (Append-only buys us this; protect it.)
-- Re-running intake must be idempotent. **New requirement on the server:** An append carrying an already-seen `(source, content_hash)` pair is a no-op that returns the existing observation ID — not a duplicate. Retries and at-least-once delivery become free.
-- Never batch semantically separate writes behind one tool call.
+> World claims should be retrieved from the ledger with their evidence and objections, not answered from a cached client memory. Store the habit of querying, not a detached copy of a verdict. Cite claim IDs and retain the context needed to check evidence applicability.
 
-**Principle 4 — Design for the cold agent.**
-Hermes's memory is *tiny* and curated. The worst failure mode for tmsv2 is the agent caching a world claim in `MEMORY.md` and answering from stale memory forever. The V1 front door already does the rest of the work — counts-first results, status facets, `search_claims` with no arguments = the whole world state — so a fresh session with zero context can orient itself in one call. Keep that property when tempted to add state.
-
-**Principle 5 — Skills are part of the product.**
-The skills are not documentation garnish; they are the recipe layer V1 promised ("recipes live in prose, not in the server"). Consequences: ship them in-repo; version them with the server; write the brief skill to be fully self-contained, because cron kills context by design. (Note Hermes's guardrail: cron sessions cannot create further cron jobs.)
-
-**Principle 6 — Keyless and local by default.**
-Hermes scrubs environment variables containing `KEY`, `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`, or `AUTH` before running agent-written code. Good for security — which means the server must own its configuration and never rely on the agent to relay secrets. Compute embeddings server-side with a pinned local model by default (the `embedding_model` discipline requires pinning anyway), with API fallback behind config. Ship `tmsv2 load-demo` to seed the V1 §10 dataset, so a new user sees a believed/contested world in their first sixty seconds.
-
-**Principle 7 — Spec-clean beats convenient.**
-Hermes is at 0.21.x; `mcpServers` vs `mcp_servers` mistakes happen; schemas churn. Pin our MCP SDK version, couple to nothing Hermes-specific, and stay portable to OpenClaw and ZeroClaw. The long-term distribution win is the **Nous curated MCP catalog** (reviewed manifest, prompted credentials, automatic tool checklist) — the difference between "works with Hermes" and "discoverable in Hermes." Everything in this document is roughly its review criteria anyway.
-
-## 4. Installation Reference
-
-```yaml
-# ~/.hermes/config.yaml
-mcp_servers:
-  tmsv2:
-    command: uvx
-    args: ["--project", "/path/to/tmsv2", "tmsv2"]
-```
-
-```text
-hermes mcp test tmsv2     # connect, list tools, exit 0/1
-hermes tools list         # confirm registration
-/reload-mcp               # from chat, after config changes
-```
-
-The running gateway also watches `config.yaml` and hot-reloads MCP changes within about a minute. Gotcha for anyone copying from Claude Code docs: the key is `mcp_servers` (underscore). Hermes ships `hermes import-agent claude-code` precisely because of that mistake.
-
-## 5. The Memory Firewall
-
-The one thing the SOUL.md snippet must establish, and the skill files must reinforce:
-
-> **World facts live in the tmsv2 ledger — never in your memory files.** Store the *habit* of querying the ledger, never its contents. Before asserting a fact to the user, search the ledger and cite claim IDs. New documents go through the intake skill, never paraphrased from memory.
-
-This is a deliberate separation of categories: Hermes's memory is the agent's *relationship with you* (preferences, projects, operational continuity). The ledger is the *state of the world*, with provenance, attackable and re-derivable. Conflating them would make world state hostage to a fast-moving agent's schema churn.
-
-## 6. Cron Today, Triggers Tomorrow
-
-The daily brief is the only time-based trigger we ship, because a digest is a *read* of world state, not a *reaction* to change. The long-term architecture is event-driven, and the ledger already provides the semantics:
-
-```
-dumb fetchers (pollers, quarantined)  →  append observations
-                                        ↓ every append re-evaluates the affected subgraph
-status flips (the only events that matter)
-                                        ↓
-watch rules ("tell me when status(X) changes", "when independent_sources(X) increases")
-                                        ↓
-agent tasks / notifications
-```
-
-Polling is quarantined to the dumbest layer. The write path is the event stream; `diff` is the change-data-capture mechanism; `content_hash` idempotency makes at-least-once delivery safe. Hermes's webhook platform is the dispatch surface. The daily brief is what *nothing happened* looks like.
-
-## 7. Non-Goals
-
-- **No fork.** If a need ever seems to require one, re-read §0.
-- **No reading Hermes's internal state.** Its SQLite, its schemas, its memory files are rental equipment. Our state lives in Neo4j.
-- **No Hermes-only behavior.** If a feature only works in Hermes, that's a bug in our server or a missing MCP feature — file it as one or the other.
-
-## 8. Adoption Checklist
-
-Order matters; each step is independently useful.
-
-- [ ] FastMCP server, V1 §7 surface, stub Neo4j layer — boots in <1s
-- [ ] Tool annotations per §3; `hermes mcp test` passes clean
-- [ ] Append idempotency: `(source, content_hash)` no-op dedup
-- [ ] `tmsv2 doctor` + `tmsv2 load-demo`
-- [ ] `skills/tms-intake/SKILL.md` + `skills/tms-brief/SKILL.md`, self-contained, versioned with the server
-- [ ] SOUL.md snippet with the memory firewall
-- [ ] `TMSV2_READ_ONLY=1` mode
-- [ ] GEPA optimization loop: tool descriptions + skills, per-model variants pinned like `embedding_model`
-- [ ] Catalog submission once the above are boring
+Client preferences and conversational continuity are separate from ledger claims. A future integration should preserve that distinction without reading or depending on Hermes's internal storage. The ledger remains in PostgreSQL, regardless of the client selected.
