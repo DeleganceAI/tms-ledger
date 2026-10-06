@@ -1,44 +1,24 @@
 # tmsv2
 
-Number-free truth maintenance system.
-
-An epistemic ledger of text-based statements — claims, observations, sources, and evidence — with an intended MCP interface for agents to query belief states and their provenance.
+A number-free epistemic ledger for humans and AI agents: record claims, observations, sources, explicit contradiction findings, and grounded evidence without a server deciding what to believe.
 
 ## The Discipline
 
-1. **No confidence numbers or degrees.** No probabilities, weights, scores, or ordered confidence labels. Numbers inside opaque claim text and descriptive record counts are not confidence inputs.
-2. **Never aggregate confidence.** Evaluation follows evidence relationships, not weighted summation.
-3. **Show disagreement.** Report support and surviving objections rather than smoothing conflict into a score. Cycle handling and status mapping remain explicit evaluator decisions, not settled SQL behavior.
-4. **Claims are opaque text.** Identity, classifications, and statements about sources can be claims with evidence. Agents interpret them; the ledger does not parse them, merge identities, or redirect references.
-5. **Ground evidence.** Every evidence record references an observation and carries a nonblank reason. This is not a reason requirement on every foreign key.
-6. **Append-only.** Corrections are new records and grounded evidence, never mutations or automatic version replacement. Beliefs and evidence standing are derived, not stored.
-7. **Keep projections separate.** External layers may compute scores in their own stores. Outputs written back are opaque claims with evidence, never new confidence fields or numeric inputs to the evaluator.
+- **No confidence scales.** No probabilities, weights, or ordered confidence labels. Numbers inside statements are ordinary content; retrieval distances are not confidence.
+- **Keep interpretation with readers.** Humans and AI agents decide what is believed or contested and whether a contradiction is open or resolved. The ledger neither stores nor derives those conclusions.
+- **Show the reasons.** Every evidence record cites a grounding observation and a specific reason. Contradictions name at least two distinct claims and explain their incompatibility.
+- **Preserve history.** Records are append-only: corrections add records and evidence, never edit, delete, retire, or automatically replace earlier assertions.
+- **Keep provenance explicit.** Each source, observation, claim, contradiction, and evidence record identifies its registered human or agent author and database-supplied assertion time. Authors are not document sources or verified identities.
 
-## Storage and Current Scope
+## Current Scope
 
-[db/init.sql](db/init.sql) is the authoritative **PostgreSQL + pgvector** storage contract. There are exactly four tables:
+[db/init.sql](db/init.sql) defines the PostgreSQL + pgvector schema: an authors registry, five authored content types, and contradiction membership links. Claims and observations can carry full 4096-dimensional `Qwen/Qwen3-Embedding-8B` vectors for exact cosine retrieval; PostgreSQL keyword/text retrieval is a complementary option. Neither method proves relevance, duplication, or truth.
 
-| Table | Purpose |
-|---|---|
-| `sources` | Source name and optional URI. |
-| `observations` | Document URI, nullable content, nonunique content hash, and required `source_id` foreign key. |
-| `claims` | Nonempty opaque claim text; repeated text is allowed. |
-| `evidence` | A grounding observation, relation, exactly one typed target foreign key, and a required nonblank reason. |
+Run [db/verify.sql](db/verify.sql) with `psql` after initializing the schema to check its invariants and an append/research/correction scenario.
 
-All records have a text primary key and `asserted_at`, supplied by the database's `DEFAULT now()` rather than agent write arguments. Evidence relations are `SUPPORTS`, `REBUTS`, and `QUALIFIES`; targets may be claims, evidence, sources, or observations, except that `QUALIFIES` targets claims only.
+The **MCP interface is proposed, not implemented**. It offers append tools, exact record reads, and filtered, paginated searches—not evaluation, belief summaries, or automatic contradiction resolution. Readers inspect raw records, reasons, and provenance and form their own conclusions.
 
-Claims and observations have paired nullable `embedding` / `embedding_model` fields. The selected model is **`Qwen/Qwen3-Embedding-8B`**, using the full **4096 dimensions**, without dimension reduction. No content-hash deduplication or idempotency requirement is imposed. There are no identity-link, document-dependence, or document-version tables or tools. No Hermes package is part of the current build.
-
-The intended MCP surface has four writes: `add_source`, `add_observation`, `add_claim`, and `add_evidence`. Read tools cover search, evidence traversal, record lookup, claim summaries, evaluation, hypothetical retraction, and historical differences. Collection queries use pagination envelopes; singleton reads and verdicts return objects.
-
-Verdicts report `support.chains` as the count of standing supporting evidence records and `support.distinct_sources` as the count of distinct source IDs behind those records. These counts do not establish independent reporting or rule out syndication, and are not confidence scores.
-
-## Unresolved Implementation and Evaluation Decisions
-
-The design is not a claim that the SQL alone supplies a working evaluator or MCP server:
-
-- **Embedding indexes:** SQL declares HNSW indexes over `halfvec(4096)`, exceeding its documented **4000-dimensional** halfvec index ceiling. Full embedding storage and successful indexed retrieval are different claims; this index incompatibility is unresolved.
-- **Initialization:** stale trigger declarations reference absent tables. They are an initialization issue, not features to restore. The current script must not be presented as successfully runnable without resolving its issues.
-- **Evaluation:** SQL stores relationships but does not settle standing and provenance propagation, `SUPPORTS` semantics for sources/observations/evidence, cycle handling and status mapping, the effect of `QUALIFIES`, or hypothetical retraction dependencies. These need an explicit application contract.
-
-Full design and read surface: [V1.md](V1.md). Tool examples: [EXAMPLES.md](EXAMPLES.md).
+- [V1.md](V1.md): short design and proposed MCP surface.
+- [ROLES.md](ROLES.md): contributor and reader responsibilities.
+- [EXAMPLES.md](EXAMPLES.md): ledger-writing and reading examples.
+- [RESEARCH_LOOP.md](RESEARCH_LOOP.md): historical research-loop discussion, not additional implementation requirements.
