@@ -85,6 +85,12 @@ cloudflared tunnel --url http://localhost:8765
 
 Configure the agent with the tunnel URL plus `/mcp` as a streamable-HTTP MCP server and `Authorization: Bearer <TMS_TOKEN>`. A quick tunnel gives a random hostname per run; a named tunnel on your own domain is the stable version. Each bot registers once with `add_author` (kind `agent`) and passes its own `author_id` on every write. Pin bots to a collection by telling them which one; the server does not infer it.
 
+`TMS_COLLECTION=mcas` on the server makes `mcas` the default collection for calls that omit one. The token lives in a gitignored `.env` (`export TMS_TOKEN=...`), so `source .env` before starting the server.
+
+Instructions to give an intake agent, verbatim:
+
+> You have an MCP server named `tms`, an append-only evidence ledger. Register yourself once with `add_author` (id `grok-<yourname>`, kind `agent`) and pass that `author_id` on every write. For each document, paper or post you have collected: call `search_sources` for the publisher, site or account; if absent, `add_source`. Then `add_observation` with `collection="mcas"`, the `source_id`, the original `uri`, and the complete text as `content` (not a summary; if you only have a URL, pass it and leave `content` empty so the server fetches it, and if that fails, fetch the text yourself and pass it). Do not add claims or evidence unless asked. Record each returned observation id. Finding that a document is already present is a fine outcome; do not add it twice.
+
 ## Tools
 
 | Tool | Does |
