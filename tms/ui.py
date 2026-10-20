@@ -140,11 +140,92 @@ def record(conn, kind: str, id: str) -> dict | None:
     elif kind == "author":
         rec["recent"] = [L._clean(r) for r in conn.execute(
             RECENT_SQL.replace(") r ORDER BY", ") r WHERE author_id = %s ORDER BY"), (id, 100))]
+        rec["tools"] = [L._clean(r) for r in conn.execute(
+            """SELECT coalesce(tool, method) AS name, count(*) AS n, count(*) FILTER (WHERE NOT ok) AS errors, round(avg(ms))::int AS avg_ms
+               FROM mcp_calls WHERE author_id = %s GROUP BY 1 ORDER BY n DESC, 1""", (id,))]
+        rec["failures"] = [L._clean(r) for r in conn.execute(
+            "SELECT at, tool, left(error, 300) AS error FROM mcp_calls WHERE author_id = %s AND NOT ok ORDER BY at DESC LIMIT 20", (id,))]
     return rec
 
 
+RECORDS_BY_AUTHOR_SQL = """SELECT author_id, max(asserted_at) AS last_record_at, count(*) AS records FROM (
+  SELECT author_id, asserted_at FROM observations UNION ALL SELECT author_id, asserted_at FROM claims
+  UNION ALL SELECT author_id, asserted_at FROM evidence UNION ALL SELECT author_id, asserted_at FROM contradictions
+  UNION ALL SELECT author_id, asserted_at FROM sources) r GROUP BY author_id"""
+
+DOMAIN = r"lower(regexp_replace(%s, '^([a-z]+://)?(www\.)?([^/:]+).*$', '\3'))"  # scheme optional
+
+
+def agents(conn) -> dict:
+    """Every author plus any author_id seen only in calls, with record and call counts and a 60-minute series."""
+    rows = [L._clean(r) for r in conn.execute(f"""
+        WITH calls AS (
+          SELECT author_id, count(*) AS calls, count(*) FILTER (WHERE tool LIKE 'add_%%') AS writes,
+                 count(*) FILTER (WHERE tool IS NOT NULL AND tool NOT LIKE 'add_%%') AS reads,
+                 count(*) FILTER (WHERE NOT ok) AS errors, min(at) AS first_call, max(at) AS last_call,
+                 round(avg(ms))::int AS avg_ms
+          FROM mcp_calls WHERE author_id IS NOT NULL GROUP BY author_id),
+        recs AS ({RECORDS_BY_AUTHOR_SQL})
+        SELECT coalesce(a.id, c.author_id) AS id, a.name, a.kind, a.asserted_at AS registered_at,
+               a.id IS NULL AS unregistered,
+               (SELECT count(*) FROM observations o WHERE o.author_id = a.id) AS observations,
+               (SELECT count(*) FROM claims k WHERE k.author_id = a.id) AS claims,
+               (SELECT count(*) FROM evidence e WHERE e.author_id = a.id) AS evidence,
+               (SELECT count(*) FROM contradictions x WHERE x.author_id = a.id) AS contradictions,
+               (SELECT count(*) FROM sources s WHERE s.author_id = a.id) AS sources,
+               coalesce(recs.records, 0) AS records, recs.last_record_at,
+               coalesce(c.calls, 0) AS calls, coalesce(c.writes, 0) AS writes, coalesce(c.reads, 0) AS reads,
+               coalesce(c.errors, 0) AS errors, c.first_call, c.last_call, c.avg_ms
+        FROM authors a FULL OUTER JOIN calls c ON c.author_id = a.id
+        LEFT JOIN recs ON recs.author_id = coalesce(a.id, c.author_id)
+        ORDER BY greatest(coalesce(c.last_call, 'epoch'), coalesce(recs.last_record_at, 'epoch')) DESC, 1""")]
+    per_min: dict[str, list] = {}
+    for r in conn.execute("""SELECT author_id, date_trunc('minute', at) AS m, count(*) AS n, count(*) FILTER (WHERE NOT ok) AS errors
+                             FROM mcp_calls WHERE at > now() - interval '60 minutes' AND author_id IS NOT NULL
+                             GROUP BY 1, 2 ORDER BY 1, 2"""):
+        per_min.setdefault(r["author_id"], []).append(L._clean(r))
+    return {"agents": rows, "per_min": per_min}
+
+
+SOURCE_SORTS = {
+    "observations": "observations DESC, evidence DESC, name",
+    "evidence": "evidence DESC, observations DESC, name",
+    "recent": "last_observation_at DESC NULLS LAST, asserted_at DESC",
+    "name": "lower(name), id",
+}
+
+
+def sources(conn, q: str = "", sort: str = "observations", limit: int = 300) -> dict:
+    """Sources with what they contributed, plus a rollup of observation domains."""
+    order = SOURCE_SORTS.get(sort, SOURCE_SORTS["observations"])
+    like = f"%{q}%"
+    rows = [L._clean(r) for r in conn.execute(f"""
+        SELECT * FROM (
+          SELECT s.id, s.name, s.uri, s.author_id, s.asserted_at, {DOMAIN % 'coalesce(s.uri, s.name)'} AS domain,
+                 (SELECT count(*) FROM observations o WHERE o.source_id = s.id) AS observations,
+                 (SELECT count(*) FROM evidence e JOIN observations o ON o.id = e.from_observation_id WHERE o.source_id = s.id) AS evidence,
+                 (SELECT count(DISTINCT e.target_claim_id) FROM evidence e JOIN observations o ON o.id = e.from_observation_id
+                   WHERE o.source_id = s.id AND e.target_claim_id IS NOT NULL) AS claims,
+                 (SELECT count(*) FROM evidence e WHERE e.target_source_id = s.id) AS evidence_about,
+                 (SELECT max(o.asserted_at) FROM observations o WHERE o.source_id = s.id) AS last_observation_at,
+                 (SELECT string_agg(DISTINCT o.collection_id, ', ') FROM observations o WHERE o.source_id = s.id) AS collections
+          FROM sources s WHERE s.name ILIKE %s OR coalesce(s.uri, '') ILIKE %s) b
+        ORDER BY {order} LIMIT %s""", (like, like, limit))]
+    domains = [L._clean(r) for r in conn.execute(f"""
+        SELECT {DOMAIN % 'o.uri'} AS domain, count(*) AS observations, count(DISTINCT o.source_id) AS sources,
+               (SELECT count(*) FROM evidence e WHERE e.from_observation_id = ANY(array_agg(o.id))) AS evidence
+        FROM observations o GROUP BY 1 ORDER BY observations DESC, 1 LIMIT 40""")]
+    totals = L._clean(conn.execute("""
+        SELECT (SELECT count(*) FROM sources) AS sources,
+               (SELECT count(DISTINCT source_id) FROM observations) AS with_observations,
+               (SELECT count(DISTINCT """ + DOMAIN % 'uri' + """) FROM observations) AS domains,
+               (SELECT count(*) FROM observations) AS observations,
+               (SELECT count(*) FROM evidence) AS evidence""").fetchone())
+    return {"sources": rows, "domains": domains, "totals": totals}
+
+
 async def index(request) -> HTMLResponse:
-    return HTMLResponse(PAGE)
+    return HTMLResponse(PAGE_FILE.read_text(encoding="utf-8"))  # re-read so edits show on refresh
 
 
 async def api_snapshot(request) -> JSONResponse:
@@ -163,6 +244,17 @@ async def api_browse(request) -> JSONResponse:
         return JSONResponse({"error": str(err)}, status_code=400)
 
 
+async def api_agents(request) -> JSONResponse:
+    with L.connect() as conn:
+        return JSONResponse(agents(conn))
+
+
+async def api_sources(request) -> JSONResponse:
+    qp = request.query_params
+    with L.connect() as conn:
+        return JSONResponse(sources(conn, qp.get("q", "").strip(), qp.get("sort", "observations")))
+
+
 async def api_record(request) -> JSONResponse:
     kind, id = request.path_params["kind"], request.path_params["id"]
     with L.connect() as conn:
@@ -177,11 +269,14 @@ app = Starlette(routes=[
     Route("/", index),
     Route("/api/snapshot", api_snapshot),
     Route("/api/browse", api_browse),
+    Route("/api/agents", api_agents),
+    Route("/api/sources", api_sources),
     Route("/api/record/{kind}/{id}", api_record),
 ])
 
 
-PAGE = (Path(__file__).with_name("ui.html")).read_text(encoding="utf-8")
+PAGE_FILE = Path(__file__).with_name("ui.html")
+PAGE = PAGE_FILE.read_text(encoding="utf-8")  # kept for tests and tools that import it
 
 
 def main() -> None:

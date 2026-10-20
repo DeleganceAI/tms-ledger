@@ -54,11 +54,18 @@ a.idl{font-family:var(--mono);color:var(--accent);text-decoration:none;font-size
 a.ext{color:var(--accent);word-break:break-all}pre.content{white-space:pre-wrap;word-break:break-word;font:11px/1.45 var(--mono);max-height:320px;overflow:auto;background:var(--bg);padding:8px;border-radius:4px;margin:0}
 details{margin-top:14px}summary{cursor:pointer;color:var(--ink3);font-size:11px}details pre{font:10.5px/1.4 var(--mono);white-space:pre-wrap;word-break:break-word;color:var(--ink2)}
 .seg.lg{width:160px;height:10px;margin:6px 0 10px}
+table.wide th{text-align:left;font-weight:600;font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:var(--ink3);padding:6px 8px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel);white-space:nowrap}
+table.wide th.n{text-align:right}.spark{width:120px;height:18px;display:block}td.sp{width:1%;padding:3px 8px}
+.kindtag{display:inline-block;padding:0 5px;border-radius:3px;font-family:var(--mono);font-size:10px;line-height:16px;background:var(--accent2);color:var(--accent)}.kindtag.human{background:color-mix(in srgb,var(--good) 18%,transparent);color:var(--good)}.kindtag.unreg{background:color-mix(in srgb,var(--bad) 16%,transparent);color:var(--bad)}
+.strip2{display:flex;flex-wrap:wrap}.srow{grid-template-columns:minmax(300px,1fr) 2.2fr}@media(max-width:1100px){.srow{grid-template-columns:1fr}}
+.bars.dom{grid-template-columns:max-content 1fr max-content max-content;max-height:calc(100vh - 230px)}
+.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:8px 0 4px}.grid4 .cell{background:var(--bg);border-radius:4px;padding:6px 8px}.grid4 .v{font-family:var(--mono);font-size:14px;font-weight:600}.grid4 .k{color:var(--ink3);font-size:10.5px}
+.ext2{color:var(--ink3);font-family:var(--mono);font-size:10.5px}
 </style></head><body>
 <div class="top">
   <div class="bar">
     <div class="brand">TMS <span>ledger</span></div>
-    <nav class="tabs"><button class="tab on" data-tab="activity">Activity</button><button class="tab" data-tab="browse">Browse</button></nav>
+    <nav class="tabs"><button class="tab on" data-tab="activity">Activity</button><button class="tab" data-tab="browse">Browse</button><button class="tab" data-tab="agents">Agents</button><button class="tab" data-tab="sources">Sources</button></nav>
     <div class="live" id="live"><i class="dot"></i><span id="status">connecting</span></div>
   </div>
   <div class="strip" id="strip"></div>
@@ -89,6 +96,22 @@ details{margin-top:14px}summary{cursor:pointer;color:var(--ink3);font-size:11px}
       <span class="grow"></span><span class="muted" id="bnote"></span><button class="pg" id="bprev">‹</button><button class="pg" id="bnext">›</button>
     </div>
     <div class="scroll tall"><table class="dense" id="bresults"></table></div>
+  </section>
+</main>
+<main id="agents" hidden>
+  <section class="panel">
+    <div class="ph"><h2>Agents</h2><span class="muted" id="anote"></span></div>
+    <div class="scroll tall"><table class="dense wide" id="atable"></table></div>
+  </section>
+</main>
+<main id="sources" hidden>
+  <section class="strip2" id="sstrip"></section>
+  <section class="row srow">
+    <div class="panel"><div class="ph"><h2>Observations by domain</h2><span class="muted" id="dnote"></span></div><div class="bars dom" id="domains"></div></div>
+    <div class="panel">
+      <div class="tools"><input id="sq" placeholder="filter sources…" autocomplete="off"><select id="ssort"><option value="observations">most observations</option><option value="evidence">most evidence</option><option value="recent">recently used</option><option value="name">name</option></select><span class="grow"></span><span class="muted" id="snote"></span></div>
+      <div class="scroll tall"><table class="dense wide" id="stable"></table></div>
+    </div>
   </section>
 </main>
 <aside id="drawer">
@@ -210,11 +233,61 @@ $('bsem').onchange = e => { B.sem = e.target.checked; rebrowse(); };
 $('bq').oninput = e => { B.q = e.target.value; clearTimeout(btimer); btimer = setTimeout(rebrowse, B.sem ? 600 : 250); };
 $('bprev').onclick = () => { if (B.page > 0) { B.page--; browse(); } };
 $('bnext').onclick = () => { B.page++; browse(); };
+let activeTab = 'activity';
 document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
   document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === t));
-  $('activity').hidden = t.dataset.tab !== 'activity'; $('browse').hidden = t.dataset.tab !== 'browse';
-  if (t.dataset.tab === 'browse' && !bshown) { bshown = true; browse(); }
+  activeTab = t.dataset.tab;
+  ['activity', 'browse', 'agents', 'sources'].forEach(id => $(id).hidden = id !== activeTab);
+  if (activeTab === 'browse' && !bshown) { bshown = true; browse(); }
+  if (activeTab === 'agents') loadAgents();
+  if (activeTab === 'sources') loadSources();
 });
+
+// ---- agents ---------------------------------------------------------------
+function spark(rows) {
+  const data = series(rows || []), max = Math.max(1, ...data.map(d => d.n));
+  return `<svg class="spark" viewBox="0 0 120 18" preserveAspectRatio="none">` + data.map((d, i) => d.n
+    ? `<rect x="${i * 2}" y="${18 - Math.max(1, Math.round(17 * d.n / max))}" width="1.6" height="${Math.max(1, Math.round(17 * d.n / max))}" fill="${d.errors ? 'var(--bad)' : 'var(--accent)'}"/>` : '').join('') +
+    `<line x1="0" y1="17.5" x2="120" y2="17.5" stroke="var(--line)" stroke-width=".6"/></svg>`;
+}
+const kindTag = a => a.unregistered ? '<span class="kindtag unreg">unregistered</span>' : `<span class="kindtag ${a.kind === 'human' ? 'human' : ''}">${esc(a.kind || '')}</span>`;
+async function loadAgents() {
+  let d; try { d = await (await fetch('/api/agents')).json(); } catch (e) { $('atable').innerHTML = `<tr><td class="empty">${esc(e)}</td></tr>`; return; }
+  $('anote').textContent = `${d.agents.length} · active ${d.agents.filter(a => a.last_call && Date.now() - new Date(a.last_call) < 300000).length} in last 5m`;
+  const th = '<tr><th>agent</th><th>name</th><th></th><th>last seen</th><th>last hour</th><th class="n" title="calls that named this author_id; reads carry none">calls</th><th class="n">writes</th><th class="n">errors</th><th class="n">avg</th>' +
+    '<th class="n">obs</th><th class="n">claims</th><th class="n">evidence</th><th class="n">findings</th><th class="n">sources</th><th>registered</th></tr>';
+  $('atable').innerHTML = th + (d.agents.length ? d.agents.map(a => {
+    const last = a.last_call && a.last_record_at ? (new Date(a.last_call) > new Date(a.last_record_at) ? a.last_call : a.last_record_at) : (a.last_call || a.last_record_at);
+    return `<tr class="rec" data-kind="author" data-id="${esc(a.id)}"><td class="k">${esc(a.id)}</td><td class="a" style="max-width:220px" title="${esc(a.name || '')}">${a.name && a.name !== a.id ? esc(a.name) : ''}</td><td>${kindTag(a)}</td>` +
+      `<td class="t" title="${esc(last || '')}">${last ? ago(last) + ' ago' : '—'}</td><td class="sp">${spark(d.per_min[a.id])}</td>` +
+      `<td class="n">${esc(a.calls)}</td><td class="n">${esc(a.writes)}</td>` +
+      `<td class="n" style="color:${a.errors ? 'var(--bad)' : 'var(--ink3)'}">${esc(a.errors)}</td><td class="n" style="color:var(--ink3)">${a.avg_ms != null ? esc(a.avg_ms) + 'ms' : '—'}</td>` +
+      `<td class="n">${esc(a.observations)}</td><td class="n">${esc(a.claims)}</td><td class="n">${esc(a.evidence)}</td><td class="n">${esc(a.contradictions)}</td><td class="n">${esc(a.sources)}</td>` +
+      `<td class="t" title="${esc(a.registered_at || '')}">${a.registered_at ? ago(a.registered_at) + ' ago' : '—'}</td></tr>`; }).join('') : '<tr><td class="empty" colspan="15">no agents yet</td></tr>');
+}
+
+// ---- sources --------------------------------------------------------------
+const S = {q: '', sort: 'observations'}; let stimer = null;
+async function loadSources() {
+  let d; try { d = await (await fetch('/api/sources?' + new URLSearchParams(S))).json(); } catch (e) { $('stable').innerHTML = `<tr><td class="empty">${esc(e)}</td></tr>`; return; }
+  const t = d.totals;
+  $('sstrip').innerHTML = kpi('sources', t.sources) + kpi('with observations', t.with_observations) + kpi('unused', t.sources - t.with_observations) + kpi('domains', t.domains) + kpi('observations', t.observations) + kpi('evidence grounded', t.evidence);
+  const dmax = Math.max(1, ...d.domains.map(x => x.observations));
+  $('dnote').textContent = `top ${d.domains.length}`;
+  $('domains').innerHTML = d.domains.length ? d.domains.map(x =>
+    `<span class="nm" title="${esc(x.domain)}">${esc(x.domain)}</span><div class="track"><div class="fill" style="width:${(100 * x.observations / dmax).toFixed(1)}%"></div></div>` +
+    `<span class="n">${esc(x.observations)}</span><span class="ms">${esc(x.evidence)} ev</span>`).join('') : '<div class="empty">no observations yet</div>';
+  $('snote').textContent = `${d.sources.length}${d.sources.length >= 300 ? '+' : ''}`;
+  const th = '<tr><th>source</th><th>domain</th><th>collections</th><th class="n">observations</th><th class="n">evidence</th><th class="n">claims touched</th><th class="n">about it</th><th>last used</th><th>added by</th></tr>';
+  $('stable').innerHTML = th + (d.sources.length ? d.sources.map(x =>
+    `<tr class="rec" data-kind="source" data-id="${esc(x.id)}"><td class="k" style="max-width:280px;overflow:hidden;text-overflow:ellipsis;font-family:var(--sans);font-size:11.5px" title="${esc(x.name)}${x.uri ? ' · ' + esc(x.uri) : ''}">${esc(x.name)}</td>` +
+    `<td class="k">${esc(x.domain || '')}</td><td class="a">${esc(x.collections || '')}</td><td class="n">${esc(x.observations)}</td><td class="n">${esc(x.evidence)}</td>` +
+    `<td class="n">${esc(x.claims)}</td><td class="n" style="color:var(--ink3)">${esc(x.evidence_about)}</td><td class="t" title="${esc(x.last_observation_at || '')}">${x.last_observation_at ? ago(x.last_observation_at) + ' ago' : '—'}</td><td class="a">${esc(x.author_id)}</td></tr>`).join('')
+    : '<tr><td class="empty" colspan="9">nothing matches</td></tr>');
+}
+$('sq').oninput = e => { S.q = e.target.value; clearTimeout(stimer); stimer = setTimeout(loadSources, 250); };
+$('ssort').onchange = e => { S.sort = e.target.value; loadSources(); };
+setInterval(() => { if (activeTab === 'agents') loadAgents(); if (activeTab === 'sources' && !S.q) loadSources(); }, 5000);
 
 // ---- drawer ---------------------------------------------------------------
 const hist = [];
@@ -230,7 +303,11 @@ function renderRecord(kind, r) {
   if (kind === 'evidence') h += `<p class="big q">“${esc(r.quote)}”</p>${kv('reason', esc(r.reason))}${kv('relation', `<b>${esc(r.relation)}</b> ${esc(r.target_kind)} ${link(r.target_id)}`)}${kv('grounded in', link(r.from_observation_id))}`;
   if (kind === 'observation') h += `<p class="big">${esc(r.title || '(untitled)')}</p>${kv('uri', `<a class="ext" href="${esc(r.uri)}" target="_blank" rel="noopener">${esc(r.uri)}</a>`)}${kv('source', link(r.source_id))}${kv('chars', r.content_unavailable ? 'content not stored' : esc(r.chars))}${kv('hash', `<span class="muted">${esc(r.content_hash)}</span>`)}`;
   if (kind === 'source') h += `<p class="big">${esc(r.name)}</p>${kv('uri', r.uri ? `<a class="ext" href="${esc(r.uri)}" target="_blank" rel="noopener">${esc(r.uri)}</a>` : '')}`;
-  if (kind === 'author') h += `<p class="big">${esc(r.name)} <span class="tag">${esc(r.kind)}</span></p>`;
+  if (kind === 'author') {
+    h += `<p class="big">${esc(r.name)} <span class="kindtag ${r.kind === 'human' ? 'human' : ''}">${esc(r.kind)}</span></p>`;
+    if (r.tools && r.tools.length) { const tmax = Math.max(1, ...r.tools.map(t => t.n));
+      h += `<h3>Calls by tool</h3><div class="bars" style="padding:4px 0">` + r.tools.map(t => `<span class="nm">${esc(t.name)}</span><div class="track"><div class="fill" style="width:${(100 * t.n / tmax).toFixed(1)}%"></div></div><span class="n">${esc(t.n)}${t.errors ? ` <span style="color:var(--bad)">·${esc(t.errors)}</span>` : ''}</span><span class="ms">${esc(t.avg_ms)}ms</span>`).join('') + `</div>`; }
+    h += list('Recent failures', r.failures, f => `<div class="li"><span class="tag">${esc(f.tool || '')}</span> <span style="color:var(--bad)">${esc(f.error)}</span> <span class="muted">· ${ago(f.at)} ago</span></div>`); }
   if (kind === 'collection') h += `<p class="big">${esc(r.name)}</p>`;
   h += kv('author', esc(r.author_id)) + kv('collection', esc(r.collection_id)) + kv('asserted', `${esc(r.asserted_at)} <span class="muted">· ${ago(r.asserted_at)} ago</span>`);
   if (kind === 'evidence' && r.target) h += `<h3>Target</h3><div class="li">${link(r.target.id)} ${esc(r.target.text || r.target.reason || r.target.title || r.target.name || r.target.uri || r.target.quote || '')}</div>`;
