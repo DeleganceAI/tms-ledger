@@ -153,6 +153,12 @@ def run(conn) -> None:
     res = L.check_proof(conn, "smoke", {"steps": shared})
     assert res["ok"] and res["tree"].count("\n") < 200, res["tree"].count("\n")
 
+    thin = L.list_claims(conn, "smoke", "unsupported")
+    totals = [t["supports"] + t["qualifies"] + t["rebuts"] for t in thin]
+    assert totals == sorted(totals) and {t["id"] for t in thin} == {c1["id"], c2["id"]}, thin
+    top = L.list_claims(conn, "smoke", "unchallenged")[0]
+    assert top["rebuts"] + top["qualifies"] == 0 and top["findings"] == 1, top
+
     # Telemetry and the dashboard's queries run against the same connection.
     from tms import ui
     L.log_call(conn, "tools/call", "add_claim", "smoke-agent", "smoke", True, None, 12)

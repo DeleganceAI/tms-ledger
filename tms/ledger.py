@@ -406,6 +406,31 @@ def search_contradictions(conn, collection: str, claim_id: str | None = None, te
     return rows
 
 
+# ----------------------------------------------------------- claim worklists
+
+CLAIM_COUNTS = """(SELECT count(*) FROM evidence e WHERE e.target_claim_id = claims.id AND e.relation = 'SUPPORTS') AS supports,
+    (SELECT count(*) FROM evidence e WHERE e.target_claim_id = claims.id AND e.relation = 'QUALIFIES') AS qualifies,
+    (SELECT count(*) FROM evidence e WHERE e.target_claim_id = claims.id AND e.relation = 'REBUTS') AS rebuts,
+    (SELECT count(*) FROM contradiction_claims m WHERE m.claim_id = claims.id) AS findings"""
+CLAIM_SORTS = {
+    "recent": "asserted_at DESC, id",
+    "evidence": "supports + qualifies + rebuts DESC, asserted_at DESC, id",
+    "unsupported": "supports + qualifies + rebuts ASC, asserted_at DESC, id",
+    "unchallenged": "rebuts + qualifies ASC, supports DESC, asserted_at DESC, id",
+    "contested": "rebuts DESC, findings DESC, asserted_at DESC, id",
+}
+
+
+def list_claims(conn, collection: str, sort: str = "unsupported", limit: int = 50) -> list[dict]:
+    """Claims with their evidence counts, ordered for follow-up work. Counts are retrieval aids, not verdicts."""
+    if sort not in CLAIM_SORTS:
+        raise ValueError(f"sort must be one of {sorted(CLAIM_SORTS)}")
+    return [_clean(r) for r in conn.execute(
+        f"""SELECT * FROM (SELECT id, collection_id, text, author_id, asserted_at, {CLAIM_COUNTS}
+                           FROM claims WHERE collection_id = %s) b
+            ORDER BY {CLAIM_SORTS[sort]} LIMIT %s""", (collection, limit))]
+
+
 # --------------------------------------------------------------- telemetry
 
 def log_call(conn, method: str, tool: str | None, author_id: str | None, collection: str | None,

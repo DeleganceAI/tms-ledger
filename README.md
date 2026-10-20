@@ -113,6 +113,7 @@ Opens a local dashboard at http://127.0.0.1:8780 with two tabs. **Activity**: re
 | `get_record` | Exact read of any kind; observations page through content. |
 | `search_claims` | Vector or keyword retrieval in a collection, with each claim's evidence and contradiction ids inlined. |
 | `get_evidence`, `list_observations`, `search_contradictions` | Filtered reads. `list_observations(ungrounded_only=true)` is the claims-pass worklist. |
+| `list_claims` | Claims with evidence counts, sorted `unsupported`, `unchallenged`, `contested`, `evidence` or `recent`: the follow-up research worklist. |
 | `check_proof` | Validate a thinking proof and return it as an inspectable tree. |
 
 Results come back as JSON in the response's text content (no structured content). Observations carry a `title` (passed to `add_observation` or derived from the document) that `list_observations`, `get_record` and `check_proof` trees show.

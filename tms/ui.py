@@ -73,16 +73,7 @@ def snapshot(conn, limit: int = 100) -> dict:
     }
 
 
-CLAIM_COUNTS = """(SELECT count(*) FROM evidence e WHERE e.target_claim_id = claims.id AND e.relation = 'SUPPORTS') AS supports,
-    (SELECT count(*) FROM evidence e WHERE e.target_claim_id = claims.id AND e.relation = 'QUALIFIES') AS qualifies,
-    (SELECT count(*) FROM evidence e WHERE e.target_claim_id = claims.id AND e.relation = 'REBUTS') AS rebuts,
-    (SELECT count(*) FROM contradiction_claims m WHERE m.claim_id = claims.id) AS findings"""
-SORTS = {  # claim list orderings; everything else is newest first
-    "recent": "asserted_at DESC, id",
-    "evidence": "supports + qualifies + rebuts DESC, asserted_at DESC, id",
-    "contested": "rebuts DESC, findings DESC, asserted_at DESC, id",
-    "unsupported": "supports + qualifies + rebuts ASC, asserted_at DESC, id",
-}
+CLAIM_COUNTS, SORTS = L.CLAIM_COUNTS, L.CLAIM_SORTS
 
 # kind -> (table, columns for the list, expression a text filter applies to)
 BROWSE = {

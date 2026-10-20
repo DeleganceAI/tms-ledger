@@ -179,6 +179,15 @@ def search_claims(text: str, method: str = "vector", limit: int = 10, collection
 
 
 @mcp.tool()
+def list_claims(sort: str = "unsupported", limit: int = 50, collection: str = "") -> list[dict]:
+    """Claims in a collection with their evidence counts (supports, qualifies, rebuts) and how many
+    contradiction findings they belong to. sort: 'unsupported' (fewest evidence first), 'unchallenged'
+    (supported but never rebutted or qualified), 'contested' (most rebuts and findings), 'evidence'
+    (most), 'recent'. A worklist for follow-up research; counts are retrieval aids, not judgements."""
+    return _run(L.list_claims, _col(collection), sort, limit)
+
+
+@mcp.tool()
 def get_evidence(target_kind: str = "", target_id: str = "", from_observation_id: str = "",
                  relation: str = "", limit: int = 100) -> list[dict]:
     """Evidence records filtered by target (kind + id), grounding observation and/or relation."""
