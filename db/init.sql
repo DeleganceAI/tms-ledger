@@ -15,6 +15,16 @@ CREATE TABLE authors (
     asserted_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- A collection scopes observations, claims and contradictions (one topic or
+-- project). Sources and authors are global. The same document imported into
+-- two collections is two observations.
+CREATE TABLE collections (
+    id          text PRIMARY KEY CHECK (id ~ '^[a-z0-9][a-z0-9_-]*$'),
+    name        text NOT NULL CHECK (btrim(name) <> ''),
+    author_id   text NOT NULL REFERENCES authors(id),
+    asserted_at timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE TABLE sources (
     id          text PRIMARY KEY,
     name        text NOT NULL CHECK (btrim(name) <> ''),
@@ -25,6 +35,7 @@ CREATE TABLE sources (
 
 CREATE TABLE observations (
     id              text PRIMARY KEY,
+    collection_id   text NOT NULL REFERENCES collections(id),
     source_id       text NOT NULL REFERENCES sources(id),
     uri             text NOT NULL,
     content         text,
@@ -40,6 +51,7 @@ CREATE TABLE observations (
 -- Matching text or hashes do not merge records or make appends idempotent.
 CREATE TABLE claims (
     id              text PRIMARY KEY,
+    collection_id   text NOT NULL REFERENCES collections(id),
     text            text NOT NULL CHECK (char_length(text) > 0),
     author_id       text NOT NULL REFERENCES authors(id),
     asserted_at     timestamptz NOT NULL DEFAULT now(),
@@ -50,8 +62,9 @@ CREATE TABLE claims (
 );
 
 CREATE TABLE contradictions (
-    id          text PRIMARY KEY,
-    reason      text NOT NULL CHECK (btrim(reason) <> ''),
+    id            text PRIMARY KEY,
+    collection_id text NOT NULL REFERENCES collections(id),
+    reason        text NOT NULL CHECK (btrim(reason) <> ''),
     -- Structural cardinality freezes the member set; not a confidence measure.
     -- The append tool supplies the length of its distinct claim_ids list.
     claim_count integer NOT NULL CHECK (claim_count >= 2),
@@ -78,6 +91,11 @@ CREATE TABLE evidence (
     target_evidence_id      text REFERENCES evidence(id),
     target_source_id        text REFERENCES sources(id),
     target_observation_id   text REFERENCES observations(id),
+    -- Verbatim excerpt of the grounding observation; a trigger below rejects
+    -- quotes that do not occur in that observation's stored content. The
+    -- length cap stops "quoting" a whole document.
+    quote                   text NOT NULL
+        CHECK (btrim(quote) <> '' AND char_length(quote) <= 1500),
     reason                  text NOT NULL CHECK (btrim(reason) <> ''),
     author_id               text NOT NULL REFERENCES authors(id),
     asserted_at             timestamptz NOT NULL DEFAULT now(),
@@ -129,19 +147,65 @@ CREATE CONSTRAINT TRIGGER contradiction_members_frozen
     AFTER INSERT ON contradiction_claims DEFERRABLE INITIALLY DEFERRED
     FOR EACH ROW EXECUTE FUNCTION check_contradiction_members();
 
+-- Citation check: the quote must occur in the grounding observation's text.
+-- Normalisation only forgives case, whitespace, curly quotes, dashes, soft
+-- hyphens and fi/fl ligatures (common in pdftotext output). It is a check
+-- that the citation exists, not a judgement about what it shows.
+CREATE FUNCTION normalize_quote(t text) RETURNS text
+LANGUAGE sql IMMUTABLE STRICT AS $$
+    SELECT btrim(regexp_replace(regexp_replace(lower(
+        replace(replace(translate(t,
+            E'‘’‚“”„–—‐‑− ­',
+            E'\x27\x27\x27\x22\x22\x22-----\x20'),   -- soft hyphen (last) is dropped
+        E'ﬁ', 'fi'), E'ﬂ', 'fl')),
+        '\s+', ' ', 'g'), '\s*-\s*', '-', 'g'))     -- "word—word" == "word - word"
+$$;
+
+CREATE FUNCTION check_evidence_quote() RETURNS trigger
+LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
+DECLARE
+    doc text;
+BEGIN
+    SELECT content INTO doc FROM observations WHERE id = NEW.from_observation_id;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Observation % does not exist', NEW.from_observation_id
+            USING ERRCODE = '23503';
+    END IF;
+    IF doc IS NULL THEN
+        RAISE EXCEPTION 'Observation % has no stored content, so it cannot ground evidence',
+            NEW.from_observation_id USING ERRCODE = '23514';
+    END IF;
+    IF normalize_quote(NEW.quote) = '' THEN
+        RAISE EXCEPTION 'Quote is blank after normalisation' USING ERRCODE = '23514';
+    END IF;
+    IF position(normalize_quote(NEW.quote) IN normalize_quote(doc)) = 0 THEN
+        RAISE EXCEPTION 'Quote not found verbatim in observation %', NEW.from_observation_id
+            USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER evidence_quote_grounded BEFORE INSERT ON evidence
+    FOR EACH ROW EXECUTE FUNCTION check_evidence_quote();
+
+CREATE INDEX collections_author_time_idx ON collections (author_id, asserted_at, id);
 CREATE INDEX sources_author_time_idx ON sources (author_id, asserted_at, id);
 CREATE INDEX sources_uri_idx ON sources (uri);
 CREATE INDEX observations_author_time_idx ON observations (author_id, asserted_at, id);
 CREATE INDEX observations_time_idx ON observations (asserted_at, id);
+CREATE INDEX observations_collection_idx ON observations (collection_id, asserted_at, id);
 CREATE INDEX observations_source_idx ON observations (source_id);
 CREATE INDEX observations_uri_idx ON observations (uri);
 CREATE INDEX observations_hash_idx ON observations (content_hash);
 CREATE INDEX observations_text_idx ON observations USING gin (to_tsvector('simple', coalesce(content, '')));
 CREATE INDEX claims_author_time_idx ON claims (author_id, asserted_at, id);
 CREATE INDEX claims_time_idx ON claims (asserted_at, id);
+CREATE INDEX claims_collection_idx ON claims (collection_id, asserted_at, id);
 CREATE INDEX claims_text_idx ON claims USING gin (to_tsvector('simple', text));
 CREATE INDEX contradictions_author_time_idx ON contradictions (author_id, asserted_at, id);
 CREATE INDEX contradictions_time_idx ON contradictions (asserted_at, id);
+CREATE INDEX contradictions_collection_idx ON contradictions (collection_id, asserted_at, id);
 CREATE INDEX contradiction_claims_claim_idx ON contradiction_claims (claim_id, contradiction_id);
 CREATE INDEX evidence_author_time_idx ON evidence (author_id, asserted_at, id);
 CREATE INDEX evidence_time_idx ON evidence (asserted_at, id);
@@ -160,6 +224,8 @@ END;
 $$;
 
 CREATE TRIGGER authors_immutable BEFORE UPDATE OR DELETE OR TRUNCATE ON authors
+    FOR EACH STATEMENT EXECUTE FUNCTION deny_mutation();
+CREATE TRIGGER collections_immutable BEFORE UPDATE OR DELETE OR TRUNCATE ON collections
     FOR EACH STATEMENT EXECUTE FUNCTION deny_mutation();
 CREATE TRIGGER sources_immutable BEFORE UPDATE OR DELETE OR TRUNCATE ON sources
     FOR EACH STATEMENT EXECUTE FUNCTION deny_mutation();

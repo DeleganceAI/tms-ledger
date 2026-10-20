@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "tms": {
+      "command": "uv",
+      "args": ["run", "tms-server"],
+      "env": {
+        "TMS_DATABASE_URL": "postgresql://tmsv2:tmsv2@localhost:5432/tmsv2"
+      }
+    }
+  }
+}

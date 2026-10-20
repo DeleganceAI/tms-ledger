@@ -1,1 +1,4 @@
 /.alinery/
+.venv/
+__pycache__/
+.omc/

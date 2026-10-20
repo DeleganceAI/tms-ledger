@@ -1,24 +1,117 @@
 # tmsv2
 
-A number-free epistemic ledger for humans and AI agents: record claims, observations, sources, explicit contradiction findings, and grounded evidence without a server deciding what to believe.
+A number-free epistemic ledger for humans and AI agents: record claims, observations, sources, explicit contradiction findings, and grounded evidence without a server deciding what to believe. An MCP server is the only write and read path; any agent that speaks MCP can contribute, and the agent you chat with answers questions from the ledger with an inspectable thinking proof.
 
 ## The Discipline
 
 - **No confidence scales.** No probabilities, weights, or ordered confidence labels. Numbers inside statements are ordinary content; retrieval distances are not confidence.
 - **Keep interpretation with readers.** Humans and AI agents decide what is believed or contested and whether a contradiction is open or resolved. The ledger neither stores nor derives those conclusions.
-- **Show the reasons.** Every evidence record cites a grounding observation and a specific reason. Contradictions name at least two distinct claims and explain their incompatibility.
+- **Show the reasons.** Every evidence record cites a grounding observation, quotes it verbatim, and gives a specific reason. Contradictions name at least two distinct claims and explain their incompatibility.
 - **Preserve history.** Records are append-only: corrections add records and evidence, never edit, delete, retire, or automatically replace earlier assertions.
 - **Keep provenance explicit.** Each source, observation, claim, contradiction, and evidence record identifies its registered human or agent author and database-supplied assertion time. Authors are not document sources or verified identities.
 
-## Current Scope
+The server enforces exactly two mechanical things beyond structure: an evidence quote must occur in the observation it cites, and a thinking proof may only cite records that exist. Neither is a judgement about what the records show.
 
-[db/init.sql](db/init.sql) defines the PostgreSQL + pgvector schema: an authors registry, five authored content types, and contradiction membership links. Claims and observations can carry full 4096-dimensional `Qwen/Qwen3-Embedding-8B` vectors for exact cosine retrieval; PostgreSQL keyword/text retrieval is a complementary option. Neither method proves relevance, duplication, or truth.
+## Layout
 
-Run [db/verify.sql](db/verify.sql) with `psql` after initializing the schema to check its invariants and an append/research/correction scenario.
+| Path | What |
+|---|---|
+| [db/init.sql](db/init.sql) | PostgreSQL + pgvector schema: authors, collections, sources, observations, claims, contradictions, evidence. Append-only triggers, frozen contradiction membership, quote check. |
+| [db/verify.sql](db/verify.sql) | Schema invariants and an append/research/correction scenario. Rolls back. |
+| [tms/ledger.py](tms/ledger.py) | Appends, reads, retrieval, fetch, embeddings, proof check. Plain functions over a psycopg connection. |
+| [tms/server.py](tms/server.py) | The MCP tools and prompts; stdio or bearer-token HTTP. |
+| [test_smoke.py](test_smoke.py) | End-to-end check against a live database and Ollama. Rolls back. |
+| [proofs/](proofs/) | Where the briefing agent saves thinking proofs. |
+| [V1.md](V1.md), [ROLES.md](ROLES.md), [EXAMPLES.md](EXAMPLES.md) | Design, contributor roles, a worked example. |
 
-The **MCP interface is proposed, not implemented**. It offers append tools, exact record reads, and filtered, paginated searches—not evaluation, belief summaries, or automatic contradiction resolution. Readers inspect raw records, reasons, and provenance and form their own conclusions.
+## Setup
 
-- [V1.md](V1.md): short design and proposed MCP surface.
-- [ROLES.md](ROLES.md): contributor and reader responsibilities.
-- [EXAMPLES.md](EXAMPLES.md): ledger-writing and reading examples.
-- [RESEARCH_LOOP.md](RESEARCH_LOOP.md): historical research-loop discussion, not additional implementation requirements.
+PostgreSQL with pgvector, Ollama for embeddings, `uv` for Python, `pdftotext` (poppler) for PDFs.
+
+```bash
+docker run -d --name tmsv2-pg -p 5432:5432 -e POSTGRES_DB=tmsv2 -e POSTGRES_USER=tmsv2 -e POSTGRES_PASSWORD=tmsv2 pgvector/pgvector:pg18
+```
+
+```bash
+PGPASSWORD=tmsv2 psql -h localhost -U tmsv2 -d tmsv2 -v ON_ERROR_STOP=1 -f db/init.sql
+```
+
+```bash
+PGPASSWORD=tmsv2 psql -h localhost -U tmsv2 -d tmsv2 -v ON_ERROR_STOP=1 -f db/verify.sql
+```
+
+```bash
+brew install ollama poppler
+```
+
+Start Ollama (`ollama serve`, or `brew services start ollama`), then:
+
+```bash
+ollama pull qwen3-embedding:8b
+```
+
+```bash
+uv sync
+```
+
+Smoke test (everything it writes rolls back; needs Ollama running):
+
+```bash
+uv run python test_smoke.py
+```
+
+Environment: `TMS_DATABASE_URL` (default `postgresql://tmsv2:tmsv2@localhost:5432/tmsv2`), `OLLAMA_HOST` (default `http://localhost:11434`), `TMS_EMBED_MODEL` (default `qwen3-embedding:8b`, must return 4096 dimensions), `TMS_COLLECTION` (default collection when a tool call omits one), `TMS_TOKEN` (required for HTTP).
+
+## Asking questions (Claude Code)
+
+[.mcp.json](.mcp.json) registers the server over stdio for this project. In a Claude Code session here:
+
+1. `/mcp__tms__briefing` with the collection name loads the briefing discipline: retrieve, build a thinking proof, `check_proof`, answer with citations, save the proof under `proofs/`.
+2. `/mcp__tms__claims_pass` with the collection name turns documents that no evidence cites yet into claims, quoted evidence and contradiction findings.
+
+Set `TMS_COLLECTION` in `.mcp.json` to pin a session to one collection.
+
+## Remote agents (Grok bots and friends)
+
+Serve over HTTP behind a bearer token, then put a tunnel in front:
+
+```bash
+TMS_TOKEN="$(openssl rand -hex 32)" uv run tms-server --http --port 8765
+```
+
+```bash
+cloudflared tunnel --url http://localhost:8765
+```
+
+Configure the agent with the tunnel URL plus `/mcp` as a streamable-HTTP MCP server and `Authorization: Bearer <TMS_TOKEN>`. A quick tunnel gives a random hostname per run; a named tunnel on your own domain is the stable version. Each bot registers once with `add_author` (kind `agent`) and passes its own `author_id` on every write. Pin bots to a collection by telling them which one; the server does not infer it.
+
+## Tools
+
+| Tool | Does |
+|---|---|
+| `add_author`, `add_collection`, `list_collections` | Identities and collections. Both ids are slugs you choose. |
+| `add_source`, `search_sources` | Where material comes from. Global across collections. |
+| `add_observation` | Preserve a document in a collection. Pass full text, or just a URL and the server fetches it (PDF, HTML, JATS XML). Sites that block bots: fetch elsewhere, pass the text. |
+| `add_claim` | One statement, embedded on write for vector search. |
+| `add_evidence` | Observation bears on a target with SUPPORTS, REBUTS or QUALIFIES, a verbatim `quote` (rejected if absent from the observation) and a reason. |
+| `add_contradiction` | Two or more claim ids that cannot all hold, with the reason. Membership is frozen. |
+| `get_record` | Exact read of any kind; observations page through content. |
+| `search_claims` | Vector or keyword retrieval in a collection, with each claim's evidence and contradiction ids inlined. |
+| `get_evidence`, `list_observations`, `search_contradictions` | Filtered reads. `list_observations(ungrounded_only=true)` is the claims-pass worklist. |
+| `check_proof` | Validate a thinking proof and return it as an inspectable tree. |
+
+## Thinking proofs
+
+A proof is the answering agent's argument standing on ledger records. It lives outside the ledger, saved as JSON next to the answer.
+
+```json
+{"question": "Is DAO deficiency the cause of histamine intolerance?",
+ "steps": [
+  {"id": "s1", "say": "Several reviews propose DAO deficiency as a mechanism.", "from": ["c_8f2a1b3c4d", "e_11c0aa9b8c"]},
+  {"id": "s2", "say": "One review qualifies this: assays correlate poorly with symptoms.", "from": ["e_9e41d2f0a1"]},
+  {"id": "s3", "say": "Nothing in the collection covers pediatric cases.", "from": [], "gap": true},
+  {"id": "root", "say": "Proposed mechanism, not an established cause.", "from": ["s1", "s2", "s3"]}
+ ]}
+```
+
+`check_proof` enforces three rules: every `from` is a record in this collection or an earlier step; exactly one root; every step has a ledger record in its ancestry or is marked `gap`. A gap is the agent saying out loud that it is speaking without the ledger.
