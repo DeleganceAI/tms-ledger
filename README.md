@@ -20,7 +20,7 @@ The server enforces exactly two mechanical things beyond structure: an evidence 
 | [db/verify.sql](db/verify.sql) | Schema invariants and an append/research/correction scenario. Rolls back. |
 | [tms/ledger.py](tms/ledger.py) | Appends, reads, retrieval, fetch, embeddings, proof check. Plain functions over a psycopg connection. |
 | [tms/server.py](tms/server.py) | The MCP tools and prompts; stdio or bearer-token HTTP. Logs every call. |
-| [tms/ui.py](tms/ui.py) | Local dashboard: counts, call stats, live feeds. |
+| [tms/ui.py](tms/ui.py), [tms/ui.html](tms/ui.html) | Local dashboard: activity view, browse view, record drawer. |
 | [test_smoke.py](test_smoke.py) | End-to-end check against a live database and Ollama. Rolls back. |
 | [proofs/](proofs/) | Where the briefing agent saves thinking proofs. |
 | [V1.md](V1.md), [ROLES.md](ROLES.md), [EXAMPLES.md](EXAMPLES.md) | Design, contributor roles, a worked example. |
@@ -98,7 +98,7 @@ Instructions to give an intake agent, verbatim:
 uv run tms-ui
 ```
 
-Opens a local dashboard at http://127.0.0.1:8780: record counts, per-collection counts, every MCP call so far by tool and by author (reads included), and two live feeds of recent records and recent calls that refresh every two seconds. Click a record to see it in full. The server logs each request to the `mcp_calls` table, which is operational telemetry outside the ledger and safe to truncate. The dashboard binds to localhost only and has no auth; never put it behind the tunnel.
+Opens a local dashboard at http://127.0.0.1:8780 with two tabs. **Activity**: record counts, calls and records per minute for the last hour, every MCP call so far by tool and by agent (reads included), and live feeds of recent records and calls. **Browse**: any record kind with a text filter, collection filter and paging; claims show a supports / qualifies / rebuts bar with counts and can be sorted by most evidence or most contested, and a semantic checkbox searches claim embeddings through the local Ollama model. Clicking a record opens a drawer where every linked id is clickable, so you can walk claim → evidence → observation → source. The server logs each request to the `mcp_calls` table, which is operational telemetry outside the ledger and safe to truncate. The dashboard binds to localhost only and has no auth; never put it behind the tunnel.
 
 ## Tools
 

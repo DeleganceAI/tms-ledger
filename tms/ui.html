@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TMS activity</title>
+<style>
+:root{--bg:#f4f4f2;--panel:#fff;--line:#e2e2de;--line2:#ecece9;--ink:#171716;--ink2:#5a5a55;--ink3:#8c8c86;
+  --accent:#2f6fde;--accent2:#e3ecfb;--bad:#b4232c;--new:#fff1b8;
+  --good:#0ca30c;--warn:#fab219;--crit:#d03b3b;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;--sans:Inter,system-ui,-apple-system,"Segoe UI",sans-serif}
+@media(prefers-color-scheme:dark){:root{--bg:#121211;--panel:#1a1a19;--line:#2b2b29;--line2:#232321;--ink:#ececea;--ink2:#a7a7a1;--ink3:#74746d;
+  --accent:#7aa6f5;--accent2:#1c2d4f;--bad:#f08a8a;--new:#3a3414}}
+*{box-sizing:border-box}html,body{height:100%}body{margin:0;background:var(--bg);color:var(--ink);font:12px/1.4 var(--sans);-webkit-font-smoothing:antialiased}
+button,select,input{font:11.5px var(--sans);color:var(--ink)}
+.top{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line);padding:8px 14px 0}
+.bar{display:flex;align-items:center;gap:14px;height:28px}.brand{font-weight:650;font-size:13px;letter-spacing:-.01em}.brand span{color:var(--ink3);font-weight:500}
+.tabs{display:flex;gap:2px}.tab{padding:3px 10px;border-radius:4px;border:1px solid transparent;background:none;color:var(--ink2);cursor:pointer}.tab.on{background:var(--panel);border-color:var(--line);color:var(--ink)}
+.live{display:flex;align-items:center;gap:6px;color:var(--ink3);font-family:var(--mono);font-size:11px;margin-left:auto}.dot{width:7px;height:7px;border-radius:50%;background:var(--good);animation:pulse 2s infinite}
+.live.err .dot{background:var(--bad);animation:none}@keyframes pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--good) 50%,transparent)}70%{box-shadow:0 0 0 6px transparent}100%{box-shadow:0 0 0 0 transparent}}
+.strip{display:flex;flex-wrap:wrap;padding:4px 0 8px}.kpi{display:flex;align-items:baseline;gap:5px;padding:2px 10px 2px 0;margin-right:8px;border-right:1px solid var(--line)}
+.kpi:last-child{border-right:0}.kpi .v{font-family:var(--mono);font-size:14px;font-weight:600;font-variant-numeric:tabular-nums}.kpi .k{color:var(--ink3);font-size:11px}
+.kpi.err .v{color:var(--bad)}.kpi.sep{border-right:0;width:10px;padding:0;margin:0}
+main{padding:10px 14px 18px;display:grid;gap:10px}main[hidden]{display:none}
+.row{display:grid;gap:10px}.charts{grid-template-columns:1.3fr 1fr 1fr 1.1fr}.feeds{grid-template-columns:1fr 1fr}
+@media(max-width:1400px){.charts{grid-template-columns:1fr 1fr}}@media(max-width:900px){.charts,.feeds{grid-template-columns:1fr}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:6px;min-width:0;display:flex;flex-direction:column}
+.ph{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 10px;border-bottom:1px solid var(--line2)}
+h2{margin:0;font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink3)}
+.muted{color:var(--ink3);font-family:var(--mono);font-size:10.5px}.legend{display:flex;gap:10px;color:var(--ink3);font-size:10.5px;white-space:nowrap}.legend i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+.chart{padding:8px 10px 4px}.chart svg{display:block;width:100%;height:84px}.axis{display:flex;justify-content:space-between;color:var(--ink3);font-family:var(--mono);font-size:10px;padding:2px 10px 7px}
+.bars{display:grid;grid-template-columns:max-content 1fr max-content max-content;gap:4px 8px;align-items:center;padding:8px 10px;overflow:auto;max-height:238px}
+.bars .nm{font-family:var(--mono);font-size:11px}.bars .n{font-family:var(--mono);font-size:11px;font-variant-numeric:tabular-nums;text-align:right}.bars .ms{color:var(--ink3);font-family:var(--mono);font-size:10px;text-align:right}
+.track{height:6px;background:var(--line2);border-radius:3px;overflow:hidden}.fill{height:100%;background:var(--accent);border-radius:3px}
+table.dense{width:100%;border-collapse:collapse;font-size:11.5px}.dense td{padding:4px 8px;border-top:1px solid var(--line2);vertical-align:top;line-height:1.35}.dense tr:first-child td{border-top:0}
+td.t{color:var(--ink3);font-family:var(--mono);font-size:10.5px;white-space:nowrap;width:1%}td.k{font-family:var(--mono);font-size:11px;white-space:nowrap;width:1%}
+td.a{color:var(--ink2);font-family:var(--mono);font-size:10.5px;white-space:nowrap;width:1%;max-width:140px;overflow:hidden;text-overflow:ellipsis}td.n{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap;width:1%}
+td.s{word-break:break-word;color:var(--ink)}td.s.err{color:var(--bad)}td.ev{width:1%;padding-top:7px}
+.tag{display:inline-block;padding:0 5px;border-radius:3px;background:var(--line2);color:var(--ink2);font-family:var(--mono);font-size:10px;line-height:16px;white-space:nowrap}
+.seg{display:flex;gap:2px;width:96px;height:8px}.seg i{display:block;height:100%;border-radius:2px}.seg.empty{background:var(--line2);border-radius:2px}
+.cnt{font-family:var(--mono);font-size:10.5px;font-variant-numeric:tabular-nums;white-space:nowrap}.cnt b{font-weight:600}.cnt .g{color:var(--good)}.cnt .w{color:var(--warn)}.cnt .c{color:var(--crit)}
+tr.rec{cursor:pointer}tr.rec:hover td{background:var(--accent2)}tr.sel td{background:var(--accent2)}
+tr.new td{animation:flash 5s ease-out}@keyframes flash{from{background:var(--new)}to{background:transparent}}
+.scroll{overflow:auto;max-height:44vh}.scroll.tall{max-height:calc(100vh - 170px)}.empty{color:var(--ink3);padding:10px;font-size:11.5px}
+.cols{display:flex;flex-wrap:wrap;gap:4px 14px;font-family:var(--mono);font-size:10.5px;color:var(--ink3)}.cols b{color:var(--ink);font-weight:600}
+.tools{display:flex;gap:8px;align-items:center;padding:8px 10px;border-bottom:1px solid var(--line2);flex-wrap:wrap}.tools .grow{flex:1}
+.tools select,.tools input{background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:4px 7px}.tools input{min-width:280px}.tools label{display:flex;gap:4px;align-items:center;color:var(--ink2)}
+.pg{background:var(--panel);border:1px solid var(--line);border-radius:4px;width:24px;height:24px;cursor:pointer;color:var(--ink2)}.pg:disabled{opacity:.4;cursor:default}
+#drawer{position:fixed;top:0;right:0;height:100%;width:min(560px,100%);background:var(--panel);border-left:1px solid var(--line);box-shadow:-12px 0 32px rgba(0,0,0,.14);transform:translateX(100%);transition:transform .18s ease;z-index:10;display:flex;flex-direction:column}
+#drawer.open{transform:none}.dh{display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--line2);font-family:var(--mono);font-size:11.5px}
+.dh .ttl{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dh button{background:none;border:1px solid var(--line);color:var(--ink2);border-radius:4px;height:22px;min-width:22px;padding:0 6px;cursor:pointer;font-size:12px;line-height:1}
+.dbody{padding:12px 14px;overflow:auto;flex:1}.big{font-size:13.5px;line-height:1.5;margin:0 0 10px}.big.q{font-style:italic;color:var(--ink2)}
+.kv{display:flex;gap:10px;font-size:11.5px;padding:2px 0}.kk{color:var(--ink3);width:76px;flex:none;font-family:var(--mono);font-size:10.5px;padding-top:1px}.kv2{min-width:0;word-break:break-word}
+h3{font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink3);margin:16px 0 4px}
+.li{padding:6px 0;border-top:1px solid var(--line2);font-size:11.5px}.li .q{color:var(--ink2);font-style:italic;margin-top:2px}.li .r{color:var(--ink3);font-size:11px;margin-top:2px}
+a.idl{font-family:var(--mono);color:var(--accent);text-decoration:none;font-size:10.5px;padding:0 3px;border-radius:3px;background:var(--accent2)}a.idl:hover{text-decoration:underline}
+a.ext{color:var(--accent);word-break:break-all}pre.content{white-space:pre-wrap;word-break:break-word;font:11px/1.45 var(--mono);max-height:320px;overflow:auto;background:var(--bg);padding:8px;border-radius:4px;margin:0}
+details{margin-top:14px}summary{cursor:pointer;color:var(--ink3);font-size:11px}details pre{font:10.5px/1.4 var(--mono);white-space:pre-wrap;word-break:break-word;color:var(--ink2)}
+.seg.lg{width:160px;height:10px;margin:6px 0 10px}
+</style></head><body>
+<div class="top">
+  <div class="bar">
+    <div class="brand">TMS <span>ledger</span></div>
+    <nav class="tabs"><button class="tab on" data-tab="activity">Activity</button><button class="tab" data-tab="browse">Browse</button></nav>
+    <div class="live" id="live"><i class="dot"></i><span id="status">connecting</span></div>
+  </div>
+  <div class="strip" id="strip"></div>
+</div>
+<main id="activity">
+  <section class="row charts">
+    <div class="panel"><div class="ph"><h2>Calls per minute</h2><span class="legend"><span><i style="background:var(--accent)"></i>ok</span><span><i style="background:var(--bad)"></i>error</span></span></div>
+      <div class="chart"><svg id="callsChart" preserveAspectRatio="none"></svg></div><div class="axis"><span>−60m</span><span>−30m</span><span>now</span></div></div>
+    <div class="panel"><div class="ph"><h2>Records per minute</h2><span class="muted" id="recRate"></span></div>
+      <div class="chart"><svg id="recChart" preserveAspectRatio="none"></svg></div><div class="axis"><span>−60m</span><span>−30m</span><span>now</span></div></div>
+    <div class="panel"><div class="ph"><h2>Calls by tool</h2><span class="muted" id="toolNote"></span></div><div class="bars" id="bytool"></div></div>
+    <div class="panel"><div class="ph"><h2>Agents</h2><span class="muted" id="authNote"></span></div><div class="scroll" style="max-height:238px"><table class="dense" id="byauthor"></table></div></div>
+  </section>
+  <section class="row feeds">
+    <div class="panel"><div class="ph"><h2>Recent records</h2><span class="cols" id="cols"></span></div><div class="scroll"><table class="dense" id="records"></table></div></div>
+    <div class="panel"><div class="ph"><h2>Recent calls</h2><span class="muted" id="callsNote"></span></div><div class="scroll"><table class="dense" id="calls"></table></div></div>
+  </section>
+</main>
+<main id="browse" hidden>
+  <section class="panel">
+    <div class="tools">
+      <select id="bkind"><option value="claim">claims</option><option value="observation">observations</option><option value="evidence">evidence</option><option value="contradiction">contradictions</option><option value="source">sources</option><option value="author">authors</option></select>
+      <select id="bcol"><option value="">all collections</option></select>
+      <input id="bq" placeholder="filter text…" autocomplete="off">
+      <label id="bsemwrap" title="semantic search over claim embeddings (local Ollama)"><input type="checkbox" id="bsem"> semantic</label>
+      <select id="bsort"><option value="recent">newest</option><option value="evidence">most evidence</option><option value="contested">most contested</option><option value="unsupported">least evidence</option></select>
+      <span class="legend" id="blegend"><span><i style="background:var(--good)"></i>supports</span><span><i style="background:var(--warn)"></i>qualifies</span><span><i style="background:var(--crit)"></i>rebuts</span></span>
+      <span class="grow"></span><span class="muted" id="bnote"></span><button class="pg" id="bprev">‹</button><button class="pg" id="bnext">›</button>
+    </div>
+    <div class="scroll tall"><table class="dense" id="bresults"></table></div>
+  </section>
+</main>
+<aside id="drawer">
+  <div class="dh"><button id="dback" title="back">‹</button><span class="ttl" id="drawerTitle"></span><button onclick="hideDetail()" title="close (Esc)">×</button></div>
+  <div class="dbody" id="dbody"></div>
+</aside>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const ago = iso => { if (!iso) return ''; const s = Math.max(0, (Date.now() - new Date(iso)) / 1000);
+  return s < 60 ? `${s|0}s` : s < 3600 ? `${(s/60)|0}m` : s < 86400 ? `${(s/3600)|0}h` : `${(s/86400)|0}d`; };
+const hm = t => new Date(t).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+const KIND = {c: 'claim', o: 'observation', k: 'contradiction', e: 'evidence', src: 'source'};
+const kindOf = id => KIND[String(id).split('_')[0]];
+const link = id => `<a href="#" class="idl" data-id="${esc(id)}">${esc(id)}</a>`;
+const linkify = s => esc(s).replace(/\b(c|o|k|e|src)_[0-9a-f]{10}\b/g, m => link(m));
+const seenRec = new Set(), seenCall = new Set(); let first = true, selected = null, colsKnown = '';
+
+// ---- activity -------------------------------------------------------------
+function series(rows) {
+  const now = new Date(); now.setSeconds(0, 0);
+  const map = new Map(rows.map(r => [new Date(r.m).getTime(), r]));
+  const out = [];
+  for (let i = 59; i >= 0; i--) { const t = now.getTime() - i * 60000; const r = map.get(t) || {}; out.push({t, n: r.n || 0, errors: r.errors || 0}); }
+  return out;
+}
+function bars(svg, data, unit, withErrors) {
+  const W = 600, H = 84, max = Math.max(1, ...data.map(d => d.n));
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.innerHTML = data.map((d, i) => {
+    const x = i * 10 + 1, h = d.n ? Math.max(2, Math.round((H - 6) * d.n / max)) : 0;
+    const eh = withErrors && d.errors ? Math.max(2, Math.round((H - 6) * d.errors / max)) : 0;
+    const tip = `${hm(d.t)} · ${d.n} ${unit}${eh ? ` · ${d.errors} errors` : ''}`;
+    return `<g><title>${esc(tip)}</title><rect x="${x - 1}" y="0" width="10" height="${H}" fill="transparent"/>` +
+      (h ? `<rect x="${x}" y="${H - 2 - h}" width="8" height="${h}" rx="1.5" fill="var(--accent)"/>` : '') +
+      (eh ? `<rect x="${x}" y="${H - 2 - eh}" width="8" height="${eh}" rx="1.5" fill="var(--bad)"/>` : '') + `</g>`;
+  }).join('') + `<line x1="0" y1="${H - 1.5}" x2="${W}" y2="${H - 1.5}" stroke="var(--line)" stroke-width="1"/>`;
+}
+const kpi = (k, v, cls = '') => `<div class="kpi ${cls}"><span class="v">${esc(v)}</span><span class="k">${esc(k)}</span></div>`;
+function render(d) {
+  const c = d.counts, m = d.calls;
+  $('strip').innerHTML = ['observations', 'claims', 'evidence', 'contradictions', 'sources', 'authors', 'collections'].map(k => kpi(k, c[k])).join('')
+    + '<div class="kpi sep"></div>' + kpi('calls', m.total) + kpi('writes', m.writes) + kpi('errors', m.errors, m.errors ? 'err' : '')
+    + kpi('last hour', m.last_hour) + kpi('last 5 min', m.last_5m) + kpi('active agents', m.active_authors);
+  $('cols').innerHTML = d.collections.map(x => `<span><b>${esc(x.id)}</b> ${esc(x.observations)}o ${esc(x.claims)}c ${esc(x.contradictions)}k</span>`).join('');
+  const key = d.collections.map(x => x.id).join(',');
+  if (key !== colsKnown) { colsKnown = key; const sel = $('bcol'), cur = sel.value;
+    sel.innerHTML = '<option value="">all collections</option>' + d.collections.map(x => `<option value="${esc(x.id)}">${esc(x.id)}</option>`).join(''); sel.value = cur; }
+  const cs = series(d.calls_per_min), rs = series(d.records_per_min);
+  bars($('callsChart'), cs, 'calls', true); bars($('recChart'), rs, 'records', false);
+  $('recRate').textContent = `${rs.reduce((a, b) => a + b.n, 0)} in 60m`;
+  const tmax = Math.max(1, ...d.by_tool.map(t => t.n));
+  $('toolNote').textContent = d.by_tool.length ? `${d.by_tool.length} tools` : '';
+  $('bytool').innerHTML = d.by_tool.length ? d.by_tool.map(t =>
+    `<span class="nm">${esc(t.name)}</span><div class="track"><div class="fill" style="width:${(100 * t.n / tmax).toFixed(1)}%"></div></div>` +
+    `<span class="n">${esc(t.n)}${t.errors ? ` <span style="color:var(--bad)">·${esc(t.errors)}</span>` : ''}</span><span class="ms">${esc(t.avg_ms)}ms</span>`).join('')
+    : '<div class="empty">no calls recorded yet</div>';
+  $('authNote').textContent = d.by_author.length ? `${d.by_author.length} seen` : '';
+  $('byauthor').innerHTML = d.by_author.length ? d.by_author.map(a =>
+    `<tr class="rec" data-kind="author" data-id="${esc(a.author_id)}"><td class="k">${esc(a.author_id)}</td><td class="n">${esc(a.n)}</td><td class="n" style="color:var(--ink3)">${esc(a.writes)}w</td>` +
+    `<td class="n" style="color:${a.errors ? 'var(--bad)' : 'var(--ink3)'}">${esc(a.errors)}e</td><td class="t" title="${esc(a.last_at)}">${ago(a.last_at)}</td></tr>`).join('')
+    : '<tr><td class="empty">none yet</td></tr>';
+  $('records').innerHTML = d.recent_records.length ? d.recent_records.map(r => {
+    const isNew = !first && !seenRec.has(r.id); seenRec.add(r.id);
+    return `<tr class="rec${isNew ? ' new' : ''}${selected === r.id ? ' sel' : ''}" data-kind="${esc(r.kind)}" data-id="${esc(r.id)}">` +
+      `<td class="t" title="${esc(r.asserted_at)}">${ago(r.asserted_at)}</td><td class="k"><span class="tag">${esc(r.kind)}</span></td>` +
+      `<td class="a" title="${esc(r.author_id)}">${esc(r.author_id)}</td><td class="s">${esc(r.summary)}</td></tr>`; }).join('')
+    : '<tr><td class="empty">no records yet</td></tr>';
+  $('callsNote').textContent = d.recent_calls.length ? `last ${d.recent_calls.length}` : '';
+  $('calls').innerHTML = d.recent_calls.length ? d.recent_calls.map(r => {
+    const isNew = !first && !seenCall.has(r.id); seenCall.add(r.id);
+    return `<tr class="${isNew ? 'new' : ''}"><td class="t" title="${esc(r.at)}">${ago(r.at)}</td><td class="k">${esc(r.tool || r.method)}</td>` +
+      `<td class="a" title="${esc(r.author_id || '')}">${esc(r.author_id || '')}</td><td class="n" style="color:var(--ink3)">${esc(r.ms)}ms</td>` +
+      `<td class="s${r.ok ? '' : ' err'}" title="${esc(r.error || '')}">${r.ok ? '<span style="color:var(--ink3)">ok</span>' : '✕ ' + esc(r.error)}</td></tr>`; }).join('')
+    : '<tr><td class="empty">no calls recorded yet</td></tr>';
+  first = false;
+}
+async function poll() {
+  const live = $('live'), st = $('status');
+  try { const r = await fetch('/api/snapshot'); if (!r.ok) throw new Error(r.status); render(await r.json());
+    st.textContent = `live · ${new Date().toLocaleTimeString()}`; live.className = 'live'; }
+  catch (e) { st.textContent = `unreachable: ${e.message}`; live.className = 'live err'; }
+}
+
+// ---- browse ---------------------------------------------------------------
+const segBar = (s, q, r, max, cls = '') => { const tot = s + q + r; if (!tot) return `<div class="seg empty ${cls}"></div>`;
+  const px = n => n ? Math.max(3, Math.round(96 * n / Math.max(max, 1))) : 0;
+  return `<div class="seg ${cls}" title="${s} supports · ${q} qualifies · ${r} rebuts">` +
+    (s ? `<i style="width:${px(s)}px;background:var(--good)"></i>` : '') + (q ? `<i style="width:${px(q)}px;background:var(--warn)"></i>` : '') +
+    (r ? `<i style="width:${px(r)}px;background:var(--crit)"></i>` : '') + `</div>`; };
+const counts = (s, q, r) => `<span class="cnt"><b class="g">${s}</b> · <b class="w">${q}</b> · <b class="c">${r}</b></span>`;
+const B = {kind: 'claim', q: '', col: '', sem: false, sort: 'recent', page: 0};
+let btimer = null, bshown = false;
+function syncTools() { const cl = B.kind === 'claim'; $('bsemwrap').style.display = cl ? '' : 'none'; $('bsort').style.display = cl ? '' : 'none'; $('blegend').style.display = cl ? '' : 'none';
+  $('bcol').style.display = ['claim', 'observation', 'contradiction'].includes(B.kind) ? '' : 'none'; }
+async function browse() {
+  syncTools();
+  const p = new URLSearchParams({kind: B.kind, q: B.q, collection: B.col, page: B.page, sort: B.sort, method: B.sem && B.kind === 'claim' ? 'vector' : 'keyword'});
+  $('bnote').textContent = 'loading…';
+  let d; try { d = await (await fetch('/api/browse?' + p)).json(); } catch (e) { d = {error: String(e)}; }
+  if (d.error) { $('bresults').innerHTML = `<tr><td class="empty">${esc(d.error)}</td></tr>`; $('bnote').textContent = ''; return; }
+  const max = Math.max(1, ...d.items.map(r => (r.supports || 0) + (r.qualifies || 0) + (r.rebuts || 0)));
+  $('bresults').innerHTML = d.items.length ? d.items.map(r => {
+    const row = `<tr class="rec${selected === r.id ? ' sel' : ''}" data-kind="${esc(B.kind)}" data-id="${esc(r.id)}" title="${esc(r.id)}">` +
+      `<td class="t" title="${esc(r.asserted_at)}">${ago(r.asserted_at)}</td>`;
+    if (B.kind === 'claim') return row + `<td class="ev">${segBar(r.supports, r.qualifies, r.rebuts, max)}</td><td class="n">${counts(r.supports, r.qualifies, r.rebuts)}</td>` +
+      (r.distance != null ? `<td class="n" style="color:var(--ink3)" title="cosine distance">${esc(r.distance)}</td>` : '') +
+      `<td class="s">${esc(r.summary)}${r.findings ? ` <span class="tag">${esc(r.findings)} finding${r.findings > 1 ? 's' : ''}</span>` : ''}</td><td class="a" title="${esc(r.author_id)}">${esc(r.author_id)}</td></tr>`;
+    return row + `<td class="k">${esc(r.id)}</td><td class="a" title="${esc(r.author_id)}">${esc(r.author_id)}</td><td class="s">${esc(r.summary)}</td></tr>`;
+  }).join('') : '<tr><td class="empty">nothing matches</td></tr>';
+  $('bnote').textContent = `${d.method === 'vector' ? 'semantic · ' : ''}page ${B.page + 1} · ${d.items.length}${d.more ? '+' : ''}`;
+  $('bprev').disabled = B.page === 0; $('bnext').disabled = !d.more;
+}
+const rebrowse = () => { B.page = 0; browse(); };
+$('bkind').onchange = e => { B.kind = e.target.value; rebrowse(); };
+$('bcol').onchange = e => { B.col = e.target.value; rebrowse(); };
+$('bsort').onchange = e => { B.sort = e.target.value; rebrowse(); };
+$('bsem').onchange = e => { B.sem = e.target.checked; rebrowse(); };
+$('bq').oninput = e => { B.q = e.target.value; clearTimeout(btimer); btimer = setTimeout(rebrowse, B.sem ? 600 : 250); };
+$('bprev').onclick = () => { if (B.page > 0) { B.page--; browse(); } };
+$('bnext').onclick = () => { B.page++; browse(); };
+document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
+  document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === t));
+  $('activity').hidden = t.dataset.tab !== 'activity'; $('browse').hidden = t.dataset.tab !== 'browse';
+  if (t.dataset.tab === 'browse' && !bshown) { bshown = true; browse(); }
+});
+
+// ---- drawer ---------------------------------------------------------------
+const hist = [];
+const kv = (k, v) => v == null || v === '' ? '' : `<div class="kv"><span class="kk">${esc(k)}</span><span class="kv2">${v}</span></div>`;
+const list = (title, items, fn) => items && items.length ? `<h3>${esc(title)} <span class="muted">${items.length}</span></h3>${items.map(fn).join('')}` : '';
+const evLine = e => `<div class="li">${link(e.id)} <b>${esc(e.relation)}</b> ${esc(e.target_kind)} ${link(e.target_id)} <span class="muted">from</span> ${link(e.from_observation_id)}` +
+  `<div class="q">“${esc(e.quote)}”</div><div class="r">${esc(e.reason)} <span class="muted">· ${esc(e.author_id)} · ${ago(e.asserted_at)} ago</span></div></div>`;
+function renderRecord(kind, r) {
+  let h = '';
+  if (kind === 'claim') { const s = r.evidence.filter(e => e.relation === 'SUPPORTS').length, q = r.evidence.filter(e => e.relation === 'QUALIFIES').length, b = r.evidence.filter(e => e.relation === 'REBUTS').length;
+    h += `<p class="big">${esc(r.text)}</p>${segBar(s, q, b, s + q + b, 'lg')}${kv('evidence', counts(s, q, b) + ' <span class="muted">supports · qualifies · rebuts</span>')}`; }
+  if (kind === 'contradiction') h += `<p class="big">${esc(r.reason)}</p>`;
+  if (kind === 'evidence') h += `<p class="big q">“${esc(r.quote)}”</p>${kv('reason', esc(r.reason))}${kv('relation', `<b>${esc(r.relation)}</b> ${esc(r.target_kind)} ${link(r.target_id)}`)}${kv('grounded in', link(r.from_observation_id))}`;
+  if (kind === 'observation') h += `<p class="big">${esc(r.title || '(untitled)')}</p>${kv('uri', `<a class="ext" href="${esc(r.uri)}" target="_blank" rel="noopener">${esc(r.uri)}</a>`)}${kv('source', link(r.source_id))}${kv('chars', r.content_unavailable ? 'content not stored' : esc(r.chars))}${kv('hash', `<span class="muted">${esc(r.content_hash)}</span>`)}`;
+  if (kind === 'source') h += `<p class="big">${esc(r.name)}</p>${kv('uri', r.uri ? `<a class="ext" href="${esc(r.uri)}" target="_blank" rel="noopener">${esc(r.uri)}</a>` : '')}`;
+  if (kind === 'author') h += `<p class="big">${esc(r.name)} <span class="tag">${esc(r.kind)}</span></p>`;
+  if (kind === 'collection') h += `<p class="big">${esc(r.name)}</p>`;
+  h += kv('author', esc(r.author_id)) + kv('collection', esc(r.collection_id)) + kv('asserted', `${esc(r.asserted_at)} <span class="muted">· ${ago(r.asserted_at)} ago</span>`);
+  if (kind === 'evidence' && r.target) h += `<h3>Target</h3><div class="li">${link(r.target.id)} ${esc(r.target.text || r.target.reason || r.target.title || r.target.name || r.target.uri || r.target.quote || '')}</div>`;
+  if (kind === 'evidence' && r.observation) h += `<h3>Observation</h3><div class="li">${link(r.observation.id)} ${esc(r.observation.title || r.observation.uri)}</div>`;
+  h += list('Member claims', r.claims, c => `<div class="li">${link(c.id)} ${esc(c.text)} <span class="muted">· ${esc(c.author_id)}</span></div>`);
+  h += list('Evidence', r.evidence, evLine);
+  h += list('Contradiction findings', r.contradictions, k => `<div class="li">${link(k.id)} ${esc(k.reason)}<div class="r">${(k.claim_ids || []).map(link).join(' ')}${k.evidence && k.evidence.length ? ` · ${k.evidence.length} evidence on the finding` : ''}</div></div>`);
+  h += list('Evidence grounded here', r.evidence_from, evLine);
+  h += list('Observations', r.observations, o => `<div class="li">${link(o.id)} ${esc(o.title || o.uri)} <span class="muted">· ${esc(o.collection_id)} · ${ago(o.asserted_at)} ago</span></div>`);
+  h += list('Recent records by this author', r.recent, x => `<div class="li"><span class="tag">${esc(x.kind)}</span> ${linkify(x.id)} ${esc(x.summary)} <span class="muted">· ${ago(x.asserted_at)} ago</span></div>`);
+  if (kind === 'observation' && r.content) h += `<h3>Content <span class="muted">first ${r.content.length} of ${esc(r.chars)} chars</span></h3><pre class="content">${esc(r.content)}</pre>`;
+  h += `<details><summary>raw record</summary><pre>${esc(JSON.stringify(r, null, 2))}</pre></details>`;
+  return h;
+}
+async function showDetail(kind, id, push = true) {
+  if (push && selected && selected !== id) hist.push(selected);
+  selected = id; document.querySelectorAll('tr.rec').forEach(tr => tr.classList.toggle('sel', tr.dataset.id === id));
+  $('drawer').classList.add('open'); $('drawerTitle').textContent = `${kind} ${id}`; $('dback').style.visibility = hist.length ? 'visible' : 'hidden';
+  $('dbody').innerHTML = '<div class="empty">loading…</div>';
+  try { const r = await fetch(`/api/record/${encodeURIComponent(kind)}/${encodeURIComponent(id)}`); const d = await r.json();
+    $('dbody').innerHTML = d.error ? `<div class="empty">${esc(d.error)}</div>` : renderRecord(kind, d); }
+  catch (e) { $('dbody').innerHTML = `<div class="empty">${esc(e)}</div>`; }
+}
+function hideDetail() { selected = null; hist.length = 0; $('drawer').classList.remove('open'); document.querySelectorAll('tr.sel').forEach(tr => tr.classList.remove('sel')); }
+$('dback').onclick = () => { const prev = hist.pop(); if (prev) showDetail(kindOf(prev) || 'author', prev, false); };
+document.addEventListener('click', e => {
+  const a = e.target.closest('a.idl'); if (a) { e.preventDefault(); const id = a.dataset.id; showDetail(kindOf(id), id); return; }
+  const tr = e.target.closest('tr.rec'); if (tr) showDetail(tr.dataset.kind, tr.dataset.id);
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape') hideDetail(); });
+poll(); setInterval(poll, 2000);
+</script></body></html>
