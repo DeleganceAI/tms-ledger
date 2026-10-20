@@ -38,6 +38,7 @@ CREATE TABLE observations (
     collection_id   text NOT NULL REFERENCES collections(id),
     source_id       text NOT NULL REFERENCES sources(id),
     uri             text NOT NULL,
+    title           text,  -- existing databases: ALTER TABLE observations ADD COLUMN title text;
     content         text,
     content_hash    text NOT NULL,
     author_id       text NOT NULL REFERENCES authors(id),

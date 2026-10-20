@@ -6,6 +6,8 @@ Everything runs in one transaction and rolls back. Needs db/init.sql applied and
 the embedding model. The one thing that must fail is a quote that is not in the document.
 """
 import json
+import re
+import tempfile
 
 import psycopg
 
@@ -14,6 +16,17 @@ from tms import ledger as L
 DOC = """Histamine intolerance (HIT) is thought to result from reduced diamine oxidase (DAO) activity.
 Serum DAO activity correlates poorly with symptom severity in several cohorts.
 In one 2019 trial, DAO supplementation reduced symptom scores in adults with low serum DAO."""
+
+LONG = ("Serum tryptase remained within the reference range in most patients at every visit, while urinary "
+        "N-methylhistamine rose above the upper limit of normal in a minority, and neither marker tracked the "
+        "symptom scores that patients reported in the weekly diaries kept throughout the twelve-month follow-up "
+        "period of the study.")
+JATS = f"""<?xml version="1.0"?><article><front><journal-meta><journal-title>Biomolecules</journal-title></journal-meta>
+<article-meta><title-group><article-title>Diagnostic criteria for <italic>MCAS</italic>: a comparison</article-title></title-group>
+<abstract><p>Two criteria sets are compared.</p></abstract></article-meta></front>
+<body><sec><title>Results</title><p>{LONG}</p>
+<table><tr><td>MCAS: CD25 on mast cells</td><td>WHO SM: CD25 on mast cells</td></tr></table><p>After the table.</p></sec></body>
+<back><ref-list><ref><mixed-citation>Cited paper about zebras.</mixed-citation></ref></ref-list></back></article>"""
 
 
 def main() -> None:
@@ -27,11 +40,33 @@ def main() -> None:
 
 def run(conn) -> None:
     L.add_author(conn, "smoke-agent", "Smoke test agent", "agent")
+    assert L.add_author(conn, "smoke-agent", "Smoke test agent", "agent")["id"] == "smoke-agent"  # idempotent
+    try:
+        with conn.transaction():
+            L.add_author(conn, "smoke-agent", "Someone else", "agent")
+    except psycopg.errors.UniqueViolation:
+        pass
+    else:
+        raise AssertionError("the same id with a different name must still fail")
     L.add_collection(conn, "smoke", "Smoke collection", "smoke-agent")
     L.add_collection(conn, "other", "Other collection", "smoke-agent")
     src = L.add_source(conn, "Example journal", "smoke-agent", "https://example.org")
     obs = L.add_observation(conn, "smoke", src["id"], "smoke-agent", "https://example.org/hit-review", DOC)
     assert obs["chars"] == len(DOC) and "content" not in obs
+    assert obs["title"] == DOC.splitlines()[0]  # plain text: first line
+
+    # JATS: title from <article-title>; journal metadata and bibliography dropped; table cells kept apart.
+    with tempfile.NamedTemporaryFile("w", suffix=".xml") as f:
+        f.write(JATS)
+        f.flush()
+        text, title = L.fetch_text(f.name)
+        obs2 = L.add_observation(conn, "smoke", src["id"], "smoke-agent", f.name)
+    assert title == "Diagnostic criteria for MCAS: a comparison" and obs2["title"] == title, (title, obs2)
+    assert "zebras" not in text and "Biomolecules" not in text and "Two criteria sets" in text, text
+    assert re.search(r"MCAS: CD25 on mast cells\t\s*WHO SM: CD25 on mast cells\t\s*\n", text), text
+    assert L.get_record(conn, "observation", obs2["id"], max_chars=0)["title"] == title
+    obs3 = L.add_observation(conn, "smoke", src["id"], "smoke-agent", "x", "body", title="Given")
+    assert obs3["title"] == "Given"
 
     c1 = L.add_claim(conn, "smoke", "Histamine intolerance results from reduced DAO activity.", "smoke-agent")
     c2 = L.add_claim(conn, "smoke", "Serum DAO activity correlates poorly with symptom severity.", "smoke-agent")
@@ -43,6 +78,7 @@ def run(conn) -> None:
     assert e1["target_id"] == c1["id"] and "target_claim_id" not in e1
     q1 = L.add_evidence(conn, obs["id"], "claim", c1["id"], "QUALIFIES",
                         "correlates poorly with symptom severity", "DAO level alone does not track symptoms.", "smoke-agent")
+    e2 = L.add_evidence(conn, obs2["id"], "claim", c2["id"], "SUPPORTS", LONG, "Markers did not track symptoms.", "smoke-agent")
 
     # The citation guard: a quote absent from the document is rejected (savepoint keeps the rest).
     try:
@@ -71,14 +107,16 @@ def run(conn) -> None:
     assert all(h["collection_id"] == "smoke" for h in hits["items"])
     kw = L.search_claims(conn, "smoke", "serum symptom", "keyword", 5)
     assert [h["id"] for h in kw["items"]] == [c2["id"]]
+    short = next(e for e in kw["items"][0]["evidence"] if e["id"] == e2["id"])["quote"]
+    assert short == LONG[:300] + "…" and L.get_record(conn, "evidence", e2["id"])["quote"] == LONG  # search truncates, reads do not
 
-    assert L.list_observations(conn, "smoke", ungrounded_only=True) == []
-    assert len(L.list_observations(conn, "smoke")) == 1
+    assert [o["id"] for o in L.list_observations(conn, "smoke", ungrounded_only=True)] == [obs3["id"]]
+    assert {o["title"] for o in L.list_observations(conn, "smoke")} == {obs["title"], title, "Given"}
     assert L.get_record(conn, "observation", obs["id"], offset=10, max_chars=20)["content"] == DOC[10:30]
     assert L.search_contradictions(conn, "smoke", claim_id=c2["id"])[0]["claim_ids"] == k1["claim_ids"]
 
     proof = {"question": "Does DAO deficiency cause HIT?", "steps": [
-        {"id": "s1", "say": "One review proposes reduced DAO activity as the mechanism.", "from": [c1["id"], e1["id"]]},
+        {"id": "s1", "say": "One review proposes reduced DAO activity as the mechanism.", "from": [c1["id"], e1["id"], obs2["id"]]},
         {"id": "s2", "say": "A finding says this sits badly with poor serum correlation.", "from": [k1["id"]]},
         {"id": "s3", "say": "Nothing here covers children.", "from": [], "gap": True},
         {"id": "root", "say": "Proposed mechanism, not established; one finding is open on my reading.", "from": ["s1", "s2", "s3"]},
@@ -86,6 +124,7 @@ def run(conn) -> None:
     res = L.check_proof(conn, "smoke", proof)
     assert res["ok"], res["problems"]
     assert res["root"] == "root" and "(gap)" in res["tree"] and e1["quote"] in res["tree"]
+    assert f'observation "{title}" ' in res["tree"], res["tree"]
     print(res["tree"])
 
     bad = {"steps": [

@@ -97,7 +97,7 @@ Instructions to give an intake agent, verbatim:
 |---|---|
 | `add_author`, `add_collection`, `list_collections` | Identities and collections. Both ids are slugs you choose. |
 | `add_source`, `search_sources` | Where material comes from. Global across collections. |
-| `add_observation` | Preserve a document in a collection. Pass full text, or just a URL and the server fetches it (PDF, HTML, JATS XML). Sites that block bots: fetch elsewhere, pass the text. |
+| `add_observation` | Preserve a document in a collection. Pass full text, or just a URL and the server fetches it (PDF, HTML, JATS XML). Sites that block bots: fetch elsewhere, pass the text. Optional `title`; otherwise derived from the document. |
 | `add_claim` | One statement, embedded on write for vector search. |
 | `add_evidence` | Observation bears on a target with SUPPORTS, REBUTS or QUALIFIES, a verbatim `quote` (rejected if absent from the observation) and a reason. |
 | `add_contradiction` | Two or more claim ids that cannot all hold, with the reason. Membership is frozen. |
@@ -105,6 +105,8 @@ Instructions to give an intake agent, verbatim:
 | `search_claims` | Vector or keyword retrieval in a collection, with each claim's evidence and contradiction ids inlined. |
 | `get_evidence`, `list_observations`, `search_contradictions` | Filtered reads. `list_observations(ungrounded_only=true)` is the claims-pass worklist. |
 | `check_proof` | Validate a thinking proof and return it as an inspectable tree. |
+
+Results come back as JSON in the response's text content (no structured content). Observations carry a `title` (passed to `add_observation` or derived from the document) that `list_observations`, `get_record` and `check_proof` trees show.
 
 ## Thinking proofs
 

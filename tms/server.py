@@ -56,7 +56,9 @@ def _col(collection: str) -> str:
 @mcp.tool()
 def add_author(id: str, name: str, kind: str) -> dict:
     """Register an operational identity (not a login). kind is 'human' or 'agent'.
-    Use a short slug id such as 'dustin' or 'grok-scout-1'. Register once, reuse the id."""
+    Use a short slug id such as 'dustin' or 'grok-scout-1'. Register once, reuse the id. Calling it
+    again with the same id, name and kind returns the existing record; a different name or kind for
+    an existing id is an error."""
     return _run(L.add_author, id, name, kind)
 
 
@@ -87,13 +89,16 @@ def search_sources(text: str, limit: int = 20) -> list[dict]:
 
 
 @mcp.tool()
-def add_observation(source_id: str, author_id: str, uri: str, content: str = "", collection: str = "") -> dict:
+def add_observation(source_id: str, author_id: str, uri: str, content: str = "", title: str = "",
+                    collection: str = "") -> dict:
     """Preserve a document, paper, blog post or social post in a collection.
     Pass the full text as content, or leave content empty and the server fetches uri
     (PDF via pdftotext, HTML via a readability extractor). The stored text is what
     evidence quotes are checked against, so pass the whole thing, not a summary.
-    Returns the record without content; read it back with get_record."""
-    return _run(L.add_observation, _col(collection), source_id, author_id, uri, content or None)
+    title is optional: left empty, the server derives one (the document's <title> or JATS
+    <article-title>, else the first non-empty line). Returns the record without content; read
+    it back with get_record."""
+    return _run(L.add_observation, _col(collection), source_id, author_id, uri, content or None, title or None)
 
 
 @mcp.tool()
@@ -119,7 +124,9 @@ def add_evidence(from_observation_id: str, target_kind: str, target_id: str, rel
 def add_contradiction(claim_ids: list[str], reason: str, author_id: str, collection: str = "") -> dict:
     """Record an authored finding that two or more distinct claims cannot all hold, with the reason.
     Membership is frozen on write; a different set needs a new finding. Differences of scope,
-    population or timeframe are not contradictions: put that in a QUALIFIES evidence instead."""
+    population or timeframe are not contradictions: put that in a QUALIFIES evidence instead.
+    Two criteria sets or definitions for the same diagnosis that would classify the same patient
+    differently ARE a contradiction, not a scope difference."""
     return _run(L.add_contradiction, _col(collection), claim_ids, reason, author_id)
 
 
@@ -128,8 +135,8 @@ def add_contradiction(claim_ids: list[str], reason: str, author_id: str, collect
 @mcp.tool()
 def get_record(kind: str, id: str, offset: int = 0, max_chars: int = 20000) -> dict | None:
     """Exact read. kind: author, collection, source, observation, claim, contradiction, evidence.
-    Observations return a content window (offset, max_chars) plus total chars; page through
-    long documents. A null content with content_unavailable=true means the text was not stored."""
+    Observations return title, a content window (offset, max_chars) and `chars` (the total); page
+    through long documents. A null content with content_unavailable=true means the text was not stored."""
     return _run(L.get_record, kind, id, offset, max_chars)
 
 
@@ -137,7 +144,8 @@ def get_record(kind: str, id: str, offset: int = 0, max_chars: int = 20000) -> d
 def search_claims(text: str, method: str = "vector", limit: int = 10, collection: str = "") -> dict:
     """Retrieve claims in a collection by meaning (method='vector') or words (method='keyword').
     Each result inlines its evidence (relation, quote, grounding observation) and the ids of any
-    contradiction findings it belongs to. Ordering is a retrieval aid, not a judgement."""
+    contradiction findings it belongs to. Inlined quotes are cut to 300 chars with an ellipsis here
+    only; get_evidence and get_record return them whole. Ordering is a retrieval aid, not a judgement."""
     return _run(L.search_claims, _col(collection), text, method, limit)
 
 
@@ -190,8 +198,8 @@ For each question:
 4. Write the answer. Each paragraph corresponds to a step and cites its ids inline. Report
    rebuttals, qualifications and contradiction findings as what the records say, and state
    that open-or-resolved is your reading. Say plainly what the collection does not cover.
-5. Save the proof JSON to proofs/<YYYYMMDD-HHMM>-<slug>.json in your working directory and
-   append the tree from check_proof under the answer.
+5. Reply with the answer in chat followed by the check_proof tree; save only {question, steps}
+   to proofs/<YYYYMMDD-HHMM>-<slug>.json.
 
 Never answer from general knowledge without marking it as a gap step. If the collection has
 nothing relevant, say so; that is a complete and honest answer.
@@ -205,6 +213,7 @@ Worklist: list_observations(ungrounded_only=true). For each observation:
 1. Read it in full with get_record (page with offset/max_chars).
 2. For each statement about the world worth keeping, call search_claims with it. Reuse an
    existing claim id when it says the same thing with the same scope; otherwise add_claim.
+   Aim for the statements a careful reader would cite, usually five to fifteen per paper.
    Keep hedges, population, dose, timeframe and diagnostic criteria inside the claim text.
 3. add_evidence from this observation to the claim: SUPPORTS, REBUTS or QUALIFIES, with a
    verbatim quote copied exactly from the document and a reason saying what the passage shows.

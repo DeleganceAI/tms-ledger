@@ -109,9 +109,10 @@ def _download(uri: str) -> tuple[bytes, str]:
         return b"".join(chunks), r.headers.get("content-type", "")
 
 
-def fetch_text(uri: str) -> str:
-    """Fetch an http(s) URL, or read a local path when ALLOW_LOCAL, and return plain text
-    (PDF via pdftotext, HTML via trafilatura, XML by stripping tags)."""
+def fetch_text(uri: str) -> tuple[str, str | None]:
+    """Fetch an http(s) URL, or read a local path when ALLOW_LOCAL, and return (plain text, title).
+    PDF via pdftotext, HTML via trafilatura, JATS XML by stripping tags; the title comes from
+    <title>/<article-title> for HTML/XML and is None otherwise."""
     parsed = urlparse(uri)
     path = uri[7:] if uri.startswith("file://") else uri
     if parsed.scheme in ("http", "https"):
@@ -129,6 +130,7 @@ def fetch_text(uri: str) -> str:
     else:
         raise ValueError(f"{uri} is neither an http(s) URL nor an existing file")
 
+    title = None
     if data[:5] == b"%PDF-" or "pdf" in ctype or (not ctype and path.lower().endswith(".pdf")):
         with tempfile.NamedTemporaryFile(suffix=".pdf") as tmp:
             tmp.write(data)
@@ -140,21 +142,40 @@ def fetch_text(uri: str) -> str:
                 raise ValueError(f"pdftotext failed: {err.stderr.strip()[:300]}") from err
     elif "html" in ctype or b"<html" in data[:2000].lower():
         import trafilatura
-        text = trafilatura.extract(data.decode("utf-8", errors="replace"), include_comments=False, include_tables=True) or ""
+        doc = data.decode("utf-8", errors="replace")
+        text = trafilatura.extract(doc, include_comments=False, include_tables=True) or ""
+        m = re.search(r"<title[^>]*>(.*?)</title>", doc, re.S | re.I)
+        title = m.group(1) if m else trafilatura.extract_metadata(doc).title
     elif "xml" in ctype or data.lstrip()[:5] == b"<?xml":
         # JATS full text from the Europe PMC REST API and similar: keep the words, drop the tags.
-        text = html.unescape(re.sub(r"<[^>]+>", " ", data.decode("utf-8", errors="replace")))
+        doc = data.decode("utf-8", errors="replace")
+        m = re.search(r"<article-title\b[^>]*>(.*?)</article-title>", doc, re.S)
+        title = m.group(1) if m else None
+        # Front matter shrinks to title + abstract; journal metadata, bibliography and back matter go.
+        front = re.search(r"<front>.*?</front>", doc, re.S)
+        if front:
+            keep = re.findall(r"<article-title\b[^>]*>.*?</article-title>|<abstract\b[^>]*>.*?</abstract>", front.group(), re.S)
+            doc = doc[:front.start()] + "\n".join(keep) + doc[front.end():]
+        doc = re.sub(r"<(journal-meta|ref-list|back)\b.*?</\1>", " ", doc, flags=re.S)
+        doc = re.sub(r"</t[dh]>", "\t", doc)  # table cells stay apart, one row per line
+        doc = re.sub(r"</(tr|p|title|sec)>", "\n", doc)
+        text = html.unescape(re.sub(r"<[^>]+>", " ", doc))
     else:
         text = data.decode("utf-8", errors="replace")
     text = text.strip()
     if not text:
         raise ValueError(f"No text could be extracted from {uri}")
-    return text
+    if title:
+        title = " ".join(html.unescape(re.sub(r"<[^>]+>", "", title)).split())  # inline markup, not separators
+    return text, title or None
 
 
 # ------------------------------------------------------------------ appends
 
 def add_author(conn, id: str, name: str, kind: str) -> dict:
+    row = conn.execute("SELECT * FROM authors WHERE id = %s", (id,)).fetchone()
+    if row and (row["name"], row["kind"]) == (name, kind):
+        return _clean(row)  # re-registering the same identity is a no-op, not a duplicate-key error
     return _clean(conn.execute(
         "INSERT INTO authors (id, name, kind) VALUES (%s, %s, %s) RETURNING *", (id, name, kind)).fetchone())
 
@@ -172,18 +193,22 @@ def add_source(conn, name: str, author_id: str, uri: str | None = None) -> dict:
 
 
 def add_observation(conn, collection: str, source_id: str, author_id: str, uri: str,
-                    content: str | None = None) -> dict:
+                    content: str | None = None, title: str | None = None) -> dict:
     if content is None:
-        content = fetch_text(uri)
+        content, fetched = fetch_text(uri)
+        title = title or fetched
     if len(content) > MAX_CONTENT:
         raise ValueError(f"content is {len(content)} chars; cap is {MAX_CONTENT}")
+    if not title:  # plain text and PDF: the first non-empty line
+        title = next((ln.strip() for ln in content.splitlines() if ln.strip()), "")
+    title = title[:200] or None
     digest = "sha256:" + hashlib.sha256(content.encode("utf-8")).hexdigest()
     row = conn.execute(
-        """INSERT INTO observations (id, collection_id, source_id, uri, content, content_hash, author_id)
-           VALUES (%s, %s, %s, %s, %s, %s, %s)
-           RETURNING id, collection_id, source_id, uri, content_hash, author_id, asserted_at,
+        """INSERT INTO observations (id, collection_id, source_id, uri, title, content, content_hash, author_id)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+           RETURNING id, collection_id, source_id, uri, title, content_hash, author_id, asserted_at,
                      char_length(content) AS chars, left(content, 300) AS preview""",
-        (new_id("o"), collection, source_id, uri, content, digest, author_id)).fetchone()
+        (new_id("o"), collection, source_id, uri, title, content, digest, author_id)).fetchone()
     return _clean(row)
 
 
@@ -259,7 +284,7 @@ def get_record(conn, kind: str, id: str, offset: int = 0, max_chars: int = 20000
         raise ValueError(f"kind must be one of {sorted(TABLES)}")
     if kind == "observation":
         row = conn.execute(
-            """SELECT id, collection_id, source_id, uri, content_hash, author_id, asserted_at,
+            """SELECT id, collection_id, source_id, uri, title, content_hash, author_id, asserted_at,
                       char_length(content) AS chars, content IS NULL AS content_unavailable,
                       substr(content, %s + 1, %s) AS content
                FROM observations WHERE id = %s""", (offset, max_chars, id)).fetchone()
@@ -336,13 +361,16 @@ def search_claims(conn, collection: str, text: str, method: str = "vector", limi
     else:
         raise ValueError("method must be 'vector' or 'keyword'")
     items = _attach_claim_context(conn, [_clean(r) for r in rows])
+    for e in (e for c in items for e in c["evidence"]):  # search results stay skimmable; get_evidence has the whole quote
+        if len(e["quote"]) > 300:
+            e["quote"] = e["quote"][:300] + "…"
     return {"method": method, "note": "Distances and ranks are retrieval aids, not confidence.", "items": items}
 
 
 def list_observations(conn, collection: str, ungrounded_only: bool = False, limit: int = 50) -> list[dict]:
     extra = "AND NOT EXISTS (SELECT 1 FROM evidence e WHERE e.from_observation_id = o.id)" if ungrounded_only else ""
     rows = conn.execute(
-        f"""SELECT o.id, o.source_id, s.name AS source_name, o.uri, o.author_id, o.asserted_at,
+        f"""SELECT o.id, o.source_id, s.name AS source_name, o.title, o.uri, o.author_id, o.asserted_at,
                    char_length(o.content) AS chars, o.content IS NULL AS content_unavailable,
                    (SELECT count(*) FROM evidence e WHERE e.from_observation_id = o.id) AS evidence_count
             FROM observations o JOIN sources s ON s.id = o.source_id
@@ -401,7 +429,8 @@ def _leaf_line(kind: str, row: dict) -> str:
     if kind == "contradiction":
         return f"contradiction among {', '.join(row['claim_ids'])}: {row['reason']}"
     if kind == "observation":
-        return f"observation {row['uri']} (source {row['source_id']}, author {row['author_id']})"
+        title = f'"{row["title"]}" ' if row.get("title") else ""
+        return f"observation {title}{row['uri']} (source {row['source_id']}, author {row['author_id']})"
     return f"source: {row['name']} {row.get('uri') or ''}".rstrip()
 
 
