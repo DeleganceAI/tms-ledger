@@ -1,0 +1,141 @@
+{
+ "question": "What are the competing diagnostic criteria for MCAS and where do they conflict?",
+ "steps": [
+  {
+   "id": "s1",
+   "say": "Two named sets of MCAS criteria exist: the ECNM-AIM consortium criteria (Consensus 1, from Akin 2010 and endorsed by AAAAI) and the Afrin/Molderings lineage (Consensus 2); a consensus-2-aligned source calls Consensus 1 slightly stricter and says which is more accurate is debatable.",
+   "from": [
+    "c_0e0aaec817",
+    "c_ffe145471b"
+   ]
+  },
+  {
+   "id": "s2",
+   "say": "The consortium criteria require all three of: recurrent severe systemic symptoms usually meeting anaphylaxis criteria, an event-related mediator rise over the individual's own baseline (tryptase x1.2 + 2 ng/mL), and response to mast-cell-directed therapy, with biochemical documentation treated as mandatory.",
+   "from": [
+    "c_b6cf1af801",
+    "c_e37b8ed005"
+   ]
+  },
+  {
+   "id": "s3",
+   "say": "Consensus 2 establishes MCAS from a constellation of complaints attributable to mast cell activity (the major criterion) plus any single minor criterion; Molderings 2011 is the precursor with the same major-plus-minor structure.",
+   "from": [
+    "c_33e2288d3c",
+    "c_f18eb50423"
+   ]
+  },
+  {
+   "id": "s4",
+   "say": "Consensus 2's minor criteria include above-normal mediator levels, tissue, phenotype and genetic findings, and treatment response, none of which is individually required.",
+   "from": [
+    "c_802ebf674d",
+    "c_68b1e1c01a",
+    "c_2b2900f002"
+   ]
+  },
+  {
+   "id": "s5",
+   "say": "First conflict, overall structure: a recorded finding holds that the consortium rule and the consensus-2 rule cannot both be the criteria for the same diagnosis, since a complaint constellation plus one tissue finding and no mediator rise is MCAS under one and not the other.",
+   "from": [
+    "k_7ca409a2b3",
+    "e_a8696b712d",
+    "e_93dcacc194",
+    "s2",
+    "s3",
+    "s4"
+   ]
+  },
+  {
+   "id": "s6",
+   "say": "Second conflict, biochemical proof: consortium sources require documented mediator rise over baseline, while Molderings et al. give grounds against requiring it (mediator spill-over may be impeded and few mediators are measurable) and regard its necessity as unsettled.",
+   "from": [
+    "c_e37b8ed005",
+    "e_4981b33e39",
+    "c_6a9d72966f"
+   ]
+  },
+  {
+   "id": "s7",
+   "say": "Third conflict, what counts as a laboratory abnormality: consensus 2 counts an above-normal level as a minor criterion, whereas consortium-aligned sources say elevated baseline values are not diagnostic and that baseline mediator levels vary within and between people.",
+   "from": [
+    "k_b2ac5a3b98",
+    "e_e8172b582b",
+    "c_4bae1ff9ea",
+    "c_802ebf674d",
+    "c_94b4407f2f"
+   ]
+  },
+  {
+   "id": "s8",
+   "say": "Fourth conflict, tissue and clonality findings: the consortium group's stated opinion is that clonality and abnormal morphology or phenotype do not qualify as MCAS criteria, while the consensus-2 lineage lists them as minor criteria.",
+   "from": [
+    "k_10939a2c90",
+    "c_0797d31a55",
+    "c_68b1e1c01a"
+   ]
+  },
+  {
+   "id": "s9",
+   "say": "Fifth conflict, symptom breadth and severity: the consortium says headache, fatigue, nausea and sleep disturbance do not meet criteria, Molderings et al. ascribe those symptoms to mediator release and count such constellations, and the alternative criteria accept 153 symptoms against 18 without requiring the consortium's severity.",
+   "from": [
+    "k_ab59e765a5",
+    "c_240e529346",
+    "c_94e329c37d",
+    "c_805f45824b"
+   ]
+  },
+  {
+   "id": "s10",
+   "say": "Each side draws consequences: consortium-aligned sources report lower diagnostic specificity for the alternative criteria (an LLM simulation with its own stated caveat), published criticism, resemblance to the consortium's non-final 'MCAD unspecified' category, a 12.6-fold rise in idiopathic MCAS coding, and few referrals showing a tryptase rise; consensus-2-aligned sources report prevalence estimates up to 17% and a 250-patient consensus-2 cohort in which tryptase was rarely abnormal.",
+   "from": [
+    "c_350af85b01",
+    "e_85e5b9dbcd",
+    "c_2ff107a496",
+    "c_33bea13ecf",
+    "c_de1ae4e4d4",
+    "c_4dd6162be3",
+    "c_7440e77ae2",
+    "c_9bf29bf2db"
+   ]
+  },
+  {
+   "id": "s11",
+   "say": "The consortium's own tryptase criterion carries recorded qualifications: baseline tryptase can move by more than the formula's margin without activation, sensitivity falls with sampling delay, and patients who miss the threshold are classed as other mast cell activation disorders rather than MCAS.",
+   "from": [
+    "c_5d64da8862",
+    "e_30e82a8075",
+    "e_ded0fff018",
+    "c_811c42aed6"
+   ]
+  },
+  {
+   "id": "s12",
+   "say": "The consensus-2 paper itself (Afrin et al. 2021) is not in the collection; its criteria are known here only through a consensus-2-aligned tabulation, the 2011 precursor, and consortium-side critics.",
+   "from": [],
+   "gap": true
+  },
+  {
+   "id": "s13",
+   "say": "No record in the collection reports a study applying both criteria sets to the same patients, so the size of the disagreement in practice is not covered.",
+   "from": [],
+   "gap": true
+  },
+  {
+   "id": "root",
+   "say": "There are two incompatible criteria sets, the ECNM-AIM consortium criteria and the Afrin/Molderings consensus-2 criteria, and they conflict on whether a mediator rise over the patient's own baseline is mandatory, whether an isolated above-range level counts, whether tissue and clonality findings count, how broad and severe the symptoms must be, and whether therapy response is required; the four recorded contradiction findings remain open on my reading, and the collection lacks the consensus-2 paper itself and any head-to-head comparison.",
+   "from": [
+    "s1",
+    "s5",
+    "s6",
+    "s7",
+    "s8",
+    "s9",
+    "s10",
+    "s11",
+    "s12",
+    "s13"
+   ]
+  }
+ ]
+}
