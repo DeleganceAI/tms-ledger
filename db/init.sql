@@ -217,6 +217,22 @@ CREATE INDEX evidence_evidence_idx ON evidence (target_evidence_id) WHERE target
 CREATE INDEX evidence_source_idx ON evidence (target_source_id) WHERE target_source_id IS NOT NULL;
 CREATE INDEX evidence_observation_idx ON evidence (target_observation_id) WHERE target_observation_id IS NOT NULL;
 
+-- Operational telemetry, not part of the epistemic ledger: one row per MCP
+-- request the server handled (reads included). No immutability trigger; it is
+-- safe to truncate. The local dashboard (tms-ui) reads it.
+CREATE TABLE mcp_calls (
+    id          bigserial PRIMARY KEY,
+    at          timestamptz NOT NULL DEFAULT now(),
+    method      text NOT NULL,      -- initialize, tools/list, tools/call, prompts/get, ...
+    tool        text,               -- tool name when method is tools/call
+    author_id   text,               -- taken from the call's arguments when present
+    collection  text,
+    ok          boolean NOT NULL,
+    error       text,
+    ms          integer NOT NULL
+);
+CREATE INDEX mcp_calls_at_idx ON mcp_calls (at DESC, id DESC);
+
 CREATE FUNCTION deny_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
     RAISE EXCEPTION '% on % is not permitted: the ledger is append-only',

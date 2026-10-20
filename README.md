@@ -19,7 +19,8 @@ The server enforces exactly two mechanical things beyond structure: an evidence 
 | [db/init.sql](db/init.sql) | PostgreSQL + pgvector schema: authors, collections, sources, observations, claims, contradictions, evidence. Append-only triggers, frozen contradiction membership, quote check. |
 | [db/verify.sql](db/verify.sql) | Schema invariants and an append/research/correction scenario. Rolls back. |
 | [tms/ledger.py](tms/ledger.py) | Appends, reads, retrieval, fetch, embeddings, proof check. Plain functions over a psycopg connection. |
-| [tms/server.py](tms/server.py) | The MCP tools and prompts; stdio or bearer-token HTTP. |
+| [tms/server.py](tms/server.py) | The MCP tools and prompts; stdio or bearer-token HTTP. Logs every call. |
+| [tms/ui.py](tms/ui.py) | Local dashboard: counts, call stats, live feeds. |
 | [test_smoke.py](test_smoke.py) | End-to-end check against a live database and Ollama. Rolls back. |
 | [proofs/](proofs/) | Where the briefing agent saves thinking proofs. |
 | [V1.md](V1.md), [ROLES.md](ROLES.md), [EXAMPLES.md](EXAMPLES.md) | Design, contributor roles, a worked example. |
@@ -90,6 +91,14 @@ Configure the agent with the tunnel URL plus `/mcp` as a streamable-HTTP MCP ser
 Instructions to give an intake agent, verbatim:
 
 > You have an MCP server named `tms`, an append-only evidence ledger. Register yourself once with `add_author` (id `grok-<yourname>`, kind `agent`) and pass that `author_id` on every write. For each document, paper or post you have collected: call `search_sources` for the publisher, site or account; if absent, `add_source`. Then `add_observation` with `collection="mcas"`, the `source_id`, the original `uri`, and the complete text as `content` (not a summary; if you only have a URL, pass it and leave `content` empty so the server fetches it, and if that fails, fetch the text yourself and pass it). Do not add claims or evidence unless asked. Record each returned observation id. Finding that a document is already present is a fine outcome; do not add it twice.
+
+## Watching activity
+
+```bash
+uv run tms-ui
+```
+
+Opens a local dashboard at http://127.0.0.1:8780: record counts, per-collection counts, every MCP call so far by tool and by author (reads included), and two live feeds of recent records and recent calls that refresh every two seconds. Click a record to see it in full. The server logs each request to the `mcp_calls` table, which is operational telemetry outside the ledger and safe to truncate. The dashboard binds to localhost only and has no auth; never put it behind the tunnel.
 
 ## Tools
 

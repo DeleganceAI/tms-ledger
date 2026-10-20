@@ -406,6 +406,16 @@ def search_contradictions(conn, collection: str, claim_id: str | None = None, te
     return rows
 
 
+# --------------------------------------------------------------- telemetry
+
+def log_call(conn, method: str, tool: str | None, author_id: str | None, collection: str | None,
+             ok: bool, error: str | None, ms: int) -> None:
+    """Operational record of one MCP request. Not part of the ledger; no provenance rules apply."""
+    conn.execute(
+        "INSERT INTO mcp_calls (method, tool, author_id, collection, ok, error, ms) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+        (method, tool, author_id, collection, ok, error, ms))
+
+
 # -------------------------------------------------------------- proof check
 
 def _lookup(conn, ref: str) -> tuple[str, dict] | None:

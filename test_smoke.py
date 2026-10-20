@@ -153,6 +153,16 @@ def run(conn) -> None:
     res = L.check_proof(conn, "smoke", {"steps": shared})
     assert res["ok"] and res["tree"].count("\n") < 200, res["tree"].count("\n")
 
+    # Telemetry and the dashboard's queries run against the same connection.
+    from tms import ui
+    L.log_call(conn, "tools/call", "add_claim", "smoke-agent", "smoke", True, None, 12)
+    L.log_call(conn, "tools/call", "add_evidence", "smoke-agent", "smoke", False, "Quote not found verbatim", 8)
+    snap = ui.snapshot(conn)
+    assert snap["counts"]["claims"] >= 3 and snap["calls"]["errors"] >= 1
+    assert any(t["name"] == "add_claim" for t in snap["by_tool"])
+    assert snap["recent_records"][0]["kind"] in {"contradiction", "evidence", "claim", "observation", "source", "collection", "author"}
+    assert any(r["author_id"] == "smoke-agent" for r in snap["by_author"])
+
 
 if __name__ == "__main__":
     main()

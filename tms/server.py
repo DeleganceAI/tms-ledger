@@ -10,6 +10,7 @@ import hmac
 import os
 import subprocess
 import sys
+import time
 
 import httpx
 import psycopg
@@ -29,7 +30,35 @@ grounding observation verbatim; the server rejects quotes it cannot find.
 Nothing is ever edited or deleted: correct by appending.
 """
 
-mcp = MCPServer("tms", instructions=INSTRUCTIONS)
+async def _log_calls(ctx, call_next):
+    """Record every MCP request, reads included, in mcp_calls. Telemetry never fails a call."""
+    if ctx.request_id is None:  # a notification, not a call
+        return await call_next(ctx)
+    started = time.monotonic()
+    ok, error = True, None
+    try:
+        result = await call_next(ctx)
+        if getattr(result, "is_error", False):
+            ok = False
+            error = " ".join(getattr(c, "text", "") for c in (result.content or []))[:500]
+        return result
+    except Exception as err:
+        ok, error = False, str(err)[:500]
+        raise
+    finally:
+        params = ctx.params or {}
+        tool = params.get("name") if ctx.method == "tools/call" else None
+        args = (params.get("arguments") or {}) if tool else {}
+        collection = args.get("collection") or (os.environ.get("TMS_COLLECTION") if tool else None) or None
+        try:
+            with L.connect() as conn:
+                L.log_call(conn, ctx.method, tool, args.get("author_id"), collection, ok, error,
+                           int((time.monotonic() - started) * 1000))
+        except Exception as err:
+            print(f"mcp_calls logging failed: {err}", file=sys.stderr)
+
+
+mcp = MCPServer("tms", instructions=INSTRUCTIONS, middleware=[_log_calls])
 
 
 def _run(fn, *args, **kwargs):
