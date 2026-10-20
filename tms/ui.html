@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TMS activity</title>
+<title>TMS ledger</title>
 <style>
 :root{--bg:#f4f4f2;--panel:#fff;--line:#e2e2de;--line2:#ecece9;--ink:#171716;--ink2:#5a5a55;--ink3:#8c8c86;
   --accent:#2f6fde;--accent2:#e3ecfb;--bad:#b4232c;--new:#fff1b8;
@@ -61,16 +61,24 @@ table.wide th.n{text-align:right}.spark{width:120px;height:18px;display:block}td
 .bars.dom{grid-template-columns:max-content 1fr max-content max-content;max-height:calc(100vh - 230px)}
 .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:8px 0 4px}.grid4 .cell{background:var(--bg);border-radius:4px;padding:6px 8px}.grid4 .v{font-family:var(--mono);font-size:14px;font-weight:600}.grid4 .k{color:var(--ink3);font-size:10.5px}
 .ext2{color:var(--ink3);font-family:var(--mono);font-size:10.5px}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:10px}
+.card{cursor:pointer}.card:hover{border-color:var(--accent)}.card .ph h2{text-transform:none;letter-spacing:0;font-size:13px;color:var(--ink);font-family:var(--mono)}
+.card .nm2{padding:8px 10px 0;color:var(--ink2);font-size:12px}.card .grid4{margin:8px 10px 10px}.card .grid4 .v{font-size:16px}
+.storage{max-width:560px}.bars.tbl{max-height:none}
 </style></head><body>
 <div class="top">
   <div class="bar">
     <div class="brand">TMS <span>ledger</span></div>
-    <nav class="tabs"><button class="tab on" data-tab="activity">Activity</button><button class="tab" data-tab="browse">Browse</button><button class="tab" data-tab="agents">Agents</button><button class="tab" data-tab="sources">Sources</button></nav>
+    <nav class="tabs"><button class="tab on" data-tab="collections">Collections</button><button class="tab" data-tab="activity">Activity</button><button class="tab" data-tab="browse">Browse</button><button class="tab" data-tab="agents">Agents</button><button class="tab" data-tab="sources">Sources</button></nav>
     <div class="live" id="live"><i class="dot"></i><span id="status">connecting</span></div>
   </div>
   <div class="strip" id="strip"></div>
 </div>
-<main id="activity">
+<main id="collections">
+  <section class="cards" id="ccards"></section>
+  <section class="panel storage"><div class="ph"><h2>Storage</h2><span class="muted" id="dbsize"></span></div><div class="bars tbl" id="tables"></div></section>
+</main>
+<main id="activity" hidden>
   <section class="row charts">
     <div class="panel"><div class="ph"><h2>Calls per minute</h2><span class="legend"><span><i style="background:var(--accent)"></i>ok</span><span><i style="background:var(--bad)"></i>error</span></span></div>
       <div class="chart"><svg id="callsChart" preserveAspectRatio="none"></svg></div><div class="axis"><span>−60m</span><span>−30m</span><span>now</span></div></div>
@@ -233,15 +241,33 @@ $('bsem').onchange = e => { B.sem = e.target.checked; rebrowse(); };
 $('bq').oninput = e => { B.q = e.target.value; clearTimeout(btimer); btimer = setTimeout(rebrowse, B.sem ? 600 : 250); };
 $('bprev').onclick = () => { if (B.page > 0) { B.page--; browse(); } };
 $('bnext').onclick = () => { B.page++; browse(); };
-let activeTab = 'activity';
-document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
-  document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === t));
-  activeTab = t.dataset.tab;
-  ['activity', 'browse', 'agents', 'sources'].forEach(id => $(id).hidden = id !== activeTab);
-  if (activeTab === 'browse' && !bshown) { bshown = true; browse(); }
-  if (activeTab === 'agents') loadAgents();
-  if (activeTab === 'sources') loadSources();
-});
+let activeTab = 'collections';
+function showTab(name) {
+  activeTab = name;
+  document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x.dataset.tab === name));
+  ['collections', 'activity', 'browse', 'agents', 'sources'].forEach(id => $(id).hidden = id !== name);
+  if (name === 'collections') loadCollections();
+  if (name === 'browse' && !bshown) { bshown = true; browse(); }
+  if (name === 'agents') loadAgents();
+  if (name === 'sources') loadSources();
+}
+document.querySelectorAll('.tab').forEach(t => t.onclick = () => showTab(t.dataset.tab));
+
+// ---- collections ----------------------------------------------------------
+const fmtB = b => b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(0)} KB` : b < 1073741824 ? `${(b / 1048576).toFixed(1)} MB` : `${(b / 1073741824).toFixed(2)} GB`;
+const cell = (k, v, title = '') => `<div class="cell" title="${esc(title)}"><div class="v">${esc(v)}</div><div class="k">${esc(k)}</div></div>`;
+async function loadCollections() {
+  let d; try { d = await (await fetch('/api/collections')).json(); } catch (e) { $('ccards').innerHTML = `<div class="empty">${esc(e)}</div>`; return; }
+  $('ccards').innerHTML = d.collections.length ? d.collections.map(c =>
+    `<div class="panel card" data-col="${esc(c.id)}" title="browse ${esc(c.id)}"><div class="ph"><h2>${esc(c.id)}</h2><span class="muted">${c.last_at ? 'last record ' + ago(c.last_at) + ' ago' : 'empty'}</span></div>` +
+    `<div class="nm2">${esc(c.name)}</div><div class="grid4">${cell('sources', c.sources)}${cell('observations', c.observations)}${cell('contributors', c.contributors, 'distinct author ids on its records')}${cell('row data', fmtB(c.bytes), 'bytes as stored: compressed, without indexes')}` +
+    `${cell('claims', c.claims)}${cell('evidence', c.evidence)}${cell('findings', c.contradictions)}${cell('created', ago(c.asserted_at) + ' ago', `${c.author_id} · ${c.asserted_at}`)}</div></div>`).join('')
+    : '<div class="empty">no collections yet</div>';
+  $('dbsize').textContent = `${fmtB(d.db_bytes)} database on disk`;
+  const tmax = Math.max(1, ...d.tables.map(t => t.bytes));
+  $('tables').innerHTML = d.tables.map(t => `<span class="nm">${esc(t.name)}</span><div class="track"><div class="fill" style="width:${(100 * t.bytes / tmax).toFixed(1)}%"></div></div>` +
+    `<span class="n">${fmtB(t.bytes)}</span><span class="ms">${(100 * t.bytes / Math.max(1, d.db_bytes)).toFixed(0)}%</span>`).join('');
+}
 
 // ---- agents ---------------------------------------------------------------
 function spark(rows) {
@@ -287,7 +313,7 @@ async function loadSources() {
 }
 $('sq').oninput = e => { S.q = e.target.value; clearTimeout(stimer); stimer = setTimeout(loadSources, 250); };
 $('ssort').onchange = e => { S.sort = e.target.value; loadSources(); };
-setInterval(() => { if (activeTab === 'agents') loadAgents(); if (activeTab === 'sources' && !S.q) loadSources(); }, 5000);
+setInterval(() => { if (activeTab === 'collections') loadCollections(); if (activeTab === 'agents') loadAgents(); if (activeTab === 'sources' && !S.q) loadSources(); }, 5000);
 
 // ---- drawer ---------------------------------------------------------------
 const hist = [];
@@ -335,8 +361,9 @@ function hideDetail() { selected = null; hist.length = 0; $('drawer').classList.
 $('dback').onclick = () => { const prev = hist.pop(); if (prev) showDetail(kindOf(prev) || 'author', prev, false); };
 document.addEventListener('click', e => {
   const a = e.target.closest('a.idl'); if (a) { e.preventDefault(); const id = a.dataset.id; showDetail(kindOf(id), id); return; }
-  const tr = e.target.closest('tr.rec'); if (tr) showDetail(tr.dataset.kind, tr.dataset.id);
+  const tr = e.target.closest('tr.rec'); if (tr) { showDetail(tr.dataset.kind, tr.dataset.id); return; }
+  const card = e.target.closest('.card'); if (card) { B.col = card.dataset.col; $('bcol').value = B.col; bshown = true; showTab('browse'); rebrowse(); }
 });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') hideDetail(); });
-poll(); setInterval(poll, 2000);
+showTab('collections'); poll(); setInterval(poll, 2000);
 </script></body></html>

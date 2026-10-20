@@ -224,6 +224,38 @@ def sources(conn, q: str = "", sort: str = "observations", limit: int = 300) -> 
     return {"sources": rows, "domains": domains, "totals": totals}
 
 
+COLLECTION_ROWS = """SELECT author_id, asserted_at FROM observations WHERE collection_id = c.id
+  UNION ALL SELECT author_id, asserted_at FROM claims WHERE collection_id = c.id
+  UNION ALL SELECT author_id, asserted_at FROM contradictions WHERE collection_id = c.id
+  UNION ALL SELECT e.author_id, e.asserted_at FROM evidence e JOIN observations o ON o.id = e.from_observation_id
+    WHERE o.collection_id = c.id"""
+
+
+def collections(conn) -> dict:
+    """The landing page: each collection with what it holds, who wrote it and roughly what it weighs."""
+    # ponytail: per-collection bytes are row data as stored (compressed, no indexes); db_bytes is the real disk figure
+    rows = [L._clean(r) for r in conn.execute(f"""
+        SELECT c.id, c.name, c.author_id, c.asserted_at,
+               (SELECT count(*) FROM observations o WHERE o.collection_id = c.id) AS observations,
+               (SELECT count(DISTINCT o.source_id) FROM observations o WHERE o.collection_id = c.id) AS sources,
+               (SELECT count(*) FROM claims k WHERE k.collection_id = c.id) AS claims,
+               (SELECT count(*) FROM evidence e JOIN observations o ON o.id = e.from_observation_id WHERE o.collection_id = c.id) AS evidence,
+               (SELECT count(*) FROM contradictions x WHERE x.collection_id = c.id) AS contradictions,
+               (SELECT count(DISTINCT author_id) FROM ({COLLECTION_ROWS}) r) AS contributors,
+               (SELECT max(asserted_at) FROM ({COLLECTION_ROWS}) r) AS last_at,
+               (SELECT coalesce(sum(pg_column_size(o.*)), 0) FROM observations o WHERE o.collection_id = c.id)
+             + (SELECT coalesce(sum(pg_column_size(k.*)), 0) FROM claims k WHERE k.collection_id = c.id)
+             + (SELECT coalesce(sum(pg_column_size(e.*)), 0) FROM evidence e JOIN observations o ON o.id = e.from_observation_id
+                 WHERE o.collection_id = c.id)
+             + (SELECT coalesce(sum(pg_column_size(x.*)), 0) FROM contradictions x WHERE x.collection_id = c.id) AS bytes
+        FROM collections c ORDER BY c.asserted_at, c.id""")]
+    tables = [L._clean(r) for r in conn.execute("""
+        SELECT relname AS name, pg_total_relation_size(oid) AS bytes FROM pg_class
+        WHERE relkind = 'r' AND relnamespace = 'public'::regnamespace ORDER BY 2 DESC, 1""")]
+    db_bytes = conn.execute("SELECT pg_database_size(current_database()) AS b").fetchone()["b"]
+    return {"collections": rows, "tables": tables, "db_bytes": db_bytes}
+
+
 async def index(request) -> HTMLResponse:
     return HTMLResponse(PAGE_FILE.read_text(encoding="utf-8"))  # re-read so edits show on refresh
 
@@ -255,6 +287,11 @@ async def api_sources(request) -> JSONResponse:
         return JSONResponse(sources(conn, qp.get("q", "").strip(), qp.get("sort", "observations")))
 
 
+async def api_collections(request) -> JSONResponse:
+    with L.connect() as conn:
+        return JSONResponse(collections(conn))
+
+
 async def api_record(request) -> JSONResponse:
     kind, id = request.path_params["kind"], request.path_params["id"]
     with L.connect() as conn:
@@ -271,6 +308,7 @@ app = Starlette(routes=[
     Route("/api/browse", api_browse),
     Route("/api/agents", api_agents),
     Route("/api/sources", api_sources),
+    Route("/api/collections", api_collections),
     Route("/api/record/{kind}/{id}", api_record),
 ])
 

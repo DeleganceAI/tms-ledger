@@ -168,6 +168,11 @@ def run(conn) -> None:
     assert any(t["name"] == "add_claim" for t in snap["by_tool"])
     assert snap["recent_records"][0]["kind"] in {"contradiction", "evidence", "claim", "observation", "source", "collection", "author"}
     assert any(r["author_id"] == "smoke-agent" for r in snap["by_author"])
+    cols = ui.collections(conn)
+    mine = next(c for c in cols["collections"] if c["id"] == "smoke")
+    assert (mine["sources"], mine["observations"], mine["claims"], mine["evidence"], mine["contributors"]) == (1, 3, 2, 3, 1), mine
+    assert mine["bytes"] > 0 and mine["last_at"] and cols["db_bytes"] > 0, mine
+    assert any(t["name"] == "observations" and t["bytes"] > 0 for t in cols["tables"])
 
 
 if __name__ == "__main__":
