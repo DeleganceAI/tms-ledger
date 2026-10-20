@@ -62,7 +62,7 @@ Evidence bearing on a target.
 - `from`: the ID of an evidence event (the grounding document).
 - `to`: the ID of any claim, link, contradiction or evidence event. The server looks up what it points at, so no target type is needed.
 - `relation`: `SUPPORTS`, `REBUTS` or `QUALIFIES`. `QUALIFIES` is allowed only when `to` is a claim.
-- `quote`: a verbatim excerpt (1500 characters at most) that must appear in `from`'s `text`, using the existing normalisation (case, whitespace, curly quotes, dashes, ligatures).
+- `quote`: a verbatim excerpt of any length that must appear in `from`'s `text`, using the existing normalisation (case, whitespace, curly quotes, dashes, ligatures).
 - `reason`: why this quote bears on the target.
 
 Linking to a link or to a contradiction is how you dispute an earlier link or finding. That replaces deletion.
