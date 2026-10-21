@@ -170,7 +170,16 @@ async def export(request: Request):
         "Content-Disposition": f'attachment; filename="{slug}-{time.strftime("%Y%m%d")}.jsonl"'})
 
 
+async def healthz(request: Request) -> PlainTextResponse:
+    def ping():
+        with L.connect() as conn:
+            conn.execute("SELECT 1")
+    await run_in_threadpool(ping)
+    return PlainTextResponse("ok")
+
+
 routes = [
+    Route("/healthz", healthz),
     Route("/", page),
     Route("/submit", page),
     Route("/c/{slug}/members", members_page),

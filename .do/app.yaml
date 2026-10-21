@@ -1,0 +1,56 @@
+# DigitalOcean App Platform spec: doctl apps create --spec .do/app.yaml (then: doctl apps update <id> --spec ...)
+# The repo lives on a private Gitea, so the image is built locally and pushed to DOCR:
+#   doctl registry login && docker buildx build --platform linux/amd64 -t registry.digitalocean.com/<registry>/tms:latest --push .
+# Database setup, once: see README "Deploy". Secrets (type SECRET) are set in the control panel or here.
+name: tms
+region: nyc
+services:
+  - name: tms
+    image:
+      registry_type: DOCR
+      repository: tms
+      tag: latest
+      deploy_on_push:
+        enabled: true
+    http_port: 8080
+    instance_size_slug: apps-s-1vcpu-1gb
+    instance_count: 1
+    health_check:
+      http_path: /healthz
+    envs:
+      - key: DATABASE_URL          # the PgBouncer pool, transaction mode
+        scope: RUN_TIME
+        value: ${tms-db.tms-pool.DATABASE_URL}
+      - key: TMS_SECRET            # HMAC key for login cookies: openssl rand -hex 32
+        scope: RUN_TIME
+        type: SECRET
+      - key: TMS_APPROVED          # npubs or hex pubkeys, comma or space separated
+        scope: RUN_TIME
+      - key: TMS_SERVER_NSEC       # signs snapshot events (phase 8)
+        scope: RUN_TIME
+        type: SECRET
+      - key: EMBED_URL
+        scope: RUN_TIME
+        value: https://api.deepinfra.com/v1/openai
+      - key: EMBED_MODEL
+        scope: RUN_TIME
+        value: Qwen/Qwen3-Embedding-8B
+      - key: EMBED_API_KEY
+        scope: RUN_TIME
+        type: SECRET
+# Phase 8 adds the daily snapshot as a job on the same image:
+# jobs:
+#   - name: snapshot
+#     kind: SCHEDULED
+#     schedule: {cron: "15 3 * * *", time_zone: UTC}
+#     image: {registry_type: DOCR, repository: tms, tag: latest}
+#     run_command: tms-snapshot
+#     instance_size_slug: apps-s-1vcpu-0.5gb
+#     envs: [DATABASE_URL, TMS_SERVER_NSEC, TMS_SNAPSHOT_RECIPIENT, provider credentials]
+databases:
+  - name: tms-db
+    engine: PG
+    production: true
+    cluster_name: tms-db        # an existing managed PostgreSQL cluster
+    db_name: tms
+    db_user: tms

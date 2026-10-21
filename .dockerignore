@@ -1,0 +1,7 @@
+.git
+.venv
+.omc
+.claude
+.env
+check/node_modules
+__pycache__
