@@ -37,7 +37,9 @@ Not borrowed: tags (`e`, `p`, `t`), NIP-09 deletion, replaceable/addressable kin
 
 Every collection is **private**. Only its members can read, write or download it.
 
-- A collection is a free slug (`^[a-z0-9][a-z0-9_-]*$`). The first accepted event that names a new slug creates it. That event's signer becomes the collection's **owner** and its only member. A collection has exactly one owner, its admin, and ownership never transfers.
+A pubkey can use the service at all only if the operator has approved it (`TMS_APPROVED`), or it is a member of at least one collection. An owner can add any pubkey to their collection without operator approval. Only approved pubkeys can create collections. Everyone else gets nothing beyond the tool list.
+
+- A collection is a free slug (`^[a-z0-9][a-z0-9_-]*$`). The first accepted event that names a new slug creates it, if its signer is approved. That event's signer becomes the collection's **owner** and its only member. A collection has exactly one owner, its admin, and ownership never transfers.
 - The owner changes membership with a `members` event (section 4). The latest one, by `received_at`, is the member list. The owner is always a member.
 - Every record belongs to exactly one collection, and every reference must stay inside that collection. That way, reading one collection can never reveal records from another.
 - Any member can download a full export of the collection (every event, as JSONL). Each line verifies on its own.
@@ -56,7 +58,7 @@ Kind numbers stay within 0–65535, because common Nostr libraries reject larger
 | 4704 | contradiction | `collection`, `claims`, `reason` | yes |
 | 4705 | members | `collection`, `members` | yes |
 | 4706 | terms | `version`, `sha256` | yes |
-| 4707 | login | `challenge`, `origin` | no |
+| 4707 | request | `tool`, `args` | no |
 | 4708 | snapshot | `date`, `cid`, `sha256`, `count`, `last_received_at` | yes |
 
 Fields marked `?` are optional. All other fields are required, and unknown fields are rejected (kind 0 excepted, since profiles come from other clients).
@@ -89,21 +91,29 @@ Signed by the collection's owner. `members` is the complete list of pubkeys allo
 ### terms (4706)
 A user's acceptance of the terms in [TERMS.md](TERMS.md). `version` names the document, and `sha256` is the hash of its exact text, so the signature commits to what was accepted. The server rejects writes from a key that hasn't signed the current version.
 
-### login (4707)
-Proves control of a key for reading. The server issues a random `challenge`; the browser or bot signs it along with the server's `origin`, and gets back a session token (a cookie in the browser, a bearer token for bots). The server checks that the challenge is unused and less than 5 minutes old. Login events are not stored in the ledger.
+### request (4707)
+A signed tool call. `tool` names the MCP tool (or `login` for the browser), and `args` holds its arguments. The server reads the arguments from this signed content, so nothing else has to be hashed or matched. It accepts a request only if:
+- the signature verifies;
+- `tool` is the tool being called;
+- `created_at` is within 60 seconds of server time;
+- the `id` hasn't been seen before (replay protection, checked against a short-lived `auth_seen` table).
+
+Requests are not stored in the ledger.
 
 ### snapshot (4708)
 Signed by the server's own key after each daily backup upload to Filecoin. The backup is the whole ledger, encrypted with a server-held key. It's for disaster recovery; members get their own copies from the export. `cid` and `sha256` identify the encrypted file, `count` is the number of events in it, and `last_received_at` marks where it ends. This gives a signed, dated history of what the ledger held.
+
 ## 5. Server acceptance rules
 
 The server accepts an event only if:
 
 1. Recomputing the `id` matches, and `sig` verifies for `pubkey`.
 2. `kind` is a stored kind from section 4, and `content` parses to an object with exactly that kind's fields. Required strings are non-blank.
-3. The signer has signed the current `terms`, and is a member of the event's collection (or is creating it).
+3. The signer is approved or a member of some collection. For `profile` and `terms` events, that is enough. For every other kind, the signer must also have signed the current `terms`, and must be a member of the event's collection, or be approved and creating it.
 4. Every referenced ID exists, either in the ledger or earlier in the same batch, has the kind the field requires, and belongs to the same collection.
 5. Link quotes appear in the `from` evidence text.
 6. `snapshot` events are signed by the server's key, and no other kind is.
+7. `request` events are never published; they only accompany tool calls.
 
 Submissions are batches: either every event in the batch is accepted, or none is. A batch can contain evidence, claims and the links between them, because IDs are known before signing.
 
@@ -113,10 +123,10 @@ Embeddings are derived by the server and are not part of any event.
 
 ## 6. Login and reading
 
-- **Browser:** "Connect" calls `getPublicKey()`, fetches and shows the user's profile, then signs a `login` event to start a session. Writes are signed batches, as above.
-- **Bots:** sign a `login` event once to get a bearer token for MCP calls, then sign each write batch with their own key.
-- Every read is scoped to collections the session's pubkey is a member of.
+- **MCP:** the endpoint is open, so anyone can list the tools, and there's no shared token. `publish(events)` needs nothing extra, because every event in the batch is already signed. Every other tool takes a single `request` argument (kind 4707), signed fresh for each call. This works with any MCP client, because it's just a tool argument.
+- **Browser:** "Connect" calls `getPublicKey()`, fetches and shows the user's profile, then signs a `request` with `tool: "login"`. The server returns a signed HttpOnly cookie, valid for 12 hours, so the extension doesn't prompt on every page. Writes are still signed batches.
+- Every read is scoped to the collections the signer is a member of.
 
 ## 7. Migration
 
-All existing records are migrated into events. How the old unsigned rows get signed is decided at migration time.
+Nothing is migrated. The cloud ledger starts empty, and agents re-upload.

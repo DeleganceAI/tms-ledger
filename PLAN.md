@@ -11,23 +11,24 @@ Implements [EVENTS.md](EVENTS.md). Target: DigitalOcean App Platform plus DO man
 | Embeddings | DeepInfra `Qwen/Qwen3-Embedding-8B` (OpenAI-compatible); Ollama stays as the local option |
 | Daily snapshot | App Platform scheduled job, same image |
 
-Environment variables: `DATABASE_URL` (the pool's URL), `TMS_SERVER_NSEC` (signs snapshots), `TMS_SECRET` (HMAC for cookies), `EMBED_URL`, `EMBED_API_KEY`, `TMS_CREATORS` (pubkeys allowed to create collections), `TMS_SNAPSHOT_RECIPIENT` (age public key).
+Environment variables: `DATABASE_URL` (the pool's URL), `TMS_SERVER_NSEC` (signs snapshots), `TMS_SECRET` (HMAC for cookies), `EMBED_URL`, `EMBED_API_KEY`, `TMS_APPROVED` (pubkeys the operator approves; they can also create collections), `TMS_SNAPSHOT_RECIPIENT` (age public key).
 
-## Auth (proposal, see open question 1)
+## Auth
 
-Every request carries proof of a key:
+Specified in EVENTS.md sections 3, 4 (`request`) and 6.
 
-- **Bots and MCP:** each HTTP request carries `Authorization: Nostr <base64 auth event>`, an event of kind 4707 whose content is `{"url", "method", "body_sha256"}`. The server checks that:
-  - the signature is valid;
-  - `created_at` is within 60 seconds of server time;
-  - the URL, method and body hash match the request;
-  - the event ID hasn't been seen before. The `auth_seen` table has the ID as its primary key, so a replay fails on insert, and rows older than 2 minutes are cleaned up.
+- **MCP endpoint is open.** Anyone can list the tools, and there's no shared `TMS_TOKEN`.
+- **Writes:** `publish(events)` takes signed events, which are their own proof.
+- **Other tools:** each takes one `request` argument, a kind-4707 event with content `{tool, args}`, signed fresh for each call. The server checks that:
+  - the signature verifies;
+  - `tool` matches the tool being called;
+  - `created_at` is within 60 seconds;
+  - the `id` is new. It's inserted into `auth_seen` (primary key, rows older than 2 minutes cleaned up), so a replay fails.
 
-  Binding the body hash means a captured header can't be reused with a different request, and the seen-ID check stops it being reused with the same one.
-- **Browser:** signing every page load or every click would mean an extension prompt each time. Instead, the browser signs one auth event for `POST /login` and gets back a signed HttpOnly cookie, valid for 12 hours and holding an HMAC of the pubkey and expiry. Writes are still signed one event at a time.
-- This replaces the challenge-based `login` event in EVENTS.md once agreed.
-- **Writes** are signed record by record whatever the transport, so the auth layer only decides who can **read**.
-- **stdio** (local Claude Code) takes its pubkey from `TMS_NSEC`, signs locally, and sees only that key's collections.
+  It then reads the args from the signed content. Because it's a tool argument, this works with any MCP client.
+- **Who gets in:** pubkeys in `TMS_APPROVED`, plus any member of any collection. Owners add members without operator approval. Only approved pubkeys create collections.
+- **Browser:** signs one `request` with `tool: "login"` and gets a signed HttpOnly cookie, valid for 12 hours, holding an HMAC of the pubkey and expiry. Writes are still signed one event at a time.
+- **stdio** (local Claude Code): if `request` is omitted, the server signs it with `TMS_NSEC`, so local use needs no signing step.
 
 ## Database access
 
@@ -64,7 +65,7 @@ Each phase is committed locally after its check passes.
    - The connection pool moves in here.
 4. **Server.**
    - Tools: `publish`, `fetch_url` and the renamed reads.
-   - The auth middleware above.
+   - Request verification as above.
    - `/login`, which sets the cookie.
    - Rewritten `claims_pass` and `briefing` prompts.
    - `mcp_calls` logs the pubkey.
@@ -90,12 +91,12 @@ Each phase is committed locally after its check passes.
 - a non-member write is rejected;
 - a write from a key that hasn't signed the terms is rejected;
 - a duplicate ID is a no-op;
-- a replayed auth header is rejected;
-- a stale auth header is rejected;
-- an auth header whose body hash doesn't match is rejected.
+- a replayed request is rejected;
+- a stale request is rejected;
+- a request signed for one tool and sent to another is rejected;
+- an unapproved non-member gets nothing;
+- a member added by an owner gets in without approval.
 
 ## Open questions
 
-1. **Can the bots' MCP clients sign each request?** Per-request signing needs code that adds a fresh header to every HTTP request. Hosted MCP connectors, and most MCP clients including Claude Code, send fixed headers only. If any bot is in that position, it also needs the login token, and then the header becomes a bearer token that expires.
-2. **Who can create collections?** Anyone who signs the terms, or only the keys in `TMS_CREATORS`? Default: `TMS_CREATORS`, since a new user would otherwise be able to create collections without limit.
-3. **Filecoin provider:** Storacha or Lighthouse? Either needs an account.
+1. **Filecoin provider:** Storacha or Lighthouse? Either needs an account.
