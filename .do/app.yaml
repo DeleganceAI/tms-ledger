@@ -4,6 +4,10 @@
 # Database setup, once: see README "Deploy". Secrets (type SECRET) are set in the control panel or here.
 name: tms
 region: nyc
+domains:
+  - domain: tms.delegance.ai   # DigitalOcean manages delegance.ai's DNS, so it creates the record and certificate
+    type: PRIMARY
+    zone: delegance.ai
 services:
   - name: tms
     github:

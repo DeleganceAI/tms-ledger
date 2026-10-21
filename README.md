@@ -135,10 +135,11 @@ Prompts: `briefing` (answer from one collection with a checked proof) and `claim
    ```
 
    Set `TMS_SECRET`, `TMS_APPROVED`, `TMS_ADMINS`, `TMS_SERVER_NSEC` and `EMBED_API_KEY` on the app, and add the app to the cluster's trusted sources.
+   The app answers at https://tms.delegance.ai (the `domains` entry; DigitalOcean manages the zone) and at its `ondigitalocean.app` URL. Pushes to `main` redeploy only if the DigitalOcean GitHub app has access to the repo; otherwise run `doctl apps create-deployment <app-id>`.
 4. Check it:
 
    ```bash
-   TMS_NSEC=nsec1... uv run python smoke_live.py https://<app-url>
+   TMS_NSEC=nsec1... uv run python smoke_live.py https://tms.delegance.ai
    ```
 
 ## Thinking proofs
