@@ -144,7 +144,8 @@ def signed(impl):
 @mcp.tool()
 def publish(events: list[dict]) -> dict:
     """Append a batch of signed events, all or nothing. Each event is a NIP-01 envelope
-    {id, pubkey, created_at, kind, tags: [], content, sig} whose content is a JSON object string:
+    {id, pubkey, created_at, kind, tags: [], content, sig} whose content is a JSON object string
+    (profiles may carry tags; they are stored as signed and ignored):
       4701 evidence      {collection, text, url?, title?, source?}  text = the full document
       4702 claim         {collection, text}
       4703 link          {collection, from: evidence id, to: claim|link|contradiction|evidence id,

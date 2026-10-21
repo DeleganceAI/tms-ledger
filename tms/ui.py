@@ -131,7 +131,7 @@ def record(conn, cols: list[str], id: str) -> dict | None:
         return None
     col, kind = row["collection"], row["kind"]
     data = json.loads(row["content"])
-    raw = {k: row[k] for k in ("id", "pubkey", "created_at", "kind")} | {"tags": [], "content": row["content"], "sig": row["sig"]}
+    raw = {k: row[k] for k in ("id", "pubkey", "created_at", "kind")} | {"tags": row["tags"], "content": row["content"], "sig": row["sig"]}
     rec = L._clean({k: row[k] for k in ("id", "pubkey", "collection", "created_at", "received_at")})
     rec |= {"kind": E.NAMES[kind], "raw": raw, "author": conn.execute(
         f"SELECT {WHO.format('e')} FROM events e WHERE e.id = %s", (id,)).fetchone()["author"]}

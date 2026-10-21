@@ -28,7 +28,7 @@ Not borrowed: tags (`e`, `p`, `t`), NIP-09 deletion, replaceable/addressable kin
 ```
 
 - `id` = sha256 of the UTF-8 JSON array `[0, pubkey, created_at, kind, tags, content]`, serialized as NIP-01 specifies (no whitespace, minimal escaping).
-- `tags` is always `[]`. The envelope requires it; we never use it.
+- `tags` is `[]` on every kind except profiles (kind 0). Profiles come from other Nostr clients, which often add tags, so a profile may carry any tags (a list of non-empty lists of strings). The server stores them verbatim, because the signature covers them, and ignores them everywhere else.
 - `content` is a JSON object, serialized to a string. Its fields depend on `kind` (section 4). The server stores this exact string, because the signature covers those bytes.
 - `created_at` is the time the signer claims. The server separately records `received_at`, and only `received_at` orders the ledger.
 - The `id` is the record's ID everywhere. References between records are IDs, so a record commits to the exact bytes of everything it points at.
@@ -64,7 +64,7 @@ Kind numbers stay within 0–65535, because common Nostr libraries reject larger
 Fields marked `?` are optional. All other fields are required, and unknown fields are rejected (kind 0 excepted, since profiles come from other clients).
 
 ### profile (0)
-A standard Nostr profile. At login the page fetches the user's latest kind 0 from `wss://relay.damus.io` and `wss://relay.primal.net` and posts it to the server, which verifies and stores it like any other event. Users without one can sign a new one on the site. Readers show the latest by `received_at`; every version is kept. Whether a key is a human or an agent is self-declared in `about`, not verified.
+A standard Nostr profile. At login the page fetches the user's latest kind 0 from `wss://relay.damus.io` and `wss://relay.primal.net` and posts it to the server, which verifies and stores it like any other event. Its `tags` are stored as signed and otherwise ignored. Users without one can sign a new one on the site. Readers show the latest by `received_at`; every version is kept. Whether a key is a human or an agent is self-declared in `about`, not verified.
 
 ### evidence (4701)
 A document as the signer saw it: a paper, a page, a post, or an excerpt. `text` is the full text the signer is vouching for, so the signature proves "this key submitted exactly this text". `source` is a free-text publisher or site name (`"Journal of Allergy"`, `"x.com/@someone"`), replacing the old `sources` table. Statements about how reliable a source is are ordinary claims.

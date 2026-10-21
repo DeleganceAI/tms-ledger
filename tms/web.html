@@ -112,8 +112,8 @@ function renderProfile(relay) {
     box.innerHTML = `<div class="profile">${c.picture ? `<img src="${esc(c.picture)}" alt="">` : ''}<div><b>${esc(c.name || c.display_name || '(no name)')}</b><div class="muted">${esc(c.about || '')}</div></div></div>
       <div class="actions"><button id="useRelay">Use this profile here</button><span id="profMsg" class="muted">Found on ${RELAYS.map(r => r.slice(6)).join(' and ')}.</span></div>`
     $('useRelay').onclick = async () => {
-      try {  // relay profiles may carry tags; the ledger takes tags [] only, so re-sign the same content
-        const ev = relay.tags.length || !c.name ? await sign(0, {...c, name: c.name || c.display_name || ME.npub.slice(0, 12)}) : relay
+      try {  // stored as signed, tags and all; re-signed only when the relay copy has no name
+        const ev = c.name ? relay : await sign(0, {...c, name: c.display_name || ME.npub.slice(0, 12)})
         await publish([ev]); await refresh()
       } catch (e) { say('profMsg', e.message, 'err') }
     }

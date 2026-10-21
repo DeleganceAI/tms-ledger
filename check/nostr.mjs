@@ -7,6 +7,6 @@ for await (const chunk of process.stdin) raw += chunk
 const input = JSON.parse(raw)
 const out = {
   python: input.python.map(ev => ({ id: getEventHash(ev), ok: verifyEvent({ ...ev }) })),
-  signed: input.sign.map(t => finalizeEvent({ kind: t.kind, created_at: t.created_at, tags: [], content: t.content }, hexToBytes(t.sk))),
+  signed: input.sign.map(t => finalizeEvent({ kind: t.kind, created_at: t.created_at, tags: t.tags || [], content: t.content }, hexToBytes(t.sk))),
 }
 process.stdout.write(JSON.stringify(out))

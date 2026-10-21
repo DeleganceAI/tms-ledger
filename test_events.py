@@ -8,6 +8,8 @@ import subprocess
 from tms import events as E
 
 SK = "7f7ff03d123792d6ac594bfa67bf6d0c0ab55b6b1fdb6249303fe861f1ccba9a"
+PROFILE_TAGS = [["alt", "User profile: Ünï \n"], ["client", "Damus", "31990:abc"], ["i", "github:x", "proof"]]
+PROFILE = '{"name":"Tagged","about":"from a relay"}'
 TRICKY = [
     "plain ascii",
     "Ünïcödé — “quotes” ﬁ ligature 中文 עברית 🧪👩🏽‍🔬",
@@ -21,7 +23,9 @@ TRICKY = [
 def main() -> None:
     py = [E.sign(SK, k, c, created_at=1792454400 + i) for i, (k, c) in enumerate(
         [(1, t) for t in TRICKY] + [(E.CLAIM, {"collection": "smoke", "text": "Ünï\x01\n🧪"})])]
+    py.append(E.sign(SK, E.PROFILE, PROFILE, created_at=1792454400, tags=PROFILE_TAGS))
     todo = [{"sk": SK, "kind": 1, "content": t, "created_at": 1792454400} for t in TRICKY]
+    todo.append({"sk": SK, "kind": 0, "content": PROFILE, "created_at": 1792454400, "tags": PROFILE_TAGS})
     res = json.loads(subprocess.run(["node", "check/nostr.mjs"], input=json.dumps({"python": py, "sign": todo}),
                                     capture_output=True, text=True, check=True).stdout)
     for ev, js in zip(py, res["python"]):
@@ -29,6 +33,9 @@ def main() -> None:
     for ev in res["signed"]:
         assert ev["id"] == E.event_id(ev["pubkey"], ev["created_at"], ev["kind"], ev["tags"], ev["content"]), ev
         assert ev["pubkey"] == E.pubkey_of(SK)
+        if ev["kind"] == E.PROFILE:  # a tagged profile signed by nostr-tools verifies in full
+            assert E.verify(ev)["name"] == "Tagged" and ev["tags"] == PROFILE_TAGS
+            continue
         try:
             E.verify(ev)
         except E.Invalid as err:  # kind 1 is not a TMS kind: everything before content must pass
@@ -40,7 +47,10 @@ def main() -> None:
     for bad, why in [
         ({**claim, "sig": claim["sig"][:-1] + ("0" if claim["sig"][-1] != "0" else "1")}, "signature"),
         ({**claim, "content": claim["content"].replace("x", "y")}, "id does not match"),
-        ({**claim, "tags": [["t", "x"]]}, "tags"),
+        ({**claim, "tags": [["t", "x"]]}, "only profiles may carry tags"),
+        (E.sign(SK, E.PROFILE, {"name": "n"}, tags=[["t", 1]]), "profile tags must be"),
+        (E.sign(SK, E.PROFILE, {"name": "n"}, tags=[[]]), "profile tags must be"),
+        (E.sign(SK, E.PROFILE, {"name": "n"}, tags=[["t", "a\x00"]]), "profile tags must be"),
         (E.sign(SK, E.CLAIM, {"collection": "smoke", "text": "x", "extra": 1}), "unknown fields"),
         (E.sign(SK, E.CLAIM, {"collection": "Bad Slug", "text": "x"}), "'collection'"),
         (E.sign(SK, E.CLAIM, {"collection": "smoke", "text": "  "}), "'text'"),

@@ -92,6 +92,10 @@ def _no_constants(c):
     raise ValueError(f"{c} is not JSON")
 
 
+def _tags_ok(v) -> bool:  # profiles only: a list of non-empty string lists, as NIP-01 shapes them
+    return isinstance(v, list) and all(isinstance(t, list) and t and all(isinstance(x, str) for x in t) for t in v)
+
+
 def _has_nul(v) -> bool:  # Postgres text and jsonb cannot hold U+0000
     if isinstance(v, str):
         return "\x00" in v
@@ -153,8 +157,11 @@ def verify(ev) -> dict:
         raise Invalid(f"{label}: created_at must be a non-negative integer")
     if not isinstance(kind, int) or isinstance(kind, bool) or not 0 <= kind <= 65535:
         raise Invalid(f"{label}: kind must be an integer 0-65535")
-    if tags != []:
-        raise Invalid(f"{label}: tags must be []")
+    if kind == PROFILE:  # profiles come from other clients; their tags are kept as signed and ignored
+        if not _tags_ok(tags) or _has_nul(tags):
+            raise Invalid(f"{label}: profile tags must be a list of non-empty lists of strings")
+    elif tags != []:
+        raise Invalid(f"{label}: tags must be [] (only profiles may carry tags)")
     if not isinstance(content, str):
         raise Invalid(f"{label}: content must be a string")
     try:
@@ -175,16 +182,18 @@ def verify(ev) -> dict:
         raise Invalid(f"{label}: {err}") from None
 
 
-def sign(secret: str | bytes, kind: int, content: dict | str, created_at: int | None = None) -> dict:
+def sign(secret: str | bytes, kind: int, content: dict | str, created_at: int | None = None,
+         tags: list | None = None) -> dict:
     """A signed event. content may be an object (serialized compactly) or the exact string."""
     sk = PrivateKey(secret if isinstance(secret, bytes) else secret_bytes(secret))
     pubkey = PublicKeyXOnly.from_secret(sk.secret).format().hex()
     if not isinstance(content, str):
         content = json.dumps(content, separators=(",", ":"), ensure_ascii=False)
     created_at = int(time.time()) if created_at is None else created_at
-    eid = event_id(pubkey, created_at, kind, [], content)
+    tags = tags or []
+    eid = event_id(pubkey, created_at, kind, tags, content)
     sig = sk.sign_schnorr(bytes.fromhex(eid), os.urandom(32)).hex()
-    return {"id": eid, "pubkey": pubkey, "created_at": created_at, "kind": kind, "tags": [],
+    return {"id": eid, "pubkey": pubkey, "created_at": created_at, "kind": kind, "tags": tags,
             "content": content, "sig": sig}
 
 

@@ -94,12 +94,20 @@ END;
 $$;
 
 -- Profiles: latest wins, every version kept.
+-- Profiles keep their signed tags; no other kind may carry any.
+INSERT INTO events (id, pubkey, created_at, kind, tags, content, sig)
+VALUES (pg_temp.ev_id('p0'), pg_temp.ev_id('agent'), 1792454399, 0, '[["client", "Damus"]]', '{"name": "zeroth"}', repeat('0', 128));
+SELECT pg_temp.expect_error($sql$
+    INSERT INTO events (id, pubkey, created_at, kind, tags, content, sig, collection)
+    VALUES (pg_temp.ev_id('bad'), pg_temp.ev_id('agent'), 0, 4702, '[["t", "x"]]', '{"collection": "check", "text": "x"}', repeat('0', 128), 'check')
+$sql$, '23514');
 SELECT pg_temp.ev('p1', 0, 'agent', '{"name": "first"}');
 SELECT pg_temp.ev('p2', 0, 'agent', '{"name": "second", "display_name": "extra"}');
 DO $$
 BEGIN
     ASSERT (SELECT name FROM profiles WHERE pubkey = pg_temp.ev_id('agent')) = 'second', 'latest profile wins';
-    ASSERT (SELECT count(*) FROM events WHERE kind = 0 AND pubkey = pg_temp.ev_id('agent')) = 2, 'versions kept';
+    ASSERT (SELECT count(*) FROM events WHERE kind = 0 AND pubkey = pg_temp.ev_id('agent')) = 3, 'versions kept';
+    ASSERT (SELECT tags FROM events WHERE id = pg_temp.ev_id('p0')) = '[["client", "Damus"]]', 'profile tags kept';
 END;
 $$;
 

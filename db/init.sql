@@ -17,12 +17,13 @@ CREATE TABLE collections (
     created_at timestamptz NOT NULL DEFAULT now()
 );
 
--- tags is always [] and is not stored. content is the exact signed string.
+-- tags is [] except on profiles, which keep their signed tags verbatim. content is the exact signed string.
 CREATE TABLE events (
     id          text PRIMARY KEY CHECK (id ~ '^[0-9a-f]{64}$'),
     pubkey      text NOT NULL CHECK (pubkey ~ '^[0-9a-f]{64}$'),
     created_at  bigint NOT NULL,          -- claimed by the signer
     kind        integer NOT NULL CHECK (kind IN (0, 4701, 4702, 4703, 4704, 4705, 4706, 4708)),
+    tags        jsonb NOT NULL DEFAULT '[]' CHECK (kind = 0 OR tags = '[]'::jsonb),
     content     text NOT NULL CHECK (jsonb_typeof(content::jsonb) = 'object'),
     sig         text NOT NULL CHECK (sig ~ '^[0-9a-f]{128}$'),
     received_at timestamptz NOT NULL DEFAULT clock_timestamp(),  -- orders the ledger

@@ -23,6 +23,7 @@ from urllib.parse import urlparse
 
 import httpx
 from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from . import events as E
@@ -293,9 +294,10 @@ def publish(conn, events: list) -> dict:
                 skipped.append(ev["id"])  # same ID, same signed bytes: a retry
                 continue
             col = _authorize(conn, ev, data)
-            conn.execute("""INSERT INTO events (id, pubkey, created_at, kind, content, sig, collection)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s)""",
-                         (ev["id"], ev["pubkey"], ev["created_at"], ev["kind"], ev["content"], ev["sig"], col))
+            conn.execute("""INSERT INTO events (id, pubkey, created_at, kind, tags, content, sig, collection)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                         (ev["id"], ev["pubkey"], ev["created_at"], ev["kind"], Jsonb(ev["tags"]), ev["content"],
+                          ev["sig"], col))
             accepted.append(ev["id"])
             collections.add(col)
     out = {"accepted": accepted, "skipped": skipped}
@@ -489,12 +491,12 @@ def export(conn, pubkey: str, collection: str, page: int = 500):
     after = ("-infinity", "")
     while True:
         rows = conn.execute(
-            """SELECT id, pubkey, created_at, kind, content, sig, received_at FROM events
+            """SELECT id, pubkey, created_at, kind, tags, content, sig, received_at FROM events
                WHERE collection = %s AND (received_at, id) > (%s::timestamptz, %s) ORDER BY received_at, id LIMIT %s""",
             (collection, *after, page)).fetchall()
         for r in rows:
             yield {"id": r["id"], "pubkey": r["pubkey"], "created_at": r["created_at"], "kind": r["kind"],
-                   "tags": [], "content": r["content"], "sig": r["sig"]}
+                   "tags": r["tags"], "content": r["content"], "sig": r["sig"]}
         if len(rows) < page:
             return
         after = (rows[-1]["received_at"], rows[-1]["id"])

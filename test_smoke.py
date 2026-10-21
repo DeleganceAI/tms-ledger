@@ -155,7 +155,14 @@ def ledger(conn) -> list[str]:
     rejects(lambda: pub([terms(BOB)]), "is not approved")
     rejects(lambda: pub([sign(OUTSIDER, E.MEMBERS, {"collection": "smoke", "members": [PK[OUTSIDER]]})]), "not a member")
     pub([sign(OWNER, E.MEMBERS, {"collection": "smoke", "members": [PK[BOB]]})])
-    pub([terms(BOB), sign(BOB, E.PROFILE, {"name": "Bob", "about": "agent"})])
+    tagged = sign(BOB, E.PROFILE, '{"name":"Bob","about":"agent"}', tags=[["client", "Some Nostr app"], ["alt", "profile"]])
+    pub([terms(BOB), tagged])
+    rejects(lambda: pub([sign(BOB, E.CLAIM, {"collection": "smoke", "text": "tagged"}, tags=[["t", "x"]])]),
+            "only profiles may carry tags")
+    # A tagged profile is stored verbatim, so the stored copy still verifies.
+    row = conn.execute("SELECT id, pubkey, created_at, kind, tags, content, sig FROM events WHERE id = %s",
+                       (tagged["id"],)).fetchone()
+    assert dict(row) == tagged and E.verify(dict(row))["name"] == "Bob"
     b1 = sign(BOB, E.CLAIM, {"collection": "smoke", "text": "Bob adds a claim about DAO supplementation."})
     pub([b1])
     rejects(lambda: pub([sign(BOB, E.CLAIM, {"collection": "bobs", "text": "new collection"})]), "only approved pubkeys create")

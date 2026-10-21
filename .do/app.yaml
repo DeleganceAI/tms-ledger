@@ -1,17 +1,16 @@
 # DigitalOcean App Platform spec: doctl apps create --spec .do/app.yaml (then: doctl apps update <id> --spec ...)
-# The repo lives on a private Gitea, so the image is built locally and pushed to DOCR:
-#   doctl registry login && docker buildx build --platform linux/amd64 -t registry.digitalocean.com/<registry>/tms:latest --push .
+# Builds from the Dockerfile on every push to the branch. Replace <owner>/<repo> once the GitHub repo exists,
+# and install the DigitalOcean GitHub app on it.
 # Database setup, once: see README "Deploy". Secrets (type SECRET) are set in the control panel or here.
 name: tms
 region: nyc
 services:
   - name: tms
-    image:
-      registry_type: DOCR
-      repository: tms
-      tag: latest
-      deploy_on_push:
-        enabled: true
+    github:
+      repo: <owner>/<repo>
+      branch: main
+      deploy_on_push: true
+    dockerfile_path: Dockerfile
     http_port: 8080
     instance_size_slug: apps-s-1vcpu-1gb
     instance_count: 1
@@ -43,7 +42,8 @@ services:
 #   - name: snapshot
 #     kind: SCHEDULED
 #     schedule: {cron: "15 3 * * *", time_zone: UTC}
-#     image: {registry_type: DOCR, repository: tms, tag: latest}
+#     github: {repo: <owner>/<repo>, branch: main, deploy_on_push: true}
+#     dockerfile_path: Dockerfile
 #     run_command: tms-snapshot
 #     instance_size_slug: apps-s-1vcpu-0.5gb
 #     envs: [DATABASE_URL, TMS_SERVER_NSEC, TMS_SNAPSHOT_RECIPIENT, provider credentials]
