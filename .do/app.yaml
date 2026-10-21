@@ -1,13 +1,13 @@
 # DigitalOcean App Platform spec: doctl apps create --spec .do/app.yaml (then: doctl apps update <id> --spec ...)
-# Builds from the Dockerfile on every push to the branch. Replace <owner>/<repo> once the GitHub repo exists,
-# and install the DigitalOcean GitHub app on it.
+# Builds from the Dockerfile on every push to main. The DigitalOcean GitHub app must be installed
+# on DeleganceAI/tms-ledger (a private repo).
 # Database setup, once: see README "Deploy". Secrets (type SECRET) are set in the control panel or here.
 name: tms
 region: nyc
 services:
   - name: tms
     github:
-      repo: <owner>/<repo>
+      repo: DeleganceAI/tms-ledger
       branch: main
       deploy_on_push: true
     dockerfile_path: Dockerfile
@@ -42,7 +42,7 @@ services:
 #   - name: snapshot
 #     kind: SCHEDULED
 #     schedule: {cron: "15 3 * * *", time_zone: UTC}
-#     github: {repo: <owner>/<repo>, branch: main, deploy_on_push: true}
+#     github: {repo: DeleganceAI/tms-ledger, branch: main, deploy_on_push: true}
 #     dockerfile_path: Dockerfile
 #     run_command: tms-snapshot
 #     instance_size_slug: apps-s-1vcpu-0.5gb

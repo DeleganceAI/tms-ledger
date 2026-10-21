@@ -124,7 +124,7 @@ Prompts: `briefing` (answer from one collection with a checked proof) and `claim
    doctl databases pool create <cluster-id> tms-pool --db tms --user tms --mode transaction --size 10
    ```
 
-3. Put the GitHub repo name in [.do/app.yaml](.do/app.yaml) (`<owner>/<repo>`, branch `main`), install the DigitalOcean GitHub app on that repo, then create the app. App Platform builds the `Dockerfile` and redeploys on every push to `main`:
+3. Install the DigitalOcean GitHub app on [DeleganceAI/tms-ledger](https://github.com/DeleganceAI/tms-ledger), then create the app. App Platform builds the `Dockerfile` and redeploys on every push to `main`:
 
    ```bash
    doctl apps create --spec .do/app.yaml
