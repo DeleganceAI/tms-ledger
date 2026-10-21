@@ -428,12 +428,12 @@ def list_claims(conn, pubkey: str, collection: str, sort: str = "unsupported", l
             ORDER BY {CLAIM_SORTS[sort]} LIMIT %s""", (collection, _limit(limit)))]
 
 
-def get_links(conn, pubkey: str, collection: str, to: str = "", from_: str = "", relation: str = "",
+def get_links(conn, pubkey: str, collection: str, to_id: str = "", from_id: str = "", relation: str = "",
               limit: int = 100) -> list[dict]:
     """Links in a collection, filtered by target, grounding evidence and/or relation."""
     require_member(conn, pubkey, collection)
     where, params = ["x.collection = %s"], [collection]
-    for col, val in (("x.to_id", to), ("x.from_id", from_), ("x.relation", relation)):
+    for col, val in (("x.to_id", to_id), ("x.from_id", from_id), ("x.relation", relation)):
         if val:
             where.append(f"{col} = %s")
             params.append(val)

@@ -1,46 +1,65 @@
-"""MCP surface for the TMS v2 ledger. Storage and retrieval only; contributors reason.
+"""MCP surface for the TMS v2 ledger, plus the web pages and dashboard over HTTP.
 
-Run over stdio (Claude Code):    tms-server
-Run over HTTP (remote agents):   TMS_TOKEN=... tms-server --http --port 8765
+Run over stdio (Claude Code):    TMS_NSEC=nsec1... tms-server
+Run over HTTP (everyone else):   TMS_SECRET=... tms-server --http --host 0.0.0.0 --port 8080
+
+The endpoint is open. publish(events) takes signed events. Every other tool takes `request`, a
+kind-4707 event signed fresh for the call, whose content is {"tool": <tool name>, "args": {...}}.
+Over stdio, an omitted request is signed with TMS_NSEC from the tool's plain arguments.
 """
 from __future__ import annotations
 
 import argparse
-import hmac
+import functools
+import inspect
 import os
 import subprocess
 import sys
 import time
+from contextvars import ContextVar
 
 import httpx
 import psycopg
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
+from . import events as E
 from . import ledger as L
 
+LOCAL_SECRET = os.environ.get("TMS_NSEC") or None  # stdio only; main() clears it for HTTP
+REQUEST_WINDOW = 60  # seconds either side of server time
+
 INSTRUCTIONS = """\
-Append-only evidence ledger. It stores sources, observations (documents), claims,
-evidence (an observation's bearing on a target, with a verbatim quote) and
-contradiction findings, each with an author and timestamp. It never decides what
-is true; readers do. Work in one collection at a time.
-Discipline: search -> inspect -> append -> read. Search for existing claims before
-adding one and reuse IDs deliberately. Every evidence record must quote its
-grounding observation verbatim; the server rejects quotes it cannot find.
-Nothing is ever edited or deleted: correct by appending.
+Append-only evidence ledger of signed Nostr-shaped events. It stores evidence (documents),
+claims, links (evidence bearing on a claim, link, contradiction or evidence, with a verbatim
+quote) and contradictions, each signed by its author. It never decides what is true; readers do.
+Every collection is private to its members. Work in one collection at a time.
+Writes: publish(events) with events you signed (kinds 4701 evidence, 4702 claim, 4703 link,
+4704 contradiction; 0 profile; 4706 terms, once, before your first write). IDs are known
+before signing, so one batch can hold evidence, claims and the links between them.
+Every other tool takes `request`: a kind-4707 event signed now, content {"tool": <this tool>,
+"args": {<the tool's arguments>}}. Requests are single-use and expire after 60 seconds.
+Discipline: search -> inspect -> publish -> read. Search for existing claims before adding one
+and reuse IDs deliberately. A link's quote must appear in its evidence text; the server rejects
+quotes it cannot find. Nothing is edited or deleted: dispute a link or contradiction by linking to it.
 """
+
+_who: ContextVar[dict | None] = ContextVar("who", default=None)  # the verified caller, for mcp_calls
+
 
 async def _log_calls(ctx, call_next):
     """Record every MCP request, reads included, in mcp_calls. Telemetry never fails a call."""
     if ctx.request_id is None:  # a notification, not a call
         return await call_next(ctx)
     started = time.monotonic()
+    who: dict = {}
+    _who.set(who)  # a dict, so the tool's thread can fill it in
     ok, error = True, None
     try:
         result = await call_next(ctx)
-        if getattr(result, "is_error", False):
+        if isinstance(result, dict) and result.get("isError"):  # SDK 2.x hands middleware plain dicts
             ok = False
-            error = " ".join(getattr(c, "text", "") for c in (result.content or []))[:500]
+            error = " ".join(c.get("text", "") for c in result.get("content") or [])[:500]
         return result
     except Exception as err:
         ok, error = False, str(err)[:500]
@@ -48,11 +67,9 @@ async def _log_calls(ctx, call_next):
     finally:
         params = ctx.params or {}
         tool = params.get("name") if ctx.method == "tools/call" else None
-        args = (params.get("arguments") or {}) if tool else {}
-        collection = args.get("collection") or (os.environ.get("TMS_COLLECTION") if tool else None) or None
         try:
             with L.connect() as conn:
-                L.log_call(conn, ctx.method, tool, args.get("author_id"), collection, ok, error,
+                L.log_call(conn, ctx.method, tool, who.get("pubkey"), who.get("collection"), ok, error,
                            int((time.monotonic() - started) * 1000))
         except Exception as err:
             print(f"mcp_calls logging failed: {err}", file=sys.stderr)
@@ -61,182 +78,185 @@ async def _log_calls(ctx, call_next):
 mcp = MCPServer("tms", instructions=INSTRUCTIONS, middleware=[_log_calls])
 
 
-def _run(fn, *args, **kwargs):
-    """Open a connection, call a ledger function, and turn failures into messages the agent can act on
-    (the SDK hides the text of unexpected exceptions). Postgres RAISE messages are the guidance."""
+def authenticate(conn, request, tool: str) -> tuple[str, dict]:
+    """Check a signed request (EVENTS.md section 4) and return (pubkey, args)."""
+    if not isinstance(request, dict) or request.get("kind") != E.REQUEST:
+        raise E.Invalid("request must be a kind-4707 event")
+    data = E.verify(request)
+    if data["tool"] != tool:
+        raise E.Invalid(f"request was signed for tool '{data['tool']}', not '{tool}'")
+    if abs(time.time() - request["created_at"]) > REQUEST_WINDOW:
+        raise E.Invalid(f"request created_at is more than {REQUEST_WINDOW}s from server time; sign a fresh one")
+    with conn.transaction():
+        conn.execute("DELETE FROM auth_seen WHERE seen_at < now() - interval '2 minutes'")
+        if conn.execute("INSERT INTO auth_seen (id) VALUES (%s) ON CONFLICT DO NOTHING RETURNING id",
+                        (request["id"],)).fetchone() is None:
+            raise E.Invalid("request was already used; sign a fresh one for every call")
+    L.require_allowed(conn, request["pubkey"])
+    return request["pubkey"], data["args"]
+
+
+def _errors(fn):
+    """Turn failures into messages the agent can act on (the SDK hides unexpected exceptions'
+    text). Postgres RAISE messages are the guidance."""
     try:
-        with L.connect() as conn:
-            return fn(conn, *args, **kwargs)
+        return fn()
     except psycopg.Error as err:
         raise ToolError(err.diag.message_primary or str(err)) from err
     except (ValueError, RuntimeError, OSError, httpx.HTTPError, subprocess.SubprocessError) as err:
         raise ToolError(str(err)) from err
 
 
-def _col(collection: str) -> str:
-    collection = collection or os.environ.get("TMS_COLLECTION", "")
-    if not collection:
-        raise ToolError("collection is required (or set TMS_COLLECTION)")
-    return collection
+def signed(impl):
+    """Register an MCP tool whose arguments arrive in a signed request. The decorated function
+    supplies the schema and docstring; impl(conn, pubkey, **args) does the work."""
+    def register(fn):
+        defaults = {k: p.default for k, p in inspect.signature(fn).parameters.items() if k != "request"}
+
+        @functools.wraps(fn)
+        def tool(request: dict | None = None, **given):
+            def run():
+                with L.connect() as conn:
+                    req = request
+                    if req is None:
+                        if not LOCAL_SECRET:
+                            raise ValueError(f"request is required: a kind-4707 event with content "
+                                             f'{{"tool": "{fn.__name__}", "args": {{...}}}}, signed now')
+                        req = E.request(LOCAL_SECRET, fn.__name__, {k: v for k, v in given.items() if v != defaults[k]})
+                    elif any(given.get(k, v) != v for k, v in defaults.items()):
+                        raise ValueError("with a request, pass the arguments inside its signed content, not beside it")
+                    pubkey, args = authenticate(conn, req, fn.__name__)
+                    unknown = set(args) - set(defaults)
+                    if unknown:
+                        raise ValueError(f"unknown arguments for {fn.__name__}: {', '.join(sorted(unknown))}")
+                    args = {**defaults, **args}
+                    who = _who.get()
+                    if who is not None:
+                        who.update(pubkey=pubkey, collection=args.get("collection") or None)
+                    return impl(conn, pubkey, **args)
+            return _errors(run)
+        return mcp.tool()(tool)
+    return register
 
 
-# ----------------------------------------------------------------- appends
-
-@mcp.tool()
-def add_author(id: str, name: str, kind: str) -> dict:
-    """Register an operational identity (not a login). kind is 'human' or 'agent'.
-    Use a short slug id such as 'dustin' or 'grok-scout-1'. Register once, reuse the id. Calling it
-    again with the same id, name and kind returns the existing record; a different name or kind for
-    an existing id is an error."""
-    return _run(L.add_author, id, name, kind)
-
-
-@mcp.tool()
-def add_collection(id: str, name: str, author_id: str) -> dict:
-    """Create a collection (a topic or project that scopes observations, claims and contradictions).
-    id is a lowercase slug such as 'mcas'."""
-    return _run(L.add_collection, id, name, author_id)
-
-
-@mcp.tool()
-def list_collections() -> list[dict]:
-    """List collections with their observation and claim counts."""
-    return _run(L.list_collections)
-
-
-@mcp.tool()
-def add_source(name: str, author_id: str, uri: str = "") -> dict:
-    """Register where material comes from: a journal, a website, an X account, a person.
-    Sources are global across collections. Search first with search_sources and reuse the id."""
-    return _run(L.add_source, name, author_id, uri or None)
-
+# ------------------------------------------------------------------- writes
 
 @mcp.tool()
-def search_sources(text: str, limit: int = 20) -> list[dict]:
-    """Find candidate sources by name or URI substring. A match is a candidate, not an identity."""
-    return _run(L.search_sources, text, limit)
+def publish(events: list[dict]) -> dict:
+    """Append a batch of signed events, all or nothing. Each event is a NIP-01 envelope
+    {id, pubkey, created_at, kind, tags: [], content, sig} whose content is a JSON object string:
+      4701 evidence      {collection, text, url?, title?, source?}  text = the full document
+      4702 claim         {collection, text}
+      4703 link          {collection, from: evidence id, to: claim|link|contradiction|evidence id,
+                          relation: SUPPORTS|REBUTS|QUALIFIES (QUALIFIES only to claims), quote, reason}
+      4704 contradiction {collection, claims: [>=2 distinct claim ids], reason}
+      4705 members       {collection, members: [pubkeys]}   owner only; the full list
+      4706 terms         {version, sha256}   sign once before your first write (see TERMS.md)
+      0    profile       {name, about?, picture?}
+    References stay inside one collection and may point at events earlier in the same batch. A
+    link's quote must appear in its evidence's text. The first event naming a new collection
+    creates it, if its signer is approved. Events already stored are skipped, so retries are safe."""
+    def run():
+        with L.connect() as conn:
+            res = L.publish(conn, events)
+        who = _who.get()
+        if who is not None:
+            who.update(pubkey=events[0]["pubkey"], collection=",".join(res["collections"]) or None)
+        return res
+    return _errors(run)
 
 
-@mcp.tool()
-def add_observation(source_id: str, author_id: str, uri: str, content: str = "", title: str = "",
-                    collection: str = "") -> dict:
-    """Preserve a document, paper, blog post or social post in a collection.
-    Pass the full text as content, or leave content empty and the server fetches uri
-    (PDF via pdftotext, HTML via a readability extractor). The stored text is what
-    evidence quotes are checked against, so pass the whole thing, not a summary.
-    title is optional: left empty, the server derives one (the document's <title> or JATS
-    <article-title>, else the first non-empty line). Returns the record without content; read
-    it back with get_record."""
-    return _run(L.add_observation, _col(collection), source_id, author_id, uri, content or None, title or None)
+# -------------------------------------------------------------------- reads
+
+def _fetch_url(conn, pubkey, url):
+    text, title = L.fetch_text(url)
+    return {"url": url, "title": title, "chars": len(text), "text": text}
 
 
-@mcp.tool()
-def add_claim(text: str, author_id: str, collection: str = "") -> dict:
-    """Record one opaque statement about the world. Keep hedges, population, dose, timeframe and
-    diagnostic criteria inside the text ("In adults meeting consensus-2 MCAS criteria, ...").
-    Call search_claims first and reuse an existing id if the statement is already recorded.
-    The claim is embedded for vector search on write."""
-    return _run(L.add_claim, _col(collection), text, author_id)
+@signed(_fetch_url)
+def fetch_url(request: dict | None = None, url: str = "") -> dict:
+    """Fetch a URL and return its plain text and title, ready to sign as evidence (PDF via
+    pdftotext, HTML via a readability extractor, JATS XML by stripping tags). Nothing is stored.
+    The evidence text is what link quotes are checked against, so publish the whole text."""
 
 
-@mcp.tool()
-def add_evidence(from_observation_id: str, target_kind: str, target_id: str, relation: str,
-                 quote: str, reason: str, author_id: str) -> dict:
-    """Record how an observation bears on a target. relation: SUPPORTS, REBUTS, or QUALIFIES
-    (QUALIFIES only targets claims). target_kind: claim, contradiction, evidence, source, observation.
-    quote must be a verbatim passage (<=1500 chars) from the grounding observation; the write is
-    rejected if it cannot be found there. reason says specifically what the passage shows."""
-    return _run(L.add_evidence, from_observation_id, target_kind, target_id, relation, quote, reason, author_id)
+@signed(lambda conn, pubkey: L.list_collections(conn, pubkey))
+def list_collections(request: dict | None = None) -> list[dict]:
+    """Collections you are a member of, with owner, members and counts."""
 
 
-@mcp.tool()
-def add_contradiction(claim_ids: list[str], reason: str, author_id: str, collection: str = "") -> dict:
-    """Record an authored finding that two or more distinct claims cannot all hold, with the reason.
-    Membership is frozen on write; a different set needs a new finding. Differences of scope,
-    population or timeframe are not contradictions: put that in a QUALIFIES evidence instead.
-    Two criteria sets or definitions for the same diagnosis that would classify the same patient
-    differently ARE a contradiction, not a scope difference."""
-    return _run(L.add_contradiction, _col(collection), claim_ids, reason, author_id)
+@signed(L.get_event)
+def get_event(request: dict | None = None, id: str = "", offset: int = 0, max_chars: int = 20000) -> dict | None:
+    """Exact read of one event by ID, content parsed. Evidence text comes back as a window
+    (offset, max_chars) with `chars`, the total; page through long documents."""
 
 
-# ------------------------------------------------------------------- reads
-
-@mcp.tool()
-def get_record(kind: str, id: str, offset: int = 0, max_chars: int = 20000) -> dict | None:
-    """Exact read. kind: author, collection, source, observation, claim, contradiction, evidence.
-    Observations return title, a content window (offset, max_chars) and `chars` (the total); page
-    through long documents. A null content with content_unavailable=true means the text was not stored."""
-    return _run(L.get_record, kind, id, offset, max_chars)
-
-
-@mcp.tool()
-def search_claims(text: str, method: str = "vector", limit: int = 10, collection: str = "") -> dict:
+@signed(L.search_claims)
+def search_claims(request: dict | None = None, collection: str = "", text: str = "", method: str = "vector",
+                  limit: int = 10) -> dict:
     """Retrieve claims in a collection by meaning (method='vector') or words (method='keyword').
-    Each result inlines its evidence (relation, quote, grounding observation) and the ids of any
-    contradiction findings it belongs to. Inlined quotes are cut to 300 chars with an ellipsis here
-    only; get_evidence and get_record return them whole. Ordering is a retrieval aid, not a judgement."""
-    return _run(L.search_claims, _col(collection), text, method, limit)
+    Each result inlines the links targeting it (relation, quote, grounding evidence) and the ids of
+    contradictions it belongs to. Inlined quotes are cut to 300 chars here only. Ordering is a
+    retrieval aid, not a judgement."""
 
 
-@mcp.tool()
-def list_claims(sort: str = "unsupported", limit: int = 50, collection: str = "") -> list[dict]:
-    """Claims in a collection with their evidence counts (supports, qualifies, rebuts) and how many
-    contradiction findings they belong to. sort: 'unsupported' (fewest evidence first), 'unchallenged'
-    (supported but never rebutted or qualified), 'contested' (most rebuts and findings), 'evidence'
-    (most), 'recent'. A worklist for follow-up research; counts are retrieval aids, not judgements."""
-    return _run(L.list_claims, _col(collection), sort, limit)
+@signed(L.list_claims)
+def list_claims(request: dict | None = None, collection: str = "", sort: str = "unsupported",
+                limit: int = 50) -> list[dict]:
+    """Claims in a collection with their link counts (supports, qualifies, rebuts) and how many
+    contradictions they belong to. sort: 'unsupported' (fewest links first), 'unchallenged'
+    (supported, never rebutted or qualified), 'contested', 'links' (most), 'recent'. A worklist for
+    follow-up research; counts are retrieval aids, not judgements."""
 
 
-@mcp.tool()
-def get_evidence(target_kind: str = "", target_id: str = "", from_observation_id: str = "",
-                 relation: str = "", limit: int = 100) -> list[dict]:
-    """Evidence records filtered by target (kind + id), grounding observation and/or relation."""
-    return _run(L.get_evidence, target_kind or None, target_id or None, from_observation_id or None,
-                              relation or None, limit)
+@signed(L.get_links)
+def get_links(request: dict | None = None, collection: str = "", to_id: str = "", from_id: str = "",
+              relation: str = "", limit: int = 100) -> list[dict]:
+    """Links in a collection, filtered by target (to_id), grounding evidence (from_id) and/or relation."""
 
 
-@mcp.tool()
-def list_observations(ungrounded_only: bool = False, limit: int = 50, collection: str = "") -> list[dict]:
-    """List observations in a collection, oldest first. ungrounded_only=true returns documents that no
-    evidence cites yet, which is the natural worklist for a claims pass."""
-    return _run(L.list_observations, _col(collection), ungrounded_only, limit)
+@signed(L.list_evidence)
+def list_evidence(request: dict | None = None, collection: str = "", ungrounded_only: bool = False,
+                  source: str = "", limit: int = 50) -> list[dict]:
+    """Evidence documents in a collection, oldest first, without their text. ungrounded_only=true
+    returns documents no link cites yet, the worklist for a claims pass. source filters by substring."""
 
 
-@mcp.tool()
-def search_contradictions(claim_id: str = "", text: str = "", limit: int = 20, collection: str = "") -> list[dict]:
-    """Contradiction findings in a collection, optionally those naming a claim or matching words in the
-    reason. Each includes member claims and any evidence targeting the finding itself. Whether a
-    finding is open or resolved is the reader's conclusion."""
-    return _run(L.search_contradictions, _col(collection), claim_id or None, text or None, limit)
+@signed(L.search_contradictions)
+def search_contradictions(request: dict | None = None, collection: str = "", claim: str = "", text: str = "",
+                          limit: int = 20) -> list[dict]:
+    """Contradictions in a collection, optionally those naming a claim id or matching words in the
+    reason, each with its member claims and the links that target it. Whether one is open or
+    resolved is the reader's conclusion."""
 
 
-@mcp.tool()
-def check_proof(proof: dict, collection: str = "") -> dict:
+@signed(L.check_proof)
+def check_proof(request: dict | None = None, collection: str = "", proof: dict | None = None) -> dict:
     """Validate a thinking proof before answering. proof = {"question": str, "steps": [{"id", "say",
-    "from": [ledger ids or earlier step ids], "gap": bool?}]}. Rules: every 'from' resolves to a
-    record in this collection or an earlier step; exactly one root; every step has a ledger record
+    "from": [event ids or earlier step ids], "gap": bool?}]}. Rules: every 'from' resolves to an
+    event in this collection or an earlier step; exactly one root; every step has a ledger event
     in its ancestry or is marked gap. Returns problems and an indented tree with leaves expanded."""
-    return _run(L.check_proof, _col(collection), proof)
 
 
-# ----------------------------------------------------------------- prompts
+# ------------------------------------------------------------------ prompts
 
 BRIEFING = """\
 You are answering questions from the '{collection}' collection of the TMS ledger, and only from it.
+Every tool except publish takes a fresh signed request (kind 4707); sign one per call.
 
 For each question:
 1. Retrieve. Call search_claims (vector, then keyword if thin) with the question and with
    rephrasings. Follow contradiction_ids with search_contradictions. Read quotes; open
-   get_record on observations when a quote needs context.
+   get_event on evidence when a quote needs context.
 2. Build a thinking proof: {{"question": ..., "steps": [...]}}. Each step has an id, a one
-   sentence "say", and "from": the ledger ids (claims, evidence, contradictions, observations)
-   or earlier step ids it rests on. Premises come before conclusions; the last step is the
-   answer. Anything you want to say that no record supports goes in a step marked "gap": true.
+   sentence "say", and "from": the event ids (claims, links, contradictions, evidence) or
+   earlier step ids it rests on. Premises come before conclusions; the last step is the
+   answer. Anything you want to say that no event supports goes in a step marked "gap": true.
 3. Call check_proof. Fix every problem it lists, then call it again until ok.
 4. Write the answer. Each paragraph corresponds to a step and cites its ids inline. Report
-   rebuttals, qualifications and contradiction findings as what the records say, and state
-   that open-or-resolved is your reading. Say plainly what the collection does not cover.
-5. Reply with the answer in chat followed by the check_proof tree; save only {question, steps}
+   rebuttals, qualifications and contradictions as what the events say, and state that
+   open-or-resolved is your reading. Say plainly what the collection does not cover.
+5. Reply with the answer in chat followed by the check_proof tree; save only {{question, steps}}
    to proofs/<YYYYMMDD-HHMM>-<slug>.json.
 
 Never answer from general knowledge without marking it as a gap step. If the collection has
@@ -244,23 +264,33 @@ nothing relevant, say so; that is a complete and honest answer.
 """
 
 CLAIMS_PASS = """\
-You are extracting claims from documents in the '{collection}' collection of the TMS ledger.
-Register yourself once with add_author (kind 'agent') and reuse that author_id.
+You are extracting claims from evidence in the '{collection}' collection of the TMS ledger.
+You sign everything with your own key (tms-sign, or any Nostr library). Before your first write,
+publish a profile (kind 0, say in "about" that you are an agent) and the terms (kind 4706).
+Every tool except publish takes a fresh signed request (kind 4707); sign one per call.
 
-Worklist: list_observations(ungrounded_only=true). For each observation:
-1. Read it in full with get_record (page with offset/max_chars).
+Worklist: list_evidence(ungrounded_only=true). For each evidence event:
+1. Read it in full with get_event (page with offset/max_chars).
 2. For each statement about the world worth keeping, call search_claims with it. Reuse an
-   existing claim id when it says the same thing with the same scope; otherwise add_claim.
-   Aim for the statements a careful reader would cite, usually five to fifteen per paper.
-   Keep hedges, population, dose, timeframe and diagnostic criteria inside the claim text.
-3. add_evidence from this observation to the claim: SUPPORTS, REBUTS or QUALIFIES, with a
-   verbatim quote copied exactly from the document and a reason saying what the passage shows.
-   If the server rejects the quote, re-read the passage and copy it again; never paraphrase.
-4. When a retrieved claim and a claim from this document cannot both hold, call
-   add_contradiction with both ids and the reason. If they differ only in scope, population
-   or timeframe, record a QUALIFIES evidence instead.
+   existing claim id when it says the same thing with the same scope; otherwise sign a new
+   claim (kind 4702). Aim for the statements a careful reader would cite, usually five to
+   fifteen per paper. Keep hedges, population, dose, timeframe and criteria inside the text.
+3. Sign a link (kind 4703) from this evidence to the claim: SUPPORTS, REBUTS or QUALIFIES, with a
+   verbatim quote copied exactly from the evidence text and a reason saying what it shows.
+4. When a retrieved claim and a claim from this document cannot both hold, sign a contradiction
+   (kind 4704) naming both ids, with the reason. If they differ only in scope, population or
+   timeframe, sign a QUALIFIES link instead.
+5. publish the document's new claims, links and contradictions as one batch. If a quote is
+   rejected, the whole batch is: re-read the passage, copy it again, re-sign, retry. Never paraphrase.
 Finding nothing new in a document is a valid outcome. Do not summarise; record.
 """
+
+
+def _col(collection: str) -> str:
+    collection = collection or os.environ.get("TMS_COLLECTION", "")
+    if not collection:
+        raise ToolError("collection is required (or set TMS_COLLECTION)")
+    return collection
 
 
 @mcp.prompt()
@@ -271,53 +301,41 @@ def briefing(collection: str = "") -> str:
 
 @mcp.prompt()
 def claims_pass(collection: str = "") -> str:
-    """Turn ungrounded observations into claims, quoted evidence and contradiction findings."""
+    """Turn ungrounded evidence into claims, quoted links and contradictions."""
     return CLAIMS_PASS.format(collection=_col(collection))
 
 
-# ------------------------------------------------------------------- main
+# --------------------------------------------------------------------- main
 
-def _bearer(app, token: str):
-    """ASGI wrapper: everything except lifespan events needs `Authorization: Bearer <token>`."""
-    expected = token.encode()
+def http_app():
+    """MCP at /mcp plus the web pages, in one Starlette app."""
+    from mcp.server.transport_security import TransportSecuritySettings
 
-    async def wrapped(scope, receive, send):
-        if scope["type"] != "lifespan":
-            header = dict(scope.get("headers") or []).get(b"authorization", b"")
-            scheme, _, presented = header.partition(b" ")
-            if scheme.lower() != b"bearer" or not hmac.compare_digest(presented.strip(), expected):
-                if scope["type"] == "http":
-                    await send({"type": "http.response.start", "status": 401,
-                                "headers": [(b"content-type", b"text/plain"), (b"www-authenticate", b"Bearer")]})
-                    await send({"type": "http.response.body", "body": b"unauthorized"})
-                else:
-                    await send({"type": "websocket.close", "code": 1008})
-                return
-        await app(scope, receive, send)
-
-    return wrapped
+    from . import web
+    app = mcp.streamable_http_app(
+        stateless_http=True, json_response=True,
+        # The Host header is the deployment's own hostname; requests are signed, so no rebinding risk.
+        transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False))
+    app.router.routes.extend(web.routes)
+    return app
 
 
 def main() -> None:
+    global LOCAL_SECRET
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--http", action="store_true", help="serve streamable HTTP instead of stdio")
+    p.add_argument("--http", action="store_true", help="serve MCP and the web pages over HTTP instead of stdio")
     p.add_argument("--host", default="127.0.0.1")
-    p.add_argument("--port", type=int, default=8765)
+    p.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8765)))
     a = p.parse_args()
     if not a.http:
         mcp.run("stdio")
         return
-    token = os.environ.get("TMS_TOKEN")
-    if not token:
-        sys.exit("set TMS_TOKEN to a long random secret before serving over HTTP")
+    if not os.environ.get("TMS_SECRET"):
+        sys.exit("set TMS_SECRET to a long random secret (it signs login cookies) before serving over HTTP")
     import uvicorn
-    from mcp.server.transport_security import TransportSecuritySettings
+    LOCAL_SECRET = None   # over HTTP every call brings its own signature
     L.ALLOW_LOCAL = False  # remote callers fetch http(s) only; no local files, no internal hosts
-    # Host header will be the tunnel hostname; the bearer token is the gate.
-    app = mcp.streamable_http_app(
-        stateless_http=True, json_response=True,
-        transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False))
-    uvicorn.run(_bearer(app, token), host=a.host, port=a.port, log_level="info")
+    uvicorn.run(http_app(), host=a.host, port=a.port, log_level="info", proxy_headers=True, forwarded_allow_ips="*")
 
 
 if __name__ == "__main__":

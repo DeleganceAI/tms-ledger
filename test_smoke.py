@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 import re
+import time
 from pathlib import Path
 
 import psycopg
@@ -20,6 +21,7 @@ os.environ["DATABASE_URL"] = URL
 OWNER, BOB, OUTSIDER, STRANGER, SERVER = (hashlib.sha256(n.encode()).hexdigest() for n in
                                           ("owner", "bob", "outsider", "stranger", "server"))
 os.environ["TMS_SERVER_NSEC"] = SERVER
+os.environ["TMS_SECRET"] = "smoke-cookie-secret"
 
 from tms import events as E  # noqa: E402
 from tms import ledger as L  # noqa: E402
@@ -73,7 +75,8 @@ def rejects(fn, needle):
 def main() -> None:
     recreate()
     with L.connect() as conn:
-        ledger(conn)
+        ids = ledger(conn)
+    server(ids)
     print("PASS: smoke")
 
 
@@ -172,7 +175,7 @@ def ledger(conn) -> list[str]:
     assert L.list_evidence(conn, PK[BOB], "smoke", source="example")[0]["link_count"] == 2
     got = L.get_event(conn, PK[BOB], doc["id"], offset=10, max_chars=20)
     assert got["content"]["text"] == DOC[10:30] and got["chars"] == len(DOC) and got["kind_name"] == "evidence"
-    assert [x["id"] for x in L.get_links(conn, PK[BOB], "smoke", to=c1["id"], relation="QUALIFIES")] == [q1["id"]]
+    assert [x["id"] for x in L.get_links(conn, PK[BOB], "smoke", to_id=c1["id"], relation="QUALIFIES")] == [q1["id"]]
     ks = L.search_contradictions(conn, PK[BOB], "smoke", claim=c2["id"])
     assert ks[0]["claim_ids"] == [c1["id"], c2["id"]] and len(ks[0]["claims"]) == 2
     thin = L.list_claims(conn, PK[BOB], "smoke", "unsupported")
@@ -206,6 +209,76 @@ def ledger(conn) -> list[str]:
         E.verify(json.loads(line))
     rejects(lambda: list(L.export(conn, PK[OUTSIDER], "smoke")), "not a member")
     return [c1["id"]]
+
+
+def server(ids) -> None:
+    """The MCP endpoint over HTTP, in process: signed requests, replay and staleness, login."""
+    from starlette.testclient import TestClient
+
+    from tms import server as S
+    S.LOCAL_SECRET = None
+    n = iter(range(1, 10**6))
+
+    def call(name, arguments):
+        r = client.post("/mcp", headers={"Accept": "application/json, text/event-stream"},
+                        json={"jsonrpc": "2.0", "id": next(n), "method": "tools/call",
+                              "params": {"name": name, "arguments": arguments}})
+        r.raise_for_status()
+        res = r.json()["result"]
+        text = res["content"][0]["text"] if res["content"] else ""
+        if res.get("isError"):
+            raise ValueError(text)
+        return res.get("structuredContent", {}).get("result", json.loads(text) if text else None)
+
+    def req(sk, tool, args=None, **kw):
+        return E.sign(sk, E.REQUEST, {"tool": tool, "args": args or {}}, **kw)
+
+    with TestClient(S.http_app()) as client:
+        r = client.post("/mcp", headers={"Accept": "application/json, text/event-stream"},
+                        json={"jsonrpc": "2.0", "id": 0, "method": "tools/list"})
+        tools = {t["name"] for t in r.json()["result"]["tools"]}  # the tool list is open to anyone
+        assert {"publish", "fetch_url", "search_claims", "get_event", "check_proof"} <= tools, tools
+
+        ok = req(BOB, "search_claims", {"collection": "smoke", "text": "histamine DAO", "method": "keyword"})
+        assert call("search_claims", {"request": ok})["items"], "a signed request works"
+        # A replayed request is rejected.
+        rejects(lambda: call("search_claims", {"request": ok}), "already used")
+        # A stale request is rejected.
+        stale = req(BOB, "list_collections", created_at=int(time.time()) - 120)
+        rejects(lambda: call("list_collections", {"request": stale}), "from server time")
+        # A request signed for one tool and sent to another is rejected.
+        rejects(lambda: call("list_claims", {"request": req(BOB, "list_collections")}), "signed for tool 'list_collections'")
+        # Arguments come only from the signed content.
+        rejects(lambda: call("list_claims", {"request": req(BOB, "list_claims", {"collection": "smoke"}),
+                                             "collection": "outside"}), "inside its signed content")
+        rejects(lambda: call("list_claims", {"request": req(BOB, "list_claims", {"collection": "smoke", "x": 1})}),
+                "unknown arguments")
+        rejects(lambda: call("list_claims", {}), "request is required")
+        tampered = req(BOB, "list_collections")
+        rejects(lambda: call("list_collections", {"request": dict(tampered, pubkey=PK[OWNER])}), "id does not match")
+        # An unapproved non-member gets nothing beyond the tool list.
+        rejects(lambda: call("list_collections", {"request": req(STRANGER, "list_collections")}), "is not approved")
+        rejects(lambda: call("fetch_url", {"request": req(STRANGER, "fetch_url", {"url": "https://example.org"})}),
+                "is not approved")
+        rejects(lambda: call("get_event", {"request": req(OUTSIDER, "get_event", {"id": ids[0]})}) or
+                (_ for _ in ()).throw(ValueError("hidden")), "hidden")
+        got = call("get_event", {"request": req(BOB, "get_event", {"id": ids[0]})})
+        assert got["kind_name"] == "claim", got
+        assert [c["slug"] for c in call("list_collections", {"request": req(BOB, "list_collections")})] == ["smoke"]
+        res = call("publish", {"events": [sign(BOB, E.CLAIM, {"collection": "smoke", "text": "Published over HTTP."})]})
+        assert len(res["accepted"]) == 1, res
+
+        # Browser login: a signed "login" request buys a 12-hour cookie; strangers get none.
+        assert client.post("/login", json=req(STRANGER, "login")).status_code == 403
+        r = client.post("/login", json=req(BOB, "login"))
+        assert r.status_code == 200 and r.json()["pubkey"] == PK[BOB] and "httponly" in r.headers["set-cookie"].lower()
+        assert client.post("/login", json=req(BOB, "list_collections")).status_code == 400
+
+    with L.connect() as conn:
+        rows = conn.execute("SELECT tool, pubkey, collection, ok FROM mcp_calls WHERE method = 'tools/call'").fetchall()
+    assert any(r["tool"] == "search_claims" and r["pubkey"] == PK[BOB] and r["collection"] == "smoke" and r["ok"] for r in rows)
+    assert any(r["tool"] == "publish" and r["pubkey"] == PK[BOB] for r in rows)
+    assert any(not r["ok"] and r["pubkey"] is None for r in rows), "failed auth logs no pubkey"
 
 
 if __name__ == "__main__":
