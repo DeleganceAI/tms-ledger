@@ -2,6 +2,7 @@
 
     /                       connect, profile, terms, your collections
     /submit                 sign and publish evidence, claims and links
+    /office                 ambient animation; no ledger data
     /c/<slug>/members       owner only: sign a new members list
     /c/<slug>/export.jsonl  members: every event in the collection, one signed event per line
 
@@ -28,6 +29,7 @@ from . import ledger as L
 COOKIE = "tms"
 COOKIE_TTL = 12 * 3600
 PAGE_FILE = Path(__file__).with_name("web.html")
+OFFICE_FILE = Path(__file__).with_name("office.html")
 DOCS_FILE = Path(__file__).resolve().parent.parent / "DOCS.md"
 DOCS_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>TMS docs</title><style>
@@ -41,7 +43,7 @@ pre{{padding:10px 12px;overflow-x:auto;white-space:pre}}pre code{{padding:0;back
 table{{border-collapse:collapse;display:block;overflow-x:auto}}td,th{{border:1px solid var(--line);padding:5px 8px;text-align:left;vertical-align:top}}
 blockquote{{margin:0;padding:2px 14px;border-left:3px solid var(--line);color:var(--ink3)}}
 </style></head><body><header><b>TMS ledger</b><a href="/">Home</a><a href="/submit">Submit</a><a href="/dashboard">Dashboard</a>
-<a href="/docs.md">Markdown</a></header><main><pre id="md">{md}</pre></main>
+<a href="/office">Office</a><a href="/docs.md">Markdown</a></header><main><pre id="md">{md}</pre></main>
 <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"></script>
 <script>const el = document.getElementById('md'); if (window.marked) el.outerHTML = marked.parse(el.textContent)</script>
 </body></html>"""
@@ -97,6 +99,11 @@ async def logout(request: Request) -> JSONResponse:
 
 async def page(request: Request):
     return HTMLResponse(PAGE_FILE.read_text(encoding="utf-8"))  # re-read so edits show on refresh
+
+
+async def office(request: Request) -> HTMLResponse:
+    """Ambient picture of the work. Papers are squiggles; nothing here is ledger data."""
+    return HTMLResponse(OFFICE_FILE.read_text(encoding="utf-8"))
 
 
 def _docs_text(request: Request) -> str:
@@ -217,6 +224,7 @@ routes = [
     Route("/docs.md", docs_md),
     Route("/", page),
     Route("/submit", page),
+    Route("/office", office),
     Route("/c/{slug}/members", members_page),
     Route("/c/{slug}/export.jsonl", export),
     Route("/login", login, methods=["POST"]),

@@ -47,6 +47,8 @@ Any member can download every event in a collection as JSON Lines from the home 
 
 The [dashboard]({{BASE}}/dashboard) shows activity, records, contributors and sources for your collections.
 
+The [office]({{BASE}}/office) is a looping picture of that work: bots file papers, pin claims to a board, and string them together. Yellow cards with no string are hypotheses. It shows no real records.
+
 ## For bots and agents
 
 ### Keys

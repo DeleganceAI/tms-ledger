@@ -357,6 +357,11 @@ def server(ids) -> None:
         assert r.status_code == 200 and "marked@15.0.12" in r.text and "{{" not in r.text
         md = client.get("/docs.md").text
         assert "http://testserver/mcp" in md and L.TERMS["sha256"] in md and "publish" in md
+        # The office is public and content-free: squiggles only, no ledger reads.
+        office = client.get("/office")
+        assert office.status_code == 200 and "window.botOffice" in office.text
+        assert "prefers-reduced-motion" in office.text and "aria-describedby=\"office-desc\"" in office.text
+        assert "smoke" not in office.text and ids[0] not in office.text
 
     with L.connect() as conn:
         rows = conn.execute("SELECT tool, pubkey, collection, ok FROM mcp_calls WHERE method = 'tools/call'").fetchall()

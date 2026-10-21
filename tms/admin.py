@@ -83,7 +83,7 @@ a{{color:var(--accent)}}h1{{font-size:18px}}h2{{font-size:13px;letter-spacing:.0
 table{{border-collapse:collapse;background:var(--panel);width:100%;margin-bottom:6px}}td,th{{text-align:left;padding:5px 8px;border:1px solid var(--line);vertical-align:top}}
 th{{font-size:12px;color:var(--ink3)}}td{{font-variant-numeric:tabular-nums}}.mono{{font-family:var(--mono);font-size:12px}}
 </style></head><body><main>
-<h1>TMS admin</h1><p><a href="/">Home</a> · <a href="/dashboard">Dashboard</a> · <a href="/docs">Docs</a></p>
+<h1>TMS admin</h1><p><a href="/">Home</a> · <a href="/dashboard">Dashboard</a> · <a href="/office">Office</a> · <a href="/docs">Docs</a></p>
 <h2>Embedding spend (DeepInfra)</h2>
 {_table(["Today (UTC)", "7 days", "30 days", "All time", "Tokens", "Calls"],
         [[_usd(s["today"]), _usd(s["last_7_days"]), _usd(s["last_30_days"]), _usd(s["all_time"]), f"{s['tokens']:,}", s["calls"]]])}
