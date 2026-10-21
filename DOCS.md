@@ -67,6 +67,24 @@ Give the bot's npub to a collection owner, who adds it on the members page. Befo
 
 The endpoint uses MCP's streamable HTTP transport and runs stateless, so no session or initialize step is needed. Anyone can list the tools. There is no bearer token: `publish` takes signed events, and every other tool takes a signed `request`.
 
+Listing tools and prompts needs no signature. Each is a JSON-RPC POST to `/mcp` with the headers shown under [Signed requests](#signed-requests):
+
+```json
+{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+```
+
+This returns every tool's `name`, `description`, `inputSchema` and `outputSchema`, which MCP clients read automatically.
+
+```json
+{"jsonrpc": "2.0", "id": 2, "method": "prompts/list"}
+```
+
+```json
+{"jsonrpc": "2.0", "id": 3, "method": "prompts/get", "params": {"name": "claims_pass", "arguments": {"collection": "mcas"}}}
+```
+
+There are two prompts, each taking a `collection`. `claims_pass` turns evidence that no link cites yet into claims, links and contradictions. `briefing` answers questions from one collection with a checked thinking proof. `prompts/get` returns the instructions as `result.messages[0].content.text`.
+
 ### Events
 
 Every event is a NIP-01 envelope:
@@ -214,6 +232,59 @@ print(call("publish", {"events": [doc, claim, link]}))
 ```
 
 To dispute a link or a contradiction, publish a link whose `to` is that event's id.
+
+### What each tool returns
+
+Records come back with `id`, `pubkey`, `author` (the signer's profile name, or null) and `received_at` (when the server stored them, ISO 8601). Lists are oldest first unless a sort says otherwise. Results that are a list, or that can be null, arrive as `{"result": ...}`.
+
+| Tool | Result |
+|---|---|
+| `publish` | `{"accepted": [ids], "skipped": [ids already stored], "collections": [slugs], "embedded": n}`. `embedded` becomes `embedding_error` when embedding fails; the events are stored anyway, and their vectors catch up on a later publish. |
+| `fetch_url` | `{"url", "title", "chars", "text"}` |
+| `list_collections` | `{"result": [{"slug", "owner", "created_at", "members": [pubkeys], "evidence", "claims", "links", "contradictions"}]}` |
+| `get_event` | `{"result": {"id", "pubkey", "author", "kind", "kind_name", "collection", "created_at", "received_at", "content": {...}}}`, or `{"result": null}` if the event doesn't exist or isn't in your collections. For evidence, `content.text` is the window from `offset` and the result adds `chars` (the full length) and `offset`. |
+| `search_claims` | `{"method", "note", "items": [{"id", "pubkey", "author", "text", "received_at", "distance" (vector) or "rank" (keyword), "links": [link], "contradiction_ids": [ids]}]}`. Quotes inside `links` are cut to 300 characters here only. |
+| `list_claims` | `{"result": [{"id", "pubkey", "author", "text", "received_at", "supports", "qualifies", "rebuts", "findings"}]}`, where `findings` counts the contradictions the claim belongs to. |
+| `get_links` | `{"result": [link]}` |
+| `list_evidence` | `{"result": [{"id", "pubkey", "author", "title", "url", "source", "received_at", "chars", "link_count"}]}`, without the text; read it with `get_event`. |
+| `search_contradictions` | `{"result": [{"id", "pubkey", "author", "reason", "claim_ids", "received_at", "claims": [{"id", "pubkey", "author", "text"}], "links": [link]}]}` |
+| `check_proof` | `{"ok", "problems": [strings], "root", "tree"}` (see below) |
+
+A link is `{"id", "pubkey", "author", "from", "to", "relation", "quote", "reason", "received_at"}`. Distances, ranks and counts are retrieval aids, not confidence.
+
+### Thinking proofs (`check_proof`)
+
+A proof is an agent's argument resting on ledger events. It lives outside the ledger; `check_proof` validates it before the agent answers.
+
+```json
+{"question": "Is DAO deficiency the cause of histamine intolerance?",
+ "steps": [
+  {"id": "s1", "say": "One review proposes reduced DAO activity as the mechanism.", "from": ["<claim id>", "<link id>"]},
+  {"id": "s2", "say": "A contradiction says this sits badly with serum data.", "from": ["<contradiction id>"]},
+  {"id": "s3", "say": "Nothing in the collection covers children.", "from": [], "gap": true},
+  {"id": "root", "say": "Proposed mechanism, not an established cause.", "from": ["s1", "s2", "s3"]}
+ ]}
+```
+
+Each step has a unique `id`, a one-sentence `say`, and `from`: event ids from this collection, or ids of earlier steps. `gap: true` marks a step that no event supports. The rules:
+
+1. Every `from` entry is an event in this collection or an earlier step. Premises come before the steps that use them.
+2. Exactly one step, the answer, is not cited by any other step.
+3. Every step has a ledger event somewhere in its ancestry, or is marked `gap`.
+
+The result lists every broken rule in `problems`, and `ok` is true only when there are none. `root` is the answer step's id. `tree` is the proof printed as an indented tree with each event expanded (claim text, link quote, evidence title), so a person can read it next to the answer. An event from another collection is reported as not in this collection; the result never names other collections.
+
+### Limits
+
+| What | Limit |
+|---|---|
+| Events per `publish` batch | 1000 |
+| `content` per event | 2,000,000 characters; split longer documents |
+| Request age | within 60 seconds of the server's clock; each request works once |
+| `limit` argument | at least 1, at most 200 (`list_evidence` 500, `get_links` 1000) |
+| `get_event` window | `max_chars` defaults to 20,000; page with `offset` |
+| `fetch_url` download | 50 MB before extraction, http(s) only, no internal hosts |
+| Browser login | 12 hours |
 
 ### Common errors
 
