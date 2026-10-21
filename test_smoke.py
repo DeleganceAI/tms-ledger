@@ -34,7 +34,10 @@ Serum DAO activity correlates poorly with symptom severity in several cohorts.
 In one 2019 trial, DAO supplementation reduced symptom scores in adults with low serum DAO."""
 
 
-def fake_embed(texts, query=False):
+REAL_EMBED = L.embed
+
+
+def fake_embed(texts, query=False, pubkey=None, collection=None):
     out = []
     for t in texts:
         v = [0.0] * L.EMBED_DIM
@@ -76,6 +79,7 @@ def main() -> None:
     recreate()
     with L.connect() as conn:
         ids = ledger(conn)
+    embed_calls()
     server(ids)
     print("PASS: smoke")
 
@@ -218,6 +222,31 @@ def ledger(conn) -> list[str]:
     return [c1["id"], doc["id"]]
 
 
+def embed_calls() -> None:
+    """embed() logs each call with the tokens the endpoint reports; local endpoints cost nothing."""
+    class Fake:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"data": [{"index": 0, "embedding": [0.0] * L.EMBED_DIM}],
+                    "usage": {"prompt_tokens": 1_000_000, "total_tokens": 1_000_000}}
+
+    post, url = L.httpx.post, L.EMBED_URL
+    L.httpx.post = lambda *a, **k: Fake()
+    try:
+        L.EMBED_URL = "https://api.deepinfra.com/v1/openai"
+        assert len(REAL_EMBED(["a claim"], pubkey=PK[BOB], collection="smoke")) == 1
+        L.EMBED_URL = "http://localhost:11434/v1"
+        REAL_EMBED(["a query"], query=True, pubkey=PK[OWNER], collection="smoke")
+    finally:
+        L.httpx.post, L.EMBED_URL = post, url
+    with L.connect() as conn:
+        rows = conn.execute("SELECT pubkey, collection, model, tokens, cost_usd FROM embed_calls ORDER BY id").fetchall()
+    assert [(r["pubkey"], r["collection"], r["tokens"], float(r["cost_usd"])) for r in rows] == [
+        (PK[BOB], "smoke", 1_000_000, L.EMBED_PRICE_PER_MTOK), (PK[OWNER], "smoke", 1_000_000, 0.0)], rows
+
+
 def server(ids) -> None:
     """The MCP endpoint over HTTP, in process: signed requests, replay and staleness, login."""
     from starlette.testclient import TestClient
@@ -300,6 +329,11 @@ def server(ids) -> None:
         assert r.status_code == 400 and "quote not found" in r.json()["error"], r.text
         client.cookies.set(W.COOKIE, W.make_cookie(PK[OWNER]))
         assert client.get("/c/smoke/members").status_code == 200
+        # Admin page: TMS_ADMINS only; everyone else, logged out included, gets a 404.
+        L.ADMINS = {PK[OWNER]}
+        r = client.get("/admin")
+        assert r.status_code == 200 and "Embedding spend" in r.text and E.bech32_encode("npub", PK[BOB]) in r.text, r.text[:300]
+        assert "Bob" in r.text and "$0.0100" in r.text, "users table and embed spend"
         # Dashboard: scoped to the viewer's collections.
         snap = client.get("/dashboard/api/snapshot").json()
         assert {c["slug"] for c in snap["collections"]} == {"smoke", "other"}, snap["collections"]
@@ -314,6 +348,15 @@ def server(ids) -> None:
         assert client.get("/api/me").status_code == 401 and client.get("/c/smoke/export.jsonl").status_code == 401
         client.cookies.clear()
         assert client.get("/api/me").status_code == 401
+        assert client.get("/admin").status_code == 404
+        client.cookies.set(W.COOKIE, W.make_cookie(PK[BOB]))
+        assert client.get("/admin").status_code == 404
+        client.cookies.clear()
+        # Docs are public, with the live base URL and terms hash filled in.
+        r = client.get("/docs")
+        assert r.status_code == 200 and "marked@15.0.12" in r.text and "{{" not in r.text
+        md = client.get("/docs.md").text
+        assert "http://testserver/mcp" in md and L.TERMS["sha256"] in md and "publish" in md
 
     with L.connect() as conn:
         rows = conn.execute("SELECT tool, pubkey, collection, ok FROM mcp_calls WHERE method = 'tools/call'").fetchall()

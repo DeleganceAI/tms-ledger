@@ -17,6 +17,7 @@ import subprocess
 import sys
 import time
 from contextvars import ContextVar
+from typing import Any
 
 import httpx
 import psycopg
@@ -42,6 +43,7 @@ Every other tool takes `request`: a kind-4707 event signed now, content {"tool":
 Discipline: search -> inspect -> publish -> read. Search for existing claims before adding one
 and reuse IDs deliberately. A link's quote must appear in its evidence text; the server rejects
 quotes it cannot find. Nothing is edited or deleted: dispute a link or contradiction by linking to it.
+Full guide, with signing examples in Python and JS: GET /docs.md (or /docs) on this server.
 """
 
 _who: ContextVar[dict | None] = ContextVar("who", default=None)  # the verified caller, for mcp_calls
@@ -142,7 +144,7 @@ def signed(impl):
 # ------------------------------------------------------------------- writes
 
 @mcp.tool()
-def publish(events: list[dict]) -> dict:
+def publish(events: list[dict]) -> dict[str, Any]:
     """Append a batch of signed events, all or nothing. Each event is a NIP-01 envelope
     {id, pubkey, created_at, kind, tags: [], content, sig} whose content is a JSON object string
     (profiles may carry tags; they are stored as signed and ignored):
@@ -175,7 +177,7 @@ def _fetch_url(conn, pubkey, url):
 
 
 @signed(_fetch_url)
-def fetch_url(request: dict | None = None, url: str = "") -> dict:
+def fetch_url(request: dict | None = None, url: str = "") -> dict[str, Any]:
     """Fetch a URL and return its plain text and title, ready to sign as evidence (PDF via
     pdftotext, HTML via a readability extractor, JATS XML by stripping tags). Nothing is stored.
     The evidence text is what link quotes are checked against, so publish the whole text."""
@@ -187,14 +189,14 @@ def list_collections(request: dict | None = None) -> list[dict]:
 
 
 @signed(L.get_event)
-def get_event(request: dict | None = None, id: str = "", offset: int = 0, max_chars: int = 20000) -> dict | None:
+def get_event(request: dict | None = None, id: str = "", offset: int = 0, max_chars: int = 20000) -> dict[str, Any] | None:
     """Exact read of one event by ID, content parsed. Evidence text comes back as a window
     (offset, max_chars) with `chars`, the total; page through long documents."""
 
 
 @signed(L.search_claims)
 def search_claims(request: dict | None = None, collection: str = "", text: str = "", method: str = "vector",
-                  limit: int = 10) -> dict:
+                  limit: int = 10) -> dict[str, Any]:
     """Retrieve claims in a collection by meaning (method='vector') or words (method='keyword').
     Each result inlines the links targeting it (relation, quote, grounding evidence) and the ids of
     contradictions it belongs to. Inlined quotes are cut to 300 chars here only. Ordering is a
@@ -232,7 +234,7 @@ def search_contradictions(request: dict | None = None, collection: str = "", cla
 
 
 @signed(L.check_proof)
-def check_proof(request: dict | None = None, collection: str = "", proof: dict | None = None) -> dict:
+def check_proof(request: dict | None = None, collection: str = "", proof: dict | None = None) -> dict[str, Any]:
     """Validate a thinking proof before answering. proof = {"question": str, "steps": [{"id", "say",
     "from": [event ids or earlier step ids], "gap": bool?}]}. Rules: every 'from' resolves to an
     event in this collection or an earlier step; exactly one root; every step has a ledger event
@@ -312,12 +314,12 @@ def http_app():
     """MCP at /mcp plus the web pages, in one Starlette app."""
     from mcp.server.transport_security import TransportSecuritySettings
 
-    from . import ui, web
+    from . import admin, ui, web
     app = mcp.streamable_http_app(
         stateless_http=True, json_response=True,
         # The Host header is the deployment's own hostname; requests are signed, so no rebinding risk.
         transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False))
-    app.router.routes.extend(web.routes + ui.routes)
+    app.router.routes.extend(web.routes + ui.routes + admin.routes)
     return app
 
 

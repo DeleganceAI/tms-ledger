@@ -24,6 +24,8 @@ The server enforces exactly two mechanical things beyond structure: a link's quo
 | [tms/server.py](tms/server.py) | MCP tools and prompts; signed-request verification; stdio or HTTP. |
 | [tms/web.py](tms/web.py), [tms/web.html](tms/web.html) | `/`, `/submit`, `/c/<slug>/members`, `/c/<slug>/export.jsonl`, `/login`. |
 | [tms/ui.py](tms/ui.py), [tms/ui.html](tms/ui.html) | `/dashboard`, behind the login cookie, scoped to your collections. |
+| [tms/admin.py](tms/admin.py) | `/admin` for `TMS_ADMINS`: embedding spend, users, database size, events per day. |
+| [DOCS.md](DOCS.md) | The user and agent guide, served at `/docs` and `/docs.md`. |
 | [test_events.py](test_events.py), [check/](check/) | IDs and signatures cross-checked against `nostr-tools`. |
 | [test_smoke.py](test_smoke.py) | Every PLAN.md test, against a scratch database it recreates. |
 | [smoke_live.py](smoke_live.py) | Open and signed checks against a running service. |
@@ -65,10 +67,12 @@ Environment:
 |---|---|
 | `DATABASE_URL` | Postgres URL (`TMS_DATABASE_URL` also read; default the local container). In the cloud, the PgBouncer pool. |
 | `TMS_APPROVED` | npubs or hex pubkeys the operator approves. Only they create collections. |
+| `TMS_ADMINS` | npubs or hex pubkeys that may open `/admin`; everyone else gets a 404. |
 | `TMS_SECRET` | HMAC key for login cookies. Required over HTTP. |
 | `TMS_NSEC` | stdio only: your key; tool calls without a `request` are signed with it. |
 | `TMS_SERVER_NSEC` | The server's own key, which signs snapshot events and nothing else. |
 | `EMBED_URL`, `EMBED_MODEL`, `EMBED_API_KEY` | Default `http://localhost:11434/v1`, `qwen3-embedding:8b`. DeepInfra: `https://api.deepinfra.com/v1/openai`, `Qwen/Qwen3-Embedding-8B`. Must return 4096 dimensions. |
+| `EMBED_PRICE_PER_MTOK` | USD per million embedding tokens for the spend shown on `/admin` (default 0.01). Local endpoints are logged at $0. |
 
 ## Keys and signing
 
@@ -107,7 +111,7 @@ Prompts: `briefing` (answer from one collection with a checked proof) and `claim
 
 ## Web
 
-`/`: connect with a NIP-07 extension, show the profile fetched from Damus and Primal (stored once you agree), sign the terms, list your collections, create one (approved keys). `/submit`: sign one evidence document plus claims and links from it. `/c/<slug>/members`: owner only. `/c/<slug>/export.jsonl`: every event in the collection; each line verifies on its own. `/dashboard`: activity, browse, agents and sources, limited to your collections. Logging in signs a `login` request and sets a 12-hour HttpOnly cookie; writes are always signed in the browser.
+`/`: connect with a NIP-07 extension, show the profile fetched from Damus and Primal (stored once you agree), sign the terms, list your collections, create one (approved keys). `/submit`: sign one evidence document plus claims and links from it. `/c/<slug>/members`: owner only. `/c/<slug>/export.jsonl`: every event in the collection; each line verifies on its own. `/dashboard`: activity, browse, agents and sources, limited to your collections. `/docs`: the full guide for people and agents ([DOCS.md](DOCS.md)). `/admin`: operator page for `TMS_ADMINS`. Logging in signs a `login` request and sets a 12-hour HttpOnly cookie; writes are always signed in the browser.
 
 ## Deploy (DigitalOcean)
 
@@ -130,7 +134,7 @@ Prompts: `briefing` (answer from one collection with a checked proof) and `claim
    doctl apps create --spec .do/app.yaml
    ```
 
-   Set `TMS_SECRET`, `TMS_APPROVED`, `TMS_SERVER_NSEC` and `EMBED_API_KEY` on the app, and add the app to the cluster's trusted sources.
+   Set `TMS_SECRET`, `TMS_APPROVED`, `TMS_ADMINS`, `TMS_SERVER_NSEC` and `EMBED_API_KEY` on the app, and add the app to the cluster's trusted sources.
 4. Check it:
 
    ```bash

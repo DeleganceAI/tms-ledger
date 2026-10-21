@@ -104,7 +104,7 @@ def browse(conn, pk: str, cols: list[str], kind: str, q: str, collection: str, m
     view, extra, searchable = BROWSE[kind]
     base = f"x.id, x.collection, x.pubkey, {WHO.format('x')}, x.received_at"
     if method == "vector" and kind == "claim" and q:
-        vec = L.embed([q], query=True)[0]
+        vec = L.embed([q], query=True, pubkey=pk, collection=collection or None)[0]
         items = _rows(conn, f"""SELECT {base}, {extra}, round((v.vector <=> %s::vector)::numeric, 3)::float8 AS distance
             FROM claims x JOIN embeddings v ON v.event_id = x.id WHERE x.collection = ANY(%s)
             ORDER BY v.vector <=> %s::vector, x.id LIMIT %s""", (vec, scope, vec, size))

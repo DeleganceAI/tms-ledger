@@ -28,6 +28,23 @@ from . import ledger as L
 COOKIE = "tms"
 COOKIE_TTL = 12 * 3600
 PAGE_FILE = Path(__file__).with_name("web.html")
+DOCS_FILE = Path(__file__).resolve().parent.parent / "DOCS.md"
+DOCS_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>TMS docs</title><style>
+:root{{--bg:#f4f4f2;--panel:#fff;--line:#e2e2de;--ink:#171716;--ink3:#8c8c86;--accent:#2f6fde;--code:#ecece8}}
+@media(prefers-color-scheme:dark){{:root{{--bg:#121211;--panel:#1a1a19;--line:#2b2b29;--ink:#ececea;--ink3:#74746d;--accent:#7aa6f5;--code:#232321}}}}
+body{{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 system-ui,sans-serif}}
+header{{padding:10px 16px;border-bottom:1px solid var(--line);display:flex;gap:14px}}header a{{color:var(--ink3);text-decoration:none}}
+main{{max-width:860px;margin:0 auto;padding:8px 16px 40px}}a{{color:var(--accent)}}
+pre,code{{font:13px/1.5 ui-monospace,Menlo,monospace;background:var(--code);border-radius:4px}}code{{padding:1px 4px}}
+pre{{padding:10px 12px;overflow-x:auto;white-space:pre}}pre code{{padding:0;background:none}}#md{{white-space:pre-wrap}}
+table{{border-collapse:collapse;display:block;overflow-x:auto}}td,th{{border:1px solid var(--line);padding:5px 8px;text-align:left;vertical-align:top}}
+blockquote{{margin:0;padding:2px 14px;border-left:3px solid var(--line);color:var(--ink3)}}
+</style></head><body><header><b>TMS ledger</b><a href="/">Home</a><a href="/submit">Submit</a><a href="/dashboard">Dashboard</a>
+<a href="/docs.md">Markdown</a></header><main><pre id="md">{md}</pre></main>
+<script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"></script>
+<script>const el = document.getElementById('md'); if (window.marked) el.outerHTML = marked.parse(el.textContent)</script>
+</body></html>"""
 
 
 def _mac(payload: str) -> str:
@@ -80,6 +97,22 @@ async def logout(request: Request) -> JSONResponse:
 
 async def page(request: Request):
     return HTMLResponse(PAGE_FILE.read_text(encoding="utf-8"))  # re-read so edits show on refresh
+
+
+def _docs_text(request: Request) -> str:
+    base = str(request.base_url).rstrip("/")  # behind DO's proxy, uvicorn's proxy_headers make this https
+    return (DOCS_FILE.read_text(encoding="utf-8").replace("{{BASE}}", base)
+            .replace("{{TERMS_VERSION}}", L.TERMS["version"]).replace("{{TERMS_SHA256}}", L.TERMS["sha256"]))
+
+
+async def docs(request: Request) -> HTMLResponse:
+    """DOCS.md, rendered in the browser by a pinned marked; readable as plain text without JS."""
+    from html import escape
+    return HTMLResponse(DOCS_PAGE.format(md=escape(_docs_text(request))))
+
+
+async def docs_md(request: Request) -> PlainTextResponse:
+    return PlainTextResponse(_docs_text(request), media_type="text/markdown; charset=utf-8")
 
 
 async def members_page(request: Request):
@@ -180,6 +213,8 @@ async def healthz(request: Request) -> PlainTextResponse:
 
 routes = [
     Route("/healthz", healthz),
+    Route("/docs", docs),
+    Route("/docs.md", docs_md),
     Route("/", page),
     Route("/submit", page),
     Route("/c/{slug}/members", members_page),

@@ -195,4 +195,16 @@ CREATE TABLE mcp_calls (
     ms         integer NOT NULL
 );
 CREATE INDEX mcp_calls_at_idx ON mcp_calls (at DESC, id DESC);
+
+-- One row per embeddings request, with the tokens the endpoint reported. Safe to truncate.
+CREATE TABLE embed_calls (
+    id         bigserial PRIMARY KEY,
+    at         timestamptz NOT NULL DEFAULT now(),
+    pubkey     text,               -- whose publish or search caused it
+    collection text,
+    model      text NOT NULL,
+    tokens     integer NOT NULL,
+    cost_usd   numeric(12, 8) NOT NULL
+);
+CREATE INDEX embed_calls_at_idx ON embed_calls (at DESC);
 COMMIT;

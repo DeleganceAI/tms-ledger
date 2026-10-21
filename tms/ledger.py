@@ -15,6 +15,7 @@ import ipaddress
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import threading
 from datetime import datetime
@@ -35,8 +36,10 @@ EMBED_URL = os.environ.get("EMBED_URL", "http://localhost:11434/v1").rstrip("/")
 EMBED_API_KEY = os.environ.get("EMBED_API_KEY", "")
 EMBED_MODEL = os.environ.get("EMBED_MODEL", "qwen3-embedding:8b")  # DeepInfra: Qwen/Qwen3-Embedding-8B
 EMBED_DIM = 4096
+EMBED_PRICE_PER_MTOK = float(os.environ.get("EMBED_PRICE_PER_MTOK", "0.01"))  # USD; DeepInfra's Qwen3-Embedding-8B rate
 QUERY_PREFIX = "Instruct: Given a question or statement, retrieve claims relevant to it\nQuery: "
 APPROVED = {E.pubkey_hex(p) for p in re.split(r"[\s,]+", os.environ.get("TMS_APPROVED", "")) if p}
+ADMINS = {E.pubkey_hex(p) for p in re.split(r"[\s,]+", os.environ.get("TMS_ADMINS", "")) if p}
 SERVER_PUBKEY = E.pubkey_of(os.environ["TMS_SERVER_NSEC"]) if os.environ.get("TMS_SERVER_NSEC") else None
 TERMS_TEXT = (Path(__file__).resolve().parent.parent / "TERMS.md").read_bytes()
 TERMS = {"version": re.search(rb"Version (\S+)", TERMS_TEXT).group(1).decode(),
@@ -67,7 +70,8 @@ def connect():
     global _pool
     with _pool_lock:
         if _pool is None:
-            _pool = ConnectionPool(DB_URL, min_size=1, max_size=10, open=True, kwargs={
+            # check: a cheap ping on checkout, so connections dropped by a database restart are replaced
+            _pool = ConnectionPool(DB_URL, min_size=1, max_size=10, open=True, check=ConnectionPool.check_connection, kwargs={
                 "autocommit": True, "row_factory": dict_row, "prepare_threshold": None})
             atexit.register(_pool.close)
     return _pool.connection()
@@ -85,28 +89,45 @@ def _limit(n, hi: int = 200) -> int:
 
 # ---------------------------------------------------------------- embeddings
 
-def embed(texts: list[str], query: bool = False) -> list[str]:
-    """pgvector literals for each text. Queries get the Qwen3 instruct prefix."""
+def embed(texts: list[str], query: bool = False, pubkey: str | None = None,
+          collection: str | None = None) -> list[str]:
+    """pgvector literals for each text. Queries get the Qwen3 instruct prefix. Each call is
+    logged in embed_calls with the tokens the endpoint reports; a local endpoint costs nothing."""
     r = httpx.post(f"{EMBED_URL}/embeddings", timeout=120,
                    headers={"Authorization": f"Bearer {EMBED_API_KEY}"} if EMBED_API_KEY else {},
                    json={"model": EMBED_MODEL, "input": [(QUERY_PREFIX + t) if query else t for t in texts],
                          "encoding_format": "float"})
     r.raise_for_status()
+    body = r.json()
+    usage = body.get("usage") or {}
+    tokens = int(usage.get("total_tokens") or usage.get("prompt_tokens") or 0)
+    cost = 0.0 if _is_internal(urlparse(EMBED_URL).hostname or "") else tokens * EMBED_PRICE_PER_MTOK / 1e6
+    try:
+        with connect() as conn:
+            conn.execute("""INSERT INTO embed_calls (pubkey, collection, model, tokens, cost_usd)
+                            VALUES (%s, %s, %s, %s, %s)""", (pubkey, collection, EMBED_MODEL, tokens, cost))
+    except Exception as err:  # telemetry never fails an embedding
+        print(f"embed_calls logging failed: {err}", file=sys.stderr)
     out = []
-    for item in sorted(r.json()["data"], key=lambda d: d["index"]):
+    for item in sorted(body["data"], key=lambda d: d["index"]):
         if len(item["embedding"]) != EMBED_DIM:
             raise RuntimeError(f"{EMBED_MODEL} returned {len(item['embedding'])} dims, schema expects {EMBED_DIM}")
         out.append("[" + ",".join(repr(float(x)) for x in item["embedding"]) + "]")
     return out
 
 
-def embed_pending(conn, limit: int = 64) -> int:
-    """Embed claims that have no vector yet (this batch's, plus any an earlier outage left)."""
-    rows = conn.execute("""SELECT c.id, c.text FROM claims c LEFT JOIN embeddings v ON v.event_id = c.id
-                           WHERE v.event_id IS NULL ORDER BY c.received_at LIMIT %s""", (limit,)).fetchall()
-    for i in range(0, len(rows), 32):
-        chunk = rows[i:i + 32]
-        vecs = embed([r["text"] for r in chunk])
+def embed_pending(conn, pubkey: str | None = None, limit: int = 64) -> int:
+    """Embed claims that have no vector yet (this batch's, plus any an earlier outage left),
+    one call per collection so embed_calls can attribute the cost."""
+    rows = conn.execute("""SELECT c.id, c.text, c.collection FROM claims c LEFT JOIN embeddings v ON v.event_id = c.id
+                           WHERE v.event_id IS NULL ORDER BY c.collection, c.received_at LIMIT %s""", (limit,)).fetchall()
+    chunks: list[list[dict]] = []
+    for r in rows:
+        if not chunks or len(chunks[-1]) == 32 or chunks[-1][0]["collection"] != r["collection"]:
+            chunks.append([])
+        chunks[-1].append(r)
+    for chunk in chunks:
+        vecs = embed([r["text"] for r in chunk], pubkey=pubkey, collection=chunk[0]["collection"])
         conn.cursor().executemany(
             "INSERT INTO embeddings (event_id, vector, model) VALUES (%s, %s::vector, %s) ON CONFLICT DO NOTHING",
             [(r["id"], v, EMBED_MODEL) for r, v in zip(chunk, vecs)])
@@ -303,7 +324,7 @@ def publish(conn, events: list) -> dict:
     out = {"accepted": accepted, "skipped": skipped}
     if any(ev["kind"] == E.CLAIM for ev, _ in checked):
         try:
-            out["embedded"] = embed_pending(conn)
+            out["embedded"] = embed_pending(conn, checked[0][0]["pubkey"])
         except (httpx.HTTPError, RuntimeError, KeyError) as err:  # the claims are in; vectors catch up next time
             out["embedding_error"] = str(err)[:300]
     out["collections"] = sorted(c for c in collections if c)
@@ -389,7 +410,7 @@ def search_claims(conn, pubkey: str, collection: str, text: str, method: str = "
         rows = conn.execute(
             f"""SELECT x.id, x.pubkey, {AUTHOR}, x.text, x.received_at, v.vector <=> %s::vector AS distance
                 FROM claims x JOIN embeddings v ON v.event_id = x.id WHERE x.collection = %s
-                ORDER BY distance, x.id LIMIT %s""", (embed([text], query=True)[0], collection, limit))
+                ORDER BY distance, x.id LIMIT %s""", (embed([text], query=True, pubkey=pubkey, collection=collection)[0], collection, limit))
     elif method == "keyword":
         rows = conn.execute(
             f"""SELECT x.id, x.pubkey, {AUTHOR}, x.text, x.received_at,
