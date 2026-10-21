@@ -1,178 +1,211 @@
-"""End-to-end check of the ledger module against a live database and Ollama.
+"""End-to-end check of the signed-event ledger against a scratch Postgres.
 
-    TMS_DATABASE_URL=postgresql://tmsv2:tmsv2@localhost:5432/tmsv2_check uv run python test_smoke.py
+    TMS_SMOKE_URL=postgresql://tmsv2:tmsv2@localhost:5432/tmsv2_smoke uv run python test_smoke.py
 
-Everything runs in one transaction and rolls back. Needs db/init.sql applied and Ollama serving
-the embedding model. The one thing that must fail is a quote that is not in the document.
+Drops and recreates that database (its name must end in _smoke), applies db/init.sql, and runs
+every PLAN.md test. Embeddings are faked with a bag of words, so no model is needed.
 """
+import hashlib
 import json
+import os
 import re
-import tempfile
+from pathlib import Path
 
 import psycopg
 
-from tms import ledger as L
+URL = os.environ.get("TMS_SMOKE_URL", "postgresql://tmsv2:tmsv2@localhost:5432/tmsv2_smoke")
+NAME = URL.rsplit("/", 1)[1]
+assert NAME.endswith("_smoke"), f"refusing to drop {NAME}: the smoke database name must end in _smoke"
+os.environ["DATABASE_URL"] = URL
+OWNER, BOB, OUTSIDER, STRANGER, SERVER = (hashlib.sha256(n.encode()).hexdigest() for n in
+                                          ("owner", "bob", "outsider", "stranger", "server"))
+os.environ["TMS_SERVER_NSEC"] = SERVER
+
+from tms import events as E  # noqa: E402
+from tms import ledger as L  # noqa: E402
+
+PK = {k: E.pubkey_of(k) for k in (OWNER, BOB, OUTSIDER, STRANGER, SERVER)}
+L.APPROVED = {PK[OWNER], PK[OUTSIDER]}
 
 DOC = """Histamine intolerance (HIT) is thought to result from reduced diamine oxidase (DAO) activity.
 Serum DAO activity correlates poorly with symptom severity in several cohorts.
 In one 2019 trial, DAO supplementation reduced symptom scores in adults with low serum DAO."""
 
-LONG = ("Serum tryptase remained within the reference range in most patients at every visit, while urinary "
-        "N-methylhistamine rose above the upper limit of normal in a minority, and neither marker tracked the "
-        "symptom scores that patients reported in the weekly diaries kept throughout the twelve-month follow-up "
-        "period of the study.")
-JATS = f"""<?xml version="1.0"?><article><front><journal-meta><journal-title>Biomolecules</journal-title></journal-meta>
-<article-meta><title-group><article-title>Diagnostic criteria for <italic>MCAS</italic>: a comparison</article-title></title-group>
-<abstract><p>Two criteria sets are compared.</p></abstract></article-meta></front>
-<body><sec><title>Results</title><p>{LONG}</p>
-<table><tr><td>MCAS: CD25 on mast cells</td><td>WHO SM: CD25 on mast cells</td></tr></table><p>After the table.</p></sec></body>
-<back><ref-list><ref><mixed-citation>Cited paper about zebras.</mixed-citation></ref></ref-list></back></article>"""
+
+def fake_embed(texts, query=False):
+    out = []
+    for t in texts:
+        v = [0.0] * L.EMBED_DIM
+        for w in re.findall(r"[a-z]+", t.lower().replace(L.QUERY_PREFIX.lower(), "")):
+            v[int(hashlib.md5(w.encode()).hexdigest(), 16) % L.EMBED_DIM] += 1.0
+        out.append("[" + ",".join(map(str, v)) + "]")
+    return out
+
+
+L.embed = fake_embed
+
+
+def recreate() -> None:
+    with psycopg.connect(URL.rsplit("/", 1)[0] + "/postgres", autocommit=True) as c:
+        c.execute(f'DROP DATABASE IF EXISTS "{NAME}"')
+        c.execute(f'CREATE DATABASE "{NAME}"')
+    with psycopg.connect(URL, autocommit=True) as c:
+        c.execute(Path(__file__).with_name("db").joinpath("init.sql").read_text())
+
+
+def sign(sk, kind, content, **kw):
+    return E.sign(sk, kind, content, **kw)
+
+
+def terms(sk):
+    return sign(sk, E.TERMS, L.TERMS)
+
+
+def rejects(fn, needle):
+    try:
+        fn()
+    except (ValueError, psycopg.Error) as err:
+        assert needle in str(err), (needle, str(err))
+    else:
+        raise AssertionError(f"accepted, expected rejection: {needle}")
 
 
 def main() -> None:
-    with L.connect(autocommit=False) as conn:
-        try:
-            run(conn)
-        finally:
-            conn.rollback()
+    recreate()
+    with L.connect() as conn:
+        ledger(conn)
     print("PASS: smoke")
 
 
-def run(conn) -> None:
-    L.add_author(conn, "smoke-agent", "Smoke test agent", "agent")
-    assert L.add_author(conn, "smoke-agent", "Smoke test agent", "agent")["id"] == "smoke-agent"  # idempotent
-    try:
-        with conn.transaction():
-            L.add_author(conn, "smoke-agent", "Someone else", "agent")
-    except psycopg.errors.UniqueViolation:
-        pass
-    else:
-        raise AssertionError("the same id with a different name must still fail")
-    L.add_collection(conn, "smoke", "Smoke collection", "smoke-agent")
-    L.add_collection(conn, "other", "Other collection", "smoke-agent")
-    src = L.add_source(conn, "Example journal", "smoke-agent", "https://example.org")
-    obs = L.add_observation(conn, "smoke", src["id"], "smoke-agent", "https://example.org/hit-review", DOC)
-    assert obs["chars"] == len(DOC) and "content" not in obs
-    assert obs["title"] == DOC.splitlines()[0]  # plain text: first line
+def ledger(conn) -> list[str]:
+    pub = lambda evs: L.publish(conn, evs)  # noqa: E731
+    count = lambda: conn.execute("SELECT count(*) AS n FROM events").fetchone()["n"]  # noqa: E731
 
-    # JATS: title from <article-title>; journal metadata and bibliography dropped; table cells kept apart.
-    with tempfile.NamedTemporaryFile("w", suffix=".xml") as f:
-        f.write(JATS)
-        f.flush()
-        text, title = L.fetch_text(f.name)
-        obs2 = L.add_observation(conn, "smoke", src["id"], "smoke-agent", f.name)
-    assert title == "Diagnostic criteria for MCAS: a comparison" and obs2["title"] == title, (title, obs2)
-    assert "zebras" not in text and "Biomolecules" not in text and "Two criteria sets" in text, text
-    assert re.search(r"MCAS: CD25 on mast cells\t\s*WHO SM: CD25 on mast cells\t\s*\n", text), text
-    assert L.get_record(conn, "observation", obs2["id"], max_chars=0)["title"] == title
-    obs3 = L.add_observation(conn, "smoke", src["id"], "smoke-agent", "x", "body", title="Given")
-    assert obs3["title"] == "Given"
+    # A write from a key that hasn't signed the terms is rejected.
+    pub([sign(OWNER, E.PROFILE, {"name": "Owner", "about": "human"})])
+    rejects(lambda: pub([sign(OWNER, E.CLAIM, {"collection": "smoke", "text": "too early"})]), "sign the current terms")
+    rejects(lambda: pub([sign(OWNER, E.TERMS, {**L.TERMS, "version": "0"})]), "terms must be version")
 
-    c1 = L.add_claim(conn, "smoke", "Histamine intolerance results from reduced DAO activity.", "smoke-agent")
-    c2 = L.add_claim(conn, "smoke", "Serum DAO activity correlates poorly with symptom severity.", "smoke-agent")
-    c3 = L.add_claim(conn, "other", "An unrelated claim in another collection.", "smoke-agent")
+    # A signed batch is accepted: terms, evidence, claims and the links between them.
+    doc = sign(OWNER, E.EVIDENCE, {"collection": "smoke", "text": DOC, "title": "HIT review",
+                                   "url": "https://example.org/hit", "source": "Example journal"})
+    c1 = sign(OWNER, E.CLAIM, {"collection": "smoke", "text": "Histamine intolerance results from reduced DAO activity."})
+    c2 = sign(OWNER, E.CLAIM, {"collection": "smoke", "text": "Serum DAO activity correlates poorly with symptom severity."})
+    l1 = sign(OWNER, E.LINK, {"collection": "smoke", "from": doc["id"], "to": c1["id"], "relation": "SUPPORTS",
+                              "quote": "thought to result from reduced diamine oxidase (DAO) activity",
+                              "reason": "The review names reduced DAO activity as the proposed mechanism."})
+    q1 = sign(OWNER, E.LINK, {"collection": "smoke", "from": doc["id"], "to": c1["id"], "relation": "QUALIFIES",
+                              "quote": "correlates  poorly with symptom severity", "reason": "DAO alone does not track symptoms."})
+    k1 = sign(OWNER, E.CONTRADICTION, {"collection": "smoke", "claims": [c1["id"], c2["id"]],
+                                       "reason": "If DAO activity caused HIT, serum DAO should track symptoms."})
+    batch = [terms(OWNER), doc, c1, c2, l1, q1, k1]
+    res = pub(batch)
+    assert res["accepted"] == [e["id"] for e in batch] and res["embedded"] == 2 and res["collections"] == ["smoke"], res
+    assert conn.execute("SELECT owner FROM collections WHERE slug = 'smoke'").fetchone()["owner"] == PK[OWNER]
 
-    e1 = L.add_evidence(conn, obs["id"], "claim", c1["id"], "SUPPORTS",
-                        "thought to result from reduced diamine oxidase (DAO) activity",
-                        "The review names reduced DAO activity as the proposed mechanism.", "smoke-agent")
-    assert e1["target_id"] == c1["id"] and "target_claim_id" not in e1
-    q1 = L.add_evidence(conn, obs["id"], "claim", c1["id"], "QUALIFIES",
-                        "correlates poorly with symptom severity", "DAO level alone does not track symptoms.", "smoke-agent")
-    e2 = L.add_evidence(conn, obs2["id"], "claim", c2["id"], "SUPPORTS", LONG, "Markers did not track symptoms.", "smoke-agent")
+    # A duplicate ID is a no-op.
+    n = count()
+    assert pub(batch)["skipped"] == [e["id"] for e in batch] and count() == n
 
-    # The citation guard: a quote absent from the document is rejected (savepoint keeps the rest).
-    try:
-        with conn.transaction():
-            L.add_evidence(conn, obs["id"], "claim", c2["id"], "SUPPORTS",
-                           "DAO deficiency causes every case of HIT", "Invented.", "smoke-agent")
-    except psycopg.errors.CheckViolation as err:
-        assert "Quote not found" in str(err)
-    else:
-        raise AssertionError("a quote absent from the document must be rejected")
+    # A bad quote rolls back the whole batch.
+    c3 = sign(OWNER, E.CLAIM, {"collection": "smoke", "text": "DAO deficiency causes every case of HIT."})
+    bad = sign(OWNER, E.LINK, {"collection": "smoke", "from": doc["id"], "to": c3["id"], "relation": "SUPPORTS",
+                               "quote": "DAO deficiency causes every case", "reason": "Invented."})
+    rejects(lambda: pub([c3, bad]), "quote not found verbatim")
+    assert count() == n and L.get_event(conn, PK[OWNER], c3["id"]) is None
 
-    k1 = L.add_contradiction(conn, "smoke", [c1["id"], c2["id"]],
-                             "If DAO activity caused HIT, serum DAO should track symptoms.", "smoke-agent")
-    assert k1["claim_ids"] == sorted([c1["id"], c2["id"]])
-    try:
-        L.add_contradiction(conn, "smoke", [c1["id"], c3["id"]], "Members from two collections.", "smoke-agent")
-    except ValueError as err:
-        assert "collection 'smoke'" in str(err)
-    else:
-        raise AssertionError("contradiction members must live in the finding's collection")
+    # A tampered signature is rejected.
+    forged = dict(c3, sig=c3["sig"][:-2] + ("00" if not c3["sig"].endswith("00") else "11"))
+    rejects(lambda: pub([forged]), "signature does not verify")
+    rejects(lambda: pub([dict(c3, content=c3["content"].replace("every", "any"))]), "id does not match")
 
-    hits = L.search_claims(conn, "smoke", "what causes histamine intolerance?", "vector", 5)
+    # References stay inside one collection; QUALIFIES only targets claims.
+    o1 = sign(OWNER, E.CLAIM, {"collection": "other", "text": "An unrelated claim in another collection."})
+    pub([o1])
+    rejects(lambda: pub([sign(OWNER, E.CONTRADICTION, {"collection": "smoke", "claims": [c1["id"], o1["id"]],
+                                                       "reason": "two collections"})]), "is not a claim in collection")
+    rejects(lambda: pub([sign(OWNER, E.LINK, {"collection": "smoke", "from": doc["id"], "to": k1["id"],
+                                              "relation": "QUALIFIES", "quote": "DAO", "reason": "r"})]),
+            "QUALIFIES may only target a claim")
+
+    # Requests are never published; snapshots come only from the server key.
+    rejects(lambda: pub([E.request(OWNER, "list_collections")]), "never published")
+    snap = {"date": "2026-10-20", "cid": "bafy", "sha256": "0" * 64, "count": 1, "last_received_at": "2026-10-20T00:00:00Z"}
+    rejects(lambda: pub([sign(OWNER, E.SNAPSHOT, snap)]), "snapshots are signed by the server")
+    rejects(lambda: pub([sign(SERVER, E.CLAIM, {"collection": "smoke", "text": "server claim"})]), "nothing else is")
+    assert pub([sign(SERVER, E.SNAPSHOT, snap)])["accepted"]
+
+    # A non-member write is rejected, even from an approved key; approved keys may create collections.
+    pub([terms(OUTSIDER)])
+    rejects(lambda: pub([sign(OUTSIDER, E.CLAIM, {"collection": "smoke", "text": "intrusion"})]), "not a member of collection 'smoke'")
+    pub([sign(OUTSIDER, E.CLAIM, {"collection": "outside", "text": "my own collection"})])
+    rejects(lambda: L.list_claims(conn, PK[OUTSIDER], "smoke"), "not a member")
+    assert L.get_event(conn, PK[OUTSIDER], c1["id"]) is None
+    assert [c["slug"] for c in L.list_collections(conn, PK[OUTSIDER])] == ["outside"]
+
+    # An unapproved non-member gets nothing.
+    rejects(lambda: pub([sign(STRANGER, E.PROFILE, {"name": "Stranger"})]), "is not approved")
+    rejects(lambda: pub([terms(STRANGER)]), "is not approved")
+    assert not L.allowed(conn, PK[STRANGER]) and L.list_collections(conn, PK[STRANGER]) == []
+
+    # A member added by an owner gets in without approval, but cannot create collections or change members.
+    rejects(lambda: pub([terms(BOB)]), "is not approved")
+    rejects(lambda: pub([sign(OUTSIDER, E.MEMBERS, {"collection": "smoke", "members": [PK[OUTSIDER]]})]), "not a member")
+    pub([sign(OWNER, E.MEMBERS, {"collection": "smoke", "members": [PK[BOB]]})])
+    pub([terms(BOB), sign(BOB, E.PROFILE, {"name": "Bob", "about": "agent"})])
+    b1 = sign(BOB, E.CLAIM, {"collection": "smoke", "text": "Bob adds a claim about DAO supplementation."})
+    pub([b1])
+    rejects(lambda: pub([sign(BOB, E.CLAIM, {"collection": "bobs", "text": "new collection"})]), "only approved pubkeys create")
+    rejects(lambda: pub([sign(BOB, E.MEMBERS, {"collection": "smoke", "members": []})]), "only the owner")
+    mine = L.list_collections(conn, PK[BOB])
+    assert [c["slug"] for c in mine] == ["smoke"] and set(mine[0]["members"]) == {PK[OWNER], PK[BOB]}, mine
+
+    # Reads, scoped to the caller's collections.
+    hits = L.search_claims(conn, PK[BOB], "smoke", "what causes histamine intolerance?", "vector", 5)
     assert hits["items"][0]["id"] == c1["id"], hits
-    assert {e["id"] for e in hits["items"][0]["evidence"]} == {e1["id"], q1["id"]}
-    assert hits["items"][0]["contradiction_ids"] == [k1["id"]]
-    assert all(h["collection_id"] == "smoke" for h in hits["items"])
-    kw = L.search_claims(conn, "smoke", "serum symptom", "keyword", 5)
+    assert {e["id"] for e in hits["items"][0]["links"]} == {l1["id"], q1["id"]}
+    assert hits["items"][0]["contradiction_ids"] == [k1["id"]] and hits["items"][0]["author"] == "Owner"
+    kw = L.search_claims(conn, PK[BOB], "smoke", "serum symptom", "keyword", 5)
     assert [h["id"] for h in kw["items"]] == [c2["id"]]
-    short = next(e for e in kw["items"][0]["evidence"] if e["id"] == e2["id"])["quote"]
-    assert short == LONG[:300] + "…" and L.get_record(conn, "evidence", e2["id"])["quote"] == LONG  # search truncates, reads do not
+    assert [e["id"] for e in L.list_evidence(conn, PK[BOB], "smoke")] == [doc["id"]]
+    assert L.list_evidence(conn, PK[BOB], "smoke", ungrounded_only=True) == []
+    assert L.list_evidence(conn, PK[BOB], "smoke", source="example")[0]["link_count"] == 2
+    got = L.get_event(conn, PK[BOB], doc["id"], offset=10, max_chars=20)
+    assert got["content"]["text"] == DOC[10:30] and got["chars"] == len(DOC) and got["kind_name"] == "evidence"
+    assert [x["id"] for x in L.get_links(conn, PK[BOB], "smoke", to=c1["id"], relation="QUALIFIES")] == [q1["id"]]
+    ks = L.search_contradictions(conn, PK[BOB], "smoke", claim=c2["id"])
+    assert ks[0]["claim_ids"] == [c1["id"], c2["id"]] and len(ks[0]["claims"]) == 2
+    thin = L.list_claims(conn, PK[BOB], "smoke", "unsupported")
+    assert thin[-1]["id"] == c1["id"] and thin[-1]["supports"] == 1 and thin[-1]["findings"] == 1, thin
+    acct = L.account(conn, PK[BOB])
+    assert acct["allowed"] and acct["terms_signed"] and not acct["approved"] and acct["profile"]["name"] == "Bob"
 
-    assert [o["id"] for o in L.list_observations(conn, "smoke", ungrounded_only=True)] == [obs3["id"]]
-    assert {o["title"] for o in L.list_observations(conn, "smoke")} == {obs["title"], title, "Given"}
-    assert L.get_record(conn, "observation", obs["id"], offset=10, max_chars=20)["content"] == DOC[10:30]
-    assert L.search_contradictions(conn, "smoke", claim_id=c2["id"])[0]["claim_ids"] == k1["claim_ids"]
-
+    # check_proof looks events up by ID and never reveals other collections.
     proof = {"question": "Does DAO deficiency cause HIT?", "steps": [
-        {"id": "s1", "say": "One review proposes reduced DAO activity as the mechanism.", "from": [c1["id"], e1["id"], obs2["id"]]},
-        {"id": "s2", "say": "A finding says this sits badly with poor serum correlation.", "from": [k1["id"]]},
+        {"id": "s1", "say": "One review proposes reduced DAO activity.", "from": [c1["id"], l1["id"], doc["id"]]},
+        {"id": "s2", "say": "A contradiction says this sits badly with serum data.", "from": [k1["id"]]},
         {"id": "s3", "say": "Nothing here covers children.", "from": [], "gap": True},
-        {"id": "root", "say": "Proposed mechanism, not established; one finding is open on my reading.", "from": ["s1", "s2", "s3"]},
-    ]}
-    res = L.check_proof(conn, "smoke", proof)
-    assert res["ok"], res["problems"]
-    assert res["root"] == "root" and "(gap)" in res["tree"] and e1["quote"] in res["tree"]
-    assert f'observation "{title}" ' in res["tree"], res["tree"]
-    print(res["tree"])
-
-    bad = {"steps": [
-        {"id": "s1", "say": "Cites a record from another collection.", "from": [c3["id"]]},
-        {"id": "s2", "say": "Cites nothing and is not a gap.", "from": []},
-        {"id": "s3", "say": "Cites a made-up id.", "from": ["c_nope"]},
-        {"id": "root", "say": "Answer.", "from": ["s1", "s2", "s3", "s5"]},
-        {"id": "s5", "say": "Defined after it is used.", "from": [c1["id"]]},
-    ]}
-    res = L.check_proof(conn, "smoke", bad)
+        {"id": "root", "say": "Proposed, not established.", "from": ["s1", "s2", "s3"]}]}
+    res = L.check_proof(conn, PK[BOB], "smoke", proof)
+    assert res["ok"] and res["root"] == "root" and '"HIT review"' in res["tree"] and l1["id"] in res["tree"], res
+    res = L.check_proof(conn, PK[OWNER], "smoke", {"steps": [
+        {"id": "s1", "say": "Cites another collection.", "from": [o1["id"]]},
+        {"id": "s2", "say": "Not a gap.", "from": []},
+        {"id": "root", "say": "Answer.", "from": ["s1", "s2", "s4"]},
+        {"id": "s4", "say": "Later.", "from": [c1["id"]]}]})
     text = "\n".join(res["problems"])
-    for needle in ("belongs to collection 'other'", "s2: no ledger record", "c_nope is not a ledger record",
-                   "not an earlier step", "exactly one root"):
+    for needle in (f"{o1['id']} is not an event in collection 'smoke'", "s2: no ledger event", "not an earlier step",
+                   "exactly one root"):
         assert needle in text, (needle, res["problems"])
-    print(json.dumps(res["problems"], indent=1))
+    assert "other" not in text.replace("another", "")
 
-    # Hostile or malformed shapes must come back as problems, never crash or loop.
-    for shape in ([{"id": "a", "say": "x", "from": ["a"], "gap": True}],
-                  [{"id": "a", "say": "x", "from": ["b"]}, {"id": "b", "say": "y", "from": ["a"]}],
-                  [{"id": "a", "say": "x", "from": 5}, {"id": ["b"], "say": "y"}, {"id": "c", "say": 3, "from": [1]}],
-                  [{"id": "a", "say": "x", "from": "c_abc"}]):
-        res = L.check_proof(conn, "smoke", {"steps": shape})
-        assert not res["ok"] and res["problems"], shape
-    shared = [{"id": "s0", "say": "base", "from": [c1["id"]]}, {"id": "s1", "say": "one", "from": ["s0"]}]
-    shared += [{"id": f"s{i}", "say": str(i), "from": [f"s{i-1}", f"s{i-2}"]} for i in range(2, 30)]
-    res = L.check_proof(conn, "smoke", {"steps": shared})
-    assert res["ok"] and res["tree"].count("\n") < 200, res["tree"].count("\n")
-
-    thin = L.list_claims(conn, "smoke", "unsupported")
-    totals = [t["supports"] + t["qualifies"] + t["rebuts"] for t in thin]
-    assert totals == sorted(totals) and {t["id"] for t in thin} == {c1["id"], c2["id"]}, thin
-    top = L.list_claims(conn, "smoke", "unchallenged")[0]
-    assert top["rebuts"] + top["qualifies"] == 0 and top["findings"] == 1, top
-
-    # Telemetry and the dashboard's queries run against the same connection.
-    from tms import ui
-    L.log_call(conn, "tools/call", "add_claim", "smoke-agent", "smoke", True, None, 12)
-    L.log_call(conn, "tools/call", "add_evidence", "smoke-agent", "smoke", False, "Quote not found verbatim", 8)
-    snap = ui.snapshot(conn)
-    assert snap["counts"]["claims"] >= 3 and snap["calls"]["errors"] >= 1
-    assert any(t["name"] == "add_claim" for t in snap["by_tool"])
-    assert snap["recent_records"][0]["kind"] in {"contradiction", "evidence", "claim", "observation", "source", "collection", "author"}
-    assert any(r["author_id"] == "smoke-agent" for r in snap["by_author"])
-    cols = ui.collections(conn)
-    mine = next(c for c in cols["collections"] if c["id"] == "smoke")
-    assert (mine["sources"], mine["observations"], mine["claims"], mine["evidence"], mine["contributors"]) == (1, 3, 2, 3, 1), mine
-    assert mine["bytes"] > 0 and mine["last_at"] and cols["db_bytes"] > 0, mine
-    assert any(t["name"] == "observations" and t["bytes"] > 0 for t in cols["tables"])
+    # Export: every collection event, each line verifies on its own.
+    lines = [json.dumps(e) for e in L.export(conn, PK[BOB], "smoke", page=3)]
+    assert len(lines) == conn.execute("SELECT count(*) AS n FROM events WHERE collection = 'smoke'").fetchone()["n"]
+    for line in lines:
+        E.verify(json.loads(line))
+    rejects(lambda: list(L.export(conn, PK[OUTSIDER], "smoke")), "not a member")
+    return [c1["id"]]
 
 
 if __name__ == "__main__":

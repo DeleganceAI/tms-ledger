@@ -1,36 +1,49 @@
-"""TMS v2 ledger: append-only writes, raw reads, retrieval, proof checking.
+"""TMS v2 ledger: signed-event publishing, member-scoped reads, retrieval, proof checking.
 
-Every function takes an open psycopg connection. The ledger stores assertions
-and relationships; it never decides what is true. The only mechanical guards
-are structural (schema constraints) and citational (a quote must exist in the
-observation it cites; a proof may only cite records that exist).
+Every function takes an open psycopg connection; reads also take the caller's verified pubkey
+and only see collections that pubkey is a member of. The ledger stores signed assertions and
+relationships; it never decides what is true. The server checks signatures and access here;
+db/init.sql checks references, link quotes and immutability.
 """
 from __future__ import annotations
 
+import atexit
 import hashlib
+import json
 import html
 import ipaddress
 import os
 import re
 import subprocess
 import tempfile
-import uuid
+import threading
 from datetime import datetime
+from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
-import psycopg
 from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
 
-DB_URL = os.environ.get("TMS_DATABASE_URL", "postgresql://tmsv2:tmsv2@localhost:5432/tmsv2")
-OLLAMA = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
-EMBED_MODEL = os.environ.get("TMS_EMBED_MODEL", "qwen3-embedding:8b")
-EMBED_MODEL_LABEL = "Qwen/Qwen3-Embedding-8B"
+from . import events as E
+
+DB_URL = (os.environ.get("DATABASE_URL") or os.environ.get("TMS_DATABASE_URL")
+          or "postgresql://tmsv2:tmsv2@localhost:5432/tmsv2")
+# OpenAI-compatible embeddings: DeepInfra in the cloud, Ollama's /v1 locally.
+EMBED_URL = os.environ.get("EMBED_URL", "http://localhost:11434/v1").rstrip("/")
+EMBED_API_KEY = os.environ.get("EMBED_API_KEY", "")
+EMBED_MODEL = os.environ.get("EMBED_MODEL", "qwen3-embedding:8b")  # DeepInfra: Qwen/Qwen3-Embedding-8B
 EMBED_DIM = 4096
-MAX_CONTENT = 2_000_000  # chars; ponytail: one cap for everything, split documents if it ever binds
+QUERY_PREFIX = "Instruct: Given a question or statement, retrieve claims relevant to it\nQuery: "
+APPROVED = {E.pubkey_hex(p) for p in re.split(r"[\s,]+", os.environ.get("TMS_APPROVED", "")) if p}
+SERVER_PUBKEY = E.pubkey_of(os.environ["TMS_SERVER_NSEC"]) if os.environ.get("TMS_SERVER_NSEC") else None
+TERMS_TEXT = (Path(__file__).resolve().parent.parent / "TERMS.md").read_bytes()
+TERMS = {"version": re.search(rb"Version (\S+)", TERMS_TEXT).group(1).decode(),
+         "sha256": hashlib.sha256(TERMS_TEXT).hexdigest()}
+MAX_CONTENT = 2_000_000  # chars per event; ponytail: one cap for everything, split documents if it ever binds
+MAX_BATCH = 1000
 MAX_BYTES = 50_000_000   # download/file cap before extraction
 ALLOW_LOCAL = True       # the HTTP entry point sets this False: remote callers get http(s) only
-QUERY_PREFIX = "Instruct: Given a question or statement, retrieve claims relevant to it\nQuery: "
 FETCH_HEADERS = {
     # ponytail: a browser-like UA gets past most publishers; for the rest the caller
     # fetches the text itself (Firecrawl, a browser) and passes it as content.
@@ -38,52 +51,65 @@ FETCH_HEADERS = {
     "Accept": "application/pdf,text/html,application/xml,text/plain;q=0.9,*/*;q=0.8",
 }
 
-TARGET_KINDS = ("claim", "contradiction", "evidence", "source", "observation")
-RELATIONS = ("SUPPORTS", "REBUTS", "QUALIFIES")
-TABLES = {
-    "author": "authors", "collection": "collections", "source": "sources",
-    "observation": "observations", "claim": "claims",
-    "contradiction": "contradictions", "evidence": "evidence",
-}
-PREFIX_KIND = {"src": "source", "o": "observation", "c": "claim", "k": "contradiction", "e": "evidence"}
+
+class Denied(ValueError):
+    """The signer may not do this. The message says why."""
 
 
-def connect(autocommit: bool = True) -> psycopg.Connection:
-    return psycopg.connect(DB_URL, autocommit=autocommit, row_factory=dict_row)
+_pool: ConnectionPool | None = None
+_pool_lock = threading.Lock()
 
 
-def new_id(prefix: str) -> str:
-    return f"{prefix}_{uuid.uuid4().hex[:10]}"
+def connect():
+    """A pooled connection (context manager). Autocommit; batches open their own transaction.
+    prepare_threshold=None because PgBouncer in transaction mode breaks prepared statements."""
+    global _pool
+    with _pool_lock:
+        if _pool is None:
+            _pool = ConnectionPool(DB_URL, min_size=1, max_size=10, open=True, kwargs={
+                "autocommit": True, "row_factory": dict_row, "prepare_threshold": None})
+            atexit.register(_pool.close)
+    return _pool.connection()
 
 
 def _clean(row: dict | None) -> dict | None:
     if row is None:
         return None
-    row = dict(row)
-    row.pop("embedding", None)
-    return {k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in row.items()}
+    return {k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in dict(row).items()}
 
 
-def _tidy_evidence(row: dict) -> dict:
-    row = _clean(row)
-    kind = row["target_kind"]
-    row["target_id"] = row.pop(f"target_{kind}_id")
-    for k in TARGET_KINDS:
-        row.pop(f"target_{k}_id", None)
-    return row
+def _limit(n, hi: int = 200) -> int:
+    return max(1, min(int(n), hi))
 
 
 # ---------------------------------------------------------------- embeddings
 
-def embed(text: str, query: bool = False) -> str:
-    """Return the vector as a pgvector literal. Queries get the Qwen3 instruct prefix."""
-    payload = {"model": EMBED_MODEL, "input": (QUERY_PREFIX + text) if query else text}
-    r = httpx.post(f"{OLLAMA}/api/embed", json=payload, timeout=120)
+def embed(texts: list[str], query: bool = False) -> list[str]:
+    """pgvector literals for each text. Queries get the Qwen3 instruct prefix."""
+    r = httpx.post(f"{EMBED_URL}/embeddings", timeout=120,
+                   headers={"Authorization": f"Bearer {EMBED_API_KEY}"} if EMBED_API_KEY else {},
+                   json={"model": EMBED_MODEL, "input": [(QUERY_PREFIX + t) if query else t for t in texts],
+                         "encoding_format": "float"})
     r.raise_for_status()
-    vec = r.json()["embeddings"][0]
-    if len(vec) != EMBED_DIM:
-        raise RuntimeError(f"{EMBED_MODEL} returned {len(vec)} dims, schema expects {EMBED_DIM}")
-    return "[" + ",".join(repr(float(x)) for x in vec) + "]"
+    out = []
+    for item in sorted(r.json()["data"], key=lambda d: d["index"]):
+        if len(item["embedding"]) != EMBED_DIM:
+            raise RuntimeError(f"{EMBED_MODEL} returned {len(item['embedding'])} dims, schema expects {EMBED_DIM}")
+        out.append("[" + ",".join(repr(float(x)) for x in item["embedding"]) + "]")
+    return out
+
+
+def embed_pending(conn, limit: int = 64) -> int:
+    """Embed claims that have no vector yet (this batch's, plus any an earlier outage left)."""
+    rows = conn.execute("""SELECT c.id, c.text FROM claims c LEFT JOIN embeddings v ON v.event_id = c.id
+                           WHERE v.event_id IS NULL ORDER BY c.received_at LIMIT %s""", (limit,)).fetchall()
+    for i in range(0, len(rows), 32):
+        chunk = rows[i:i + 32]
+        vecs = embed([r["text"] for r in chunk])
+        conn.cursor().executemany(
+            "INSERT INTO embeddings (event_id, vector, model) VALUES (%s, %s::vector, %s) ON CONFLICT DO NOTHING",
+            [(r["id"], v, EMBED_MODEL) for r, v in zip(chunk, vecs)])
+    return len(rows)
 
 
 # -------------------------------------------------------------------- fetch
@@ -170,308 +196,343 @@ def fetch_text(uri: str) -> tuple[str, str | None]:
     return text, title or None
 
 
-# ------------------------------------------------------------------ appends
-
-def add_author(conn, id: str, name: str, kind: str) -> dict:
-    row = conn.execute("SELECT * FROM authors WHERE id = %s", (id,)).fetchone()
-    if row and (row["name"], row["kind"]) == (name, kind):
-        return _clean(row)  # re-registering the same identity is a no-op, not a duplicate-key error
-    return _clean(conn.execute(
-        "INSERT INTO authors (id, name, kind) VALUES (%s, %s, %s) RETURNING *", (id, name, kind)).fetchone())
 
 
-def add_collection(conn, id: str, name: str, author_id: str) -> dict:
-    return _clean(conn.execute(
-        "INSERT INTO collections (id, name, author_id) VALUES (%s, %s, %s) RETURNING *",
-        (id, name, author_id)).fetchone())
+# -------------------------------------------------------------------- access
+
+def my_collections(conn, pubkey: str) -> list[str]:
+    return [r["collection"] for r in conn.execute(
+        "SELECT collection FROM members WHERE pubkey = %s ORDER BY collection", (pubkey,))]
 
 
-def add_source(conn, name: str, author_id: str, uri: str | None = None) -> dict:
-    return _clean(conn.execute(
-        "INSERT INTO sources (id, name, uri, author_id) VALUES (%s, %s, %s, %s) RETURNING *",
-        (new_id("src"), name, uri, author_id)).fetchone())
+def allowed(conn, pubkey: str) -> bool:
+    """Approved by the operator, or a member of some collection (EVENTS.md section 3)."""
+    return pubkey in APPROVED or conn.execute(
+        "SELECT 1 FROM members WHERE pubkey = %s LIMIT 1", (pubkey,)).fetchone() is not None
 
 
-def add_observation(conn, collection: str, source_id: str, author_id: str, uri: str,
-                    content: str | None = None, title: str | None = None) -> dict:
-    if content is None:
-        content, fetched = fetch_text(uri)
-        title = title or fetched
-    if len(content) > MAX_CONTENT:
-        raise ValueError(f"content is {len(content)} chars; cap is {MAX_CONTENT}")
-    if not title:  # plain text and PDF: the first non-empty line
-        title = next((ln.strip() for ln in content.splitlines() if ln.strip()), "")
-    title = title[:200] or None
-    digest = "sha256:" + hashlib.sha256(content.encode("utf-8")).hexdigest()
-    row = conn.execute(
-        """INSERT INTO observations (id, collection_id, source_id, uri, title, content, content_hash, author_id)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-           RETURNING id, collection_id, source_id, uri, title, content_hash, author_id, asserted_at,
-                     char_length(content) AS chars, left(content, 300) AS preview""",
-        (new_id("o"), collection, source_id, uri, title, content, digest, author_id)).fetchone()
-    return _clean(row)
+def require_allowed(conn, pubkey: str) -> None:
+    if not allowed(conn, pubkey):
+        raise Denied(f"{pubkey} is not approved and is not a member of any collection")
 
 
-def add_claim(conn, collection: str, text: str, author_id: str) -> dict:
-    vec = embed(text)
-    return _clean(conn.execute(
-        """INSERT INTO claims (id, collection_id, text, author_id, embedding, embedding_model)
-           VALUES (%s, %s, %s, %s, %s::vector, %s) RETURNING *""",
-        (new_id("c"), collection, text, author_id, vec, EMBED_MODEL_LABEL)).fetchone())
+def require_member(conn, pubkey: str, collection: str) -> None:
+    if not isinstance(collection, str) or not collection:
+        raise ValueError("collection is required")
+    if conn.execute("SELECT 1 FROM members WHERE collection = %s AND pubkey = %s",
+                    (collection, pubkey)).fetchone() is None:
+        raise Denied(f"not a member of collection '{collection}'")
 
 
-def add_evidence(conn, from_observation_id: str, target_kind: str, target_id: str, relation: str,
-                 quote: str, reason: str, author_id: str) -> dict:
-    if target_kind not in TARGET_KINDS:
-        raise ValueError(f"target_kind must be one of {TARGET_KINDS}")
-    if relation not in RELATIONS:
-        raise ValueError(f"relation must be one of {RELATIONS}")
-    row = conn.execute(
-        f"""INSERT INTO evidence (id, relation, from_observation_id, target_kind, target_{target_kind}_id,
-                                  quote, reason, author_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING *""",
-        (new_id("e"), relation, from_observation_id, target_kind, target_id, quote, reason, author_id)).fetchone()
-    return _tidy_evidence(row)
+def signed_terms(conn, pubkey: str) -> bool:
+    return conn.execute("""SELECT 1 FROM events WHERE kind = 4706 AND pubkey = %s
+                             AND content::jsonb ->> 'version' = %s AND content::jsonb ->> 'sha256' = %s LIMIT 1""",
+                        (pubkey, TERMS["version"], TERMS["sha256"])).fetchone() is not None
 
 
-def add_contradiction(conn, collection: str, claim_ids: list[str], reason: str, author_id: str) -> dict:
-    ids = sorted(dict.fromkeys(claim_ids))
-    if len(ids) < 2:
-        raise ValueError("a contradiction names at least two distinct claims")
-    n = conn.execute("SELECT count(*) AS n FROM claims WHERE id = ANY(%s) AND collection_id = %s",
-                     (ids, collection)).fetchone()["n"]
-    if n != len(ids):
-        raise ValueError(f"every member claim must exist in collection '{collection}'")
-    kid = new_id("k")
+def account(conn, pubkey: str) -> dict:
+    """What the web pages need to know about a signer."""
+    profile = _clean(conn.execute("SELECT * FROM profiles WHERE pubkey = %s", (pubkey,)).fetchone())
+    return {"pubkey": pubkey, "npub": E.bech32_encode("npub", pubkey), "approved": pubkey in APPROVED,
+            "allowed": allowed(conn, pubkey), "terms_signed": signed_terms(conn, pubkey), "terms": TERMS,
+            "profile": profile, "collections": list_collections(conn, pubkey)}
+
+
+# ------------------------------------------------------------------ publish
+
+def _authorize(conn, ev: dict, data: dict) -> str | None:
+    """Acceptance rule 3. Creates the collection when an approved signer names a new slug.
+    Returns the event's collection (None for profiles, terms and snapshots)."""
+    pk, kind = ev["pubkey"], ev["kind"]
+    if kind == E.SNAPSHOT:
+        return None  # rule 6 already checked the server key
+    require_allowed(conn, pk)
+    if kind == E.TERMS:
+        if (data["version"], data["sha256"]) != (TERMS["version"], TERMS["sha256"]):
+            raise E.Invalid(f"{ev['id']}: terms must be version {TERMS['version']} with sha256 {TERMS['sha256']}")
+        return None
+    if kind == E.PROFILE:
+        return None
+    if not signed_terms(conn, pk):
+        raise Denied(f"{ev['id']}: sign the current terms first (kind 4706, version {TERMS['version']}, "
+                     f"sha256 {TERMS['sha256']})")
+    col = data["collection"]
+    row = conn.execute("SELECT owner FROM collections WHERE slug = %s", (col,)).fetchone()
+    if row is None:
+        if pk not in APPROVED:
+            raise Denied(f"{ev['id']}: collection '{col}' does not exist, and only approved pubkeys create collections")
+        conn.execute("INSERT INTO collections (slug, owner) VALUES (%s, %s) ON CONFLICT DO NOTHING", (col, pk))
+        row = conn.execute("SELECT owner FROM collections WHERE slug = %s", (col,)).fetchone()
+    require_member(conn, pk, col)
+    if kind == E.MEMBERS and row["owner"] != pk:
+        raise Denied(f"{ev['id']}: only the owner of '{col}' changes its members")
+    return col
+
+
+def publish(conn, events: list) -> dict:
+    """Accept a batch of signed events, all or nothing (EVENTS.md section 5). Events already in
+    the ledger are skipped. Claims are embedded after the batch commits."""
+    if not isinstance(events, list) or not events:
+        raise E.Invalid("events must be a non-empty list of signed events")
+    if len(events) > MAX_BATCH:
+        raise E.Invalid(f"at most {MAX_BATCH} events per batch")
+    checked = []
+    for ev in events:
+        data = E.verify(ev)  # rules 1 and 2
+        if ev["kind"] == E.REQUEST:
+            raise E.Invalid(f"{ev['id']}: request events accompany tool calls and are never published")
+        if (ev["kind"] == E.SNAPSHOT) != (SERVER_PUBKEY is not None and ev["pubkey"] == SERVER_PUBKEY):
+            raise Denied(f"{ev['id']}: snapshots are signed by the server's key, and nothing else is")
+        if len(ev["content"]) > MAX_CONTENT:
+            raise E.Invalid(f"{ev['id']}: content is {len(ev['content'])} chars; cap is {MAX_CONTENT}")
+        checked.append((ev, data))
+    accepted, skipped, collections = [], [], set()
     with conn.transaction():
-        row = conn.execute(
-            """INSERT INTO contradictions (id, collection_id, reason, claim_count, author_id)
-               VALUES (%s, %s, %s, %s, %s) RETURNING *""", (kid, collection, reason, len(ids), author_id)).fetchone()
-        conn.cursor().executemany(
-            "INSERT INTO contradiction_claims (contradiction_id, claim_id) VALUES (%s, %s)",
-            [(kid, c) for c in ids])
-    return {**_clean(row), "claim_ids": ids}
+        for ev, data in checked:
+            if conn.execute("SELECT 1 FROM events WHERE id = %s", (ev["id"],)).fetchone():
+                skipped.append(ev["id"])  # same ID, same signed bytes: a retry
+                continue
+            col = _authorize(conn, ev, data)
+            conn.execute("""INSERT INTO events (id, pubkey, created_at, kind, content, sig, collection)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                         (ev["id"], ev["pubkey"], ev["created_at"], ev["kind"], ev["content"], ev["sig"], col))
+            accepted.append(ev["id"])
+            collections.add(col)
+    out = {"accepted": accepted, "skipped": skipped}
+    if any(ev["kind"] == E.CLAIM for ev, _ in checked):
+        try:
+            out["embedded"] = embed_pending(conn)
+        except (httpx.HTTPError, RuntimeError, KeyError) as err:  # the claims are in; vectors catch up next time
+            out["embedding_error"] = str(err)[:300]
+    out["collections"] = sorted(c for c in collections if c)
+    return out
 
 
 # -------------------------------------------------------------------- reads
 
-def list_collections(conn) -> list[dict]:
+AUTHOR = "(SELECT name FROM profiles p WHERE p.pubkey = x.pubkey) AS author"
+LINK_COLS = f"""x.id, x.pubkey, {AUTHOR}, x.from_id AS "from", x.to_id AS "to", x.relation, x.quote, x.reason,
+                x.received_at"""
+
+
+def list_collections(conn, pubkey: str) -> list[dict]:
     return [_clean(r) for r in conn.execute(
-        """SELECT c.*, (SELECT count(*) FROM observations o WHERE o.collection_id = c.id) AS observations,
-                  (SELECT count(*) FROM claims k WHERE k.collection_id = c.id) AS claims
-           FROM collections c ORDER BY c.asserted_at, c.id""")]
+        """SELECT c.slug, c.owner, c.created_at,
+                  ARRAY(SELECT m.pubkey FROM members m WHERE m.collection = c.slug ORDER BY m.pubkey) AS members,
+                  (SELECT count(*) FROM evidence WHERE collection = c.slug) AS evidence,
+                  (SELECT count(*) FROM claims WHERE collection = c.slug) AS claims,
+                  (SELECT count(*) FROM links WHERE collection = c.slug) AS links,
+                  (SELECT count(*) FROM contradictions WHERE collection = c.slug) AS contradictions
+           FROM collections c WHERE c.slug IN (SELECT collection FROM members WHERE pubkey = %s)
+           ORDER BY c.created_at, c.slug""", (pubkey,))]
 
 
-def search_sources(conn, text: str, limit: int = 20) -> list[dict]:
-    like = f"%{text}%"
-    return [_clean(r) for r in conn.execute(
-        "SELECT * FROM sources WHERE name ILIKE %s OR uri ILIKE %s ORDER BY asserted_at, id LIMIT %s",
-        (like, like, limit))]
-
-
-def _members(conn, contradiction_ids: list[str]) -> dict[str, list[str]]:
-    out: dict[str, list[str]] = {k: [] for k in contradiction_ids}
-    for r in conn.execute(
-            "SELECT contradiction_id, claim_id FROM contradiction_claims WHERE contradiction_id = ANY(%s) ORDER BY claim_id",
-            (contradiction_ids,)):
-        out[r["contradiction_id"]].append(r["claim_id"])
-    return out
-
-
-def get_record(conn, kind: str, id: str, offset: int = 0, max_chars: int = 20000) -> dict | None:
-    table = TABLES.get(kind)
-    if table is None:
-        raise ValueError(f"kind must be one of {sorted(TABLES)}")
-    if kind == "observation":
-        row = conn.execute(
-            """SELECT id, collection_id, source_id, uri, title, content_hash, author_id, asserted_at,
-                      char_length(content) AS chars, content IS NULL AS content_unavailable,
-                      substr(content, %s + 1, %s) AS content
-               FROM observations WHERE id = %s""", (offset, max_chars, id)).fetchone()
-        if row:
-            row = _clean(row)
-            row["offset"] = offset
-        return row
-    row = conn.execute(f"SELECT * FROM {table} WHERE id = %s", (id,)).fetchone()
+def _visible(conn, pubkey: str, ref: str):
+    """The event row if the caller may read it: collection events need membership; profiles,
+    terms and snapshots are visible to anyone allowed in."""
+    if not isinstance(ref, str) or not E.HEX64.match(ref):
+        return None
+    row = conn.execute("SELECT * FROM events WHERE id = %s", (ref,)).fetchone()
     if row is None:
         return None
-    if kind == "evidence":
-        return _tidy_evidence(row)
-    row = _clean(row)
-    if kind == "contradiction":
-        row["claim_ids"] = _members(conn, [id])[id]
+    if row["collection"] is not None and conn.execute(
+            "SELECT 1 FROM members WHERE collection = %s AND pubkey = %s", (row["collection"], pubkey)).fetchone() is None:
+        return None
     return row
 
 
-def get_evidence(conn, target_kind: str | None = None, target_id: str | None = None,
-                 from_observation_id: str | None = None, relation: str | None = None, limit: int = 100) -> list[dict]:
-    where, params = [], []
-    if target_id and not target_kind:
-        raise ValueError("target_id requires target_kind")
-    if target_kind:
-        if target_kind not in TARGET_KINDS:
-            raise ValueError(f"target_kind must be one of {TARGET_KINDS}")
-        where.append("target_kind = %s")
-        params.append(target_kind)
-        if target_id:
-            where.append(f"target_{target_kind}_id = %s")
-            params.append(target_id)
-    if from_observation_id:
-        where.append("from_observation_id = %s")
-        params.append(from_observation_id)
-    if relation:
-        where.append("relation = %s")
-        params.append(relation)
-    sql = "SELECT * FROM evidence" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY asserted_at, id LIMIT %s"
-    return [_tidy_evidence(r) for r in conn.execute(sql, (*params, limit))]
+def get_event(conn, pubkey: str, id: str, offset: int = 0, max_chars: int = 20000) -> dict | None:
+    """One event by ID, content parsed. Evidence text comes back as a window: offset, max_chars, chars."""
+    row = _visible(conn, pubkey, id)
+    if row is None:
+        return None
+
+    data = json.loads(row["content"])
+    out = _clean({k: row[k] for k in ("id", "pubkey", "kind", "collection", "created_at", "received_at")})
+    out["kind_name"] = E.NAMES[row["kind"]]
+    out["author"] = (conn.execute("SELECT name FROM profiles WHERE pubkey = %s", (row["pubkey"],)).fetchone()
+                     or {}).get("name")
+    if row["kind"] == E.EVIDENCE:
+        offset, text = max(0, int(offset)), data["text"]
+        data["text"] = text[offset:offset + max(0, int(max_chars))]
+        out.update(chars=len(text), offset=offset)
+    out["content"] = data
+    return out
 
 
-def _attach_claim_context(conn, claims: list[dict]) -> list[dict]:
-    """Inline each claim's evidence and contradiction memberships. Raw records, no verdicts."""
+def _attach_claim_context(conn, collection: str, claims: list[dict]) -> list[dict]:
+    """Inline each claim's links and contradiction memberships. Raw records, no verdicts."""
     ids = [c["id"] for c in claims]
     if not ids:
         return claims
-    ev: dict[str, list] = {i: [] for i in ids}
-    for r in conn.execute(
-            "SELECT * FROM evidence WHERE target_claim_id = ANY(%s) ORDER BY asserted_at, id", (ids,)):
-        ev[r["target_claim_id"]].append(_tidy_evidence(r))
+    links: dict[str, list] = {i: [] for i in ids}
+    for r in conn.execute(f"SELECT {LINK_COLS} FROM links x WHERE x.to_id = ANY(%s) ORDER BY x.received_at, x.id", (ids,)):
+        links[r["to"]].append(_clean(r))
     ks: dict[str, list] = {i: [] for i in ids}
-    for r in conn.execute(
-            "SELECT claim_id, contradiction_id FROM contradiction_claims WHERE claim_id = ANY(%s) ORDER BY contradiction_id", (ids,)):
-        ks[r["claim_id"]].append(r["contradiction_id"])
+    for r in conn.execute("""SELECT id, claim_ids FROM contradictions WHERE collection = %s AND claim_ids && %s
+                             ORDER BY received_at, id""", (collection, ids)):
+        for c in r["claim_ids"]:
+            if c in ks:
+                ks[c].append(r["id"])
     for c in claims:
-        c["evidence"] = ev[c["id"]]
+        c["links"] = links[c["id"]]
         c["contradiction_ids"] = ks[c["id"]]
     return claims
 
 
-def search_claims(conn, collection: str, text: str, method: str = "vector", limit: int = 10) -> dict:
+def search_claims(conn, pubkey: str, collection: str, text: str, method: str = "vector", limit: int = 10) -> dict:
+    require_member(conn, pubkey, collection)
+    limit = _limit(limit)
     if method == "vector":
         rows = conn.execute(
-            """SELECT id, collection_id, text, author_id, asserted_at, embedding <=> %s::vector AS distance
-               FROM claims WHERE collection_id = %s AND embedding IS NOT NULL
-               ORDER BY distance, id LIMIT %s""", (embed(text, query=True), collection, limit))
+            f"""SELECT x.id, x.pubkey, {AUTHOR}, x.text, x.received_at, v.vector <=> %s::vector AS distance
+                FROM claims x JOIN embeddings v ON v.event_id = x.id WHERE x.collection = %s
+                ORDER BY distance, x.id LIMIT %s""", (embed([text], query=True)[0], collection, limit))
     elif method == "keyword":
         rows = conn.execute(
-            """SELECT id, collection_id, text, author_id, asserted_at,
-                      ts_rank_cd(to_tsvector('simple', text), plainto_tsquery('simple', %s)) AS rank
-               FROM claims WHERE collection_id = %s
-                 AND to_tsvector('simple', text) @@ plainto_tsquery('simple', %s)
-               ORDER BY rank DESC, id LIMIT %s""", (text, collection, text, limit))
+            f"""SELECT x.id, x.pubkey, {AUTHOR}, x.text, x.received_at,
+                       ts_rank_cd(to_tsvector('simple', x.text), plainto_tsquery('simple', %s)) AS rank
+                FROM claims x WHERE x.collection = %s
+                  AND to_tsvector('simple', x.text) @@ plainto_tsquery('simple', %s)
+                ORDER BY rank DESC, x.id LIMIT %s""", (text, collection, text, limit))
     else:
         raise ValueError("method must be 'vector' or 'keyword'")
-    items = _attach_claim_context(conn, [_clean(r) for r in rows])
-    for e in (e for c in items for e in c["evidence"]):  # search results stay skimmable; get_evidence has the whole quote
+    items = _attach_claim_context(conn, collection, [_clean(r) for r in rows])
+    for e in (e for c in items for e in c["links"]):  # search results stay skimmable; get_links has the whole quote
         if len(e["quote"]) > 300:
             e["quote"] = e["quote"][:300] + "…"
     return {"method": method, "note": "Distances and ranks are retrieval aids, not confidence.", "items": items}
 
 
-def list_observations(conn, collection: str, ungrounded_only: bool = False, limit: int = 50) -> list[dict]:
-    extra = "AND NOT EXISTS (SELECT 1 FROM evidence e WHERE e.from_observation_id = o.id)" if ungrounded_only else ""
-    rows = conn.execute(
-        f"""SELECT o.id, o.source_id, s.name AS source_name, o.title, o.uri, o.author_id, o.asserted_at,
-                   char_length(o.content) AS chars, o.content IS NULL AS content_unavailable,
-                   (SELECT count(*) FROM evidence e WHERE e.from_observation_id = o.id) AS evidence_count
-            FROM observations o JOIN sources s ON s.id = o.source_id
-            WHERE o.collection_id = %s {extra}
-            ORDER BY o.asserted_at, o.id LIMIT %s""", (collection, limit))
-    return [_clean(r) for r in rows]
-
-
-def search_contradictions(conn, collection: str, claim_id: str | None = None, text: str | None = None,
-                          limit: int = 20) -> list[dict]:
-    where, params = ["k.collection_id = %s"], [collection]
-    if claim_id:
-        where.append("EXISTS (SELECT 1 FROM contradiction_claims m WHERE m.contradiction_id = k.id AND m.claim_id = %s)")
-        params.append(claim_id)
-    if text:
-        where.append("to_tsvector('simple', k.reason) @@ plainto_tsquery('simple', %s)")
-        params.append(text)
-    rows = [_clean(r) for r in conn.execute(
-        f"SELECT k.* FROM contradictions k WHERE {' AND '.join(where)} ORDER BY k.asserted_at, k.id LIMIT %s",
-        (*params, limit))]
-    if not rows:
-        return rows
-    members = _members(conn, [r["id"] for r in rows])
-    ev: dict[str, list] = {r["id"]: [] for r in rows}
-    for e in conn.execute(
-            "SELECT * FROM evidence WHERE target_contradiction_id = ANY(%s) ORDER BY asserted_at, id", (list(ev),)):
-        ev[e["target_contradiction_id"]].append(_tidy_evidence(e))
-    for r in rows:
-        r["claim_ids"] = members[r["id"]]
-        r["claims"] = [_clean(c) for c in conn.execute(
-            "SELECT id, text, author_id, asserted_at FROM claims WHERE id = ANY(%s) ORDER BY id", (r["claim_ids"],))]
-        r["evidence"] = ev[r["id"]]
-    return rows
-
-
-# ----------------------------------------------------------- claim worklists
-
-CLAIM_COUNTS = """(SELECT count(*) FROM evidence e WHERE e.target_claim_id = claims.id AND e.relation = 'SUPPORTS') AS supports,
-    (SELECT count(*) FROM evidence e WHERE e.target_claim_id = claims.id AND e.relation = 'QUALIFIES') AS qualifies,
-    (SELECT count(*) FROM evidence e WHERE e.target_claim_id = claims.id AND e.relation = 'REBUTS') AS rebuts,
-    (SELECT count(*) FROM contradiction_claims m WHERE m.claim_id = claims.id) AS findings"""
+CLAIM_COUNTS = """(SELECT count(*) FROM links l WHERE l.to_id = x.id AND l.relation = 'SUPPORTS') AS supports,
+    (SELECT count(*) FROM links l WHERE l.to_id = x.id AND l.relation = 'QUALIFIES') AS qualifies,
+    (SELECT count(*) FROM links l WHERE l.to_id = x.id AND l.relation = 'REBUTS') AS rebuts,
+    (SELECT count(*) FROM contradictions k WHERE k.collection = x.collection AND x.id = ANY(k.claim_ids)) AS findings"""
 CLAIM_SORTS = {
-    "recent": "asserted_at DESC, id",
-    "evidence": "supports + qualifies + rebuts DESC, asserted_at DESC, id",
-    "unsupported": "supports + qualifies + rebuts ASC, asserted_at DESC, id",
-    "unchallenged": "rebuts + qualifies ASC, supports DESC, asserted_at DESC, id",
-    "contested": "rebuts DESC, findings DESC, asserted_at DESC, id",
+    "recent": "received_at DESC, id",
+    "links": "supports + qualifies + rebuts DESC, received_at DESC, id",
+    "unsupported": "supports + qualifies + rebuts ASC, received_at DESC, id",
+    "unchallenged": "rebuts + qualifies ASC, supports DESC, received_at DESC, id",
+    "contested": "rebuts DESC, findings DESC, received_at DESC, id",
 }
 
 
-def list_claims(conn, collection: str, sort: str = "unsupported", limit: int = 50) -> list[dict]:
-    """Claims with their evidence counts, ordered for follow-up work. Counts are retrieval aids, not verdicts."""
+def list_claims(conn, pubkey: str, collection: str, sort: str = "unsupported", limit: int = 50) -> list[dict]:
+    """Claims with their link counts, ordered for follow-up work. Counts are retrieval aids, not verdicts."""
+    require_member(conn, pubkey, collection)
     if sort not in CLAIM_SORTS:
         raise ValueError(f"sort must be one of {sorted(CLAIM_SORTS)}")
     return [_clean(r) for r in conn.execute(
-        f"""SELECT * FROM (SELECT id, collection_id, text, author_id, asserted_at, {CLAIM_COUNTS}
-                           FROM claims WHERE collection_id = %s) b
-            ORDER BY {CLAIM_SORTS[sort]} LIMIT %s""", (collection, limit))]
+        f"""SELECT * FROM (SELECT x.id, x.pubkey, {AUTHOR}, x.text, x.received_at, {CLAIM_COUNTS}
+                           FROM claims x WHERE x.collection = %s) b
+            ORDER BY {CLAIM_SORTS[sort]} LIMIT %s""", (collection, _limit(limit)))]
+
+
+def get_links(conn, pubkey: str, collection: str, to: str = "", from_: str = "", relation: str = "",
+              limit: int = 100) -> list[dict]:
+    """Links in a collection, filtered by target, grounding evidence and/or relation."""
+    require_member(conn, pubkey, collection)
+    where, params = ["x.collection = %s"], [collection]
+    for col, val in (("x.to_id", to), ("x.from_id", from_), ("x.relation", relation)):
+        if val:
+            where.append(f"{col} = %s")
+            params.append(val)
+    return [_clean(r) for r in conn.execute(
+        f"SELECT {LINK_COLS} FROM links x WHERE {' AND '.join(where)} ORDER BY x.received_at, x.id LIMIT %s",
+        (*params, _limit(limit, 1000)))]
+
+
+def list_evidence(conn, pubkey: str, collection: str, ungrounded_only: bool = False, source: str = "",
+                  limit: int = 50) -> list[dict]:
+    """Evidence documents in a collection, oldest first, without their text. ungrounded_only: no link
+    cites them yet. source: substring of the source field."""
+    require_member(conn, pubkey, collection)
+    where, params = ["x.collection = %s"], [collection]
+    if ungrounded_only:
+        where.append("NOT EXISTS (SELECT 1 FROM links l WHERE l.from_id = x.id)")
+    if source:
+        where.append("x.source ILIKE %s")
+        params.append(f"%{source}%")
+    return [_clean(r) for r in conn.execute(
+        f"""SELECT x.id, x.pubkey, {AUTHOR}, x.title, x.url, x.source, x.received_at, char_length(x.text) AS chars,
+                   (SELECT count(*) FROM links l WHERE l.from_id = x.id) AS link_count
+            FROM evidence x WHERE {' AND '.join(where)} ORDER BY x.received_at, x.id LIMIT %s""",
+        (*params, _limit(limit, 500)))]
+
+
+def search_contradictions(conn, pubkey: str, collection: str, claim: str = "", text: str = "",
+                          limit: int = 20) -> list[dict]:
+    """Contradictions in a collection, optionally naming a claim or matching words in the reason,
+    each with its member claims and the links that target it."""
+    require_member(conn, pubkey, collection)
+    where, params = ["x.collection = %s"], [collection]
+    if claim:
+        where.append("%s = ANY(x.claim_ids)")
+        params.append(claim)
+    if text:
+        where.append("to_tsvector('simple', x.reason) @@ plainto_tsquery('simple', %s)")
+        params.append(text)
+    rows = [_clean(r) for r in conn.execute(
+        f"""SELECT x.id, x.pubkey, {AUTHOR}, x.reason, x.claim_ids, x.received_at FROM contradictions x
+            WHERE {' AND '.join(where)} ORDER BY x.received_at, x.id LIMIT %s""", (*params, _limit(limit)))]
+    for r in rows:
+        r["claims"] = [_clean(c) for c in conn.execute(
+            f"SELECT x.id, x.pubkey, {AUTHOR}, x.text FROM claims x WHERE x.id = ANY(%s) ORDER BY x.id", (r["claim_ids"],))]
+        r["links"] = [_clean(c) for c in conn.execute(
+            f"SELECT {LINK_COLS} FROM links x WHERE x.to_id = %s ORDER BY x.received_at, x.id", (r["id"],))]
+    return rows
+
+
+def export(conn, pubkey: str, collection: str, page: int = 500):
+    """Every event in the collection, oldest first, as signed envelopes that each verify on their own."""
+    require_member(conn, pubkey, collection)
+    after = ("-infinity", "")
+    while True:
+        rows = conn.execute(
+            """SELECT id, pubkey, created_at, kind, content, sig, received_at FROM events
+               WHERE collection = %s AND (received_at, id) > (%s::timestamptz, %s) ORDER BY received_at, id LIMIT %s""",
+            (collection, *after, page)).fetchall()
+        for r in rows:
+            yield {"id": r["id"], "pubkey": r["pubkey"], "created_at": r["created_at"], "kind": r["kind"],
+                   "tags": [], "content": r["content"], "sig": r["sig"]}
+        if len(rows) < page:
+            return
+        after = (rows[-1]["received_at"], rows[-1]["id"])
 
 
 # --------------------------------------------------------------- telemetry
 
-def log_call(conn, method: str, tool: str | None, author_id: str | None, collection: str | None,
+def log_call(conn, method: str, tool: str | None, pubkey: str | None, collection: str | None,
              ok: bool, error: str | None, ms: int) -> None:
-    """Operational record of one MCP request. Not part of the ledger; no provenance rules apply."""
+    """Operational record of one MCP request. Not part of the ledger."""
     conn.execute(
-        "INSERT INTO mcp_calls (method, tool, author_id, collection, ok, error, ms) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-        (method, tool, author_id, collection, ok, error, ms))
+        "INSERT INTO mcp_calls (method, tool, pubkey, collection, ok, error, ms) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+        (method, tool, pubkey, collection, ok, error, ms))
 
 
 # -------------------------------------------------------------- proof check
 
-def _lookup(conn, ref: str) -> tuple[str, dict] | None:
-    kind = PREFIX_KIND.get(ref.split("_", 1)[0]) if "_" in ref else None
-    if kind is None:
-        return None
-    row = get_record(conn, kind, ref, max_chars=0)
-    if row is None:
-        return None
-    if kind == "evidence":
-        obs = conn.execute("SELECT collection_id FROM observations WHERE id = %s", (row["from_observation_id"],)).fetchone()
-        row["collection_id"] = obs["collection_id"] if obs else None
-    return kind, row
+def _leaf_line(row: dict) -> str:
+
+    c = json.loads(row["content"])
+    kind = row["kind"]
+    if kind == E.CLAIM:
+        return f"claim: {c['text']}"
+    if kind == E.LINK:
+        return f"link {c['relation']} {c['to']} from {c['from']}: \"{c['quote']}\""
+    if kind == E.CONTRADICTION:
+        return f"contradiction among {', '.join(c['claims'])}: {c['reason']}"
+    if kind == E.EVIDENCE:
+        title = f'"{c["title"]}" ' if c.get("title") else ""
+        where = " ".join(x for x in (c.get("url"), f"({c['source']})" if c.get("source") else None) if x)
+        return f"evidence {title}{where} by {row['pubkey'][:12]}".replace("  ", " ")
+    return f"{E.NAMES[kind]} by {row['pubkey'][:12]}"
 
 
-def _leaf_line(kind: str, row: dict) -> str:
-    if kind == "claim":
-        return f"claim: {row['text']}"
-    if kind == "evidence":
-        return f"evidence {row['relation']} {row['target_kind']} {row['target_id']} from {row['from_observation_id']}: \"{row['quote']}\""
-    if kind == "contradiction":
-        return f"contradiction among {', '.join(row['claim_ids'])}: {row['reason']}"
-    if kind == "observation":
-        title = f'"{row["title"]}" ' if row.get("title") else ""
-        return f"observation {title}{row['uri']} (source {row['source_id']}, author {row['author_id']})"
-    return f"source: {row['name']} {row.get('uri') or ''}".rstrip()
-
-
-def check_proof(conn, collection: str, proof: dict) -> dict:
-    """Validate a thinking proof: steps cite real ledger records in this collection or earlier
-    steps; one root; every step is grounded or marked gap. Returns problems and an inspectable tree."""
+def check_proof(conn, pubkey: str, collection: str, proof: dict) -> dict:
+    """Validate a thinking proof: steps cite events in this collection or earlier steps; one root;
+    every step is grounded or marked gap. Returns problems and an inspectable tree."""
+    require_member(conn, pubkey, collection)
     steps = proof.get("steps") if isinstance(proof, dict) else None
     if not isinstance(steps, list) or not steps:
         return {"ok": False, "problems": ["proof.steps must be a non-empty list"], "tree": ""}
@@ -479,7 +540,7 @@ def check_proof(conn, collection: str, proof: dict) -> dict:
     by_id: dict[str, dict] = {}
     premises: dict[str, list[str]] = {}
     grounded: dict[str, bool] = {}
-    leaves: dict[str, tuple[str, dict]] = {}
+    leaves: dict[str, dict] = {}
     referenced: set[str] = set()
     all_ids = {s.get("id") for s in steps if isinstance(s, dict) and isinstance(s.get("id"), str)}
     for i, s in enumerate(steps):
@@ -506,18 +567,14 @@ def check_proof(conn, collection: str, proof: dict) -> dict:
             elif ref in all_ids:
                 problems.append(f"{sid}: cites step {ref}, which is not an earlier step; list premises before conclusions")
             else:
-                found = _lookup(conn, ref)
-                if found is None:
-                    problems.append(f"{sid}: {ref} is not a ledger record")
+                row = _visible(conn, pubkey, ref)
+                if row is None or row["collection"] != collection:  # never say which other collection
+                    problems.append(f"{sid}: {ref} is not an event in collection '{collection}'")
                     continue
-                kind, row = found
-                rc = row.get("collection_id")
-                if rc and rc != collection:
-                    problems.append(f"{sid}: {ref} belongs to collection '{rc}', not '{collection}'")
-                leaves[ref] = (kind, row)
+                leaves[ref] = row
                 ok = True
         if not ok and not s.get("gap"):
-            problems.append(f"{sid}: no ledger record in its ancestry and not marked gap")
+            problems.append(f"{sid}: no ledger event in its ancestry and not marked gap")
         grounded[sid] = ok
     roots = [sid for sid in by_id if sid not in referenced]
     if len(roots) != 1:
@@ -542,7 +599,7 @@ def check_proof(conn, collection: str, proof: dict) -> dict:
             elif ref in by_id:
                 lines.append(f"{pad}  [{ref}] ?? not an earlier step")
             elif ref in leaves:
-                lines.append(f"{pad}  {ref} {_leaf_line(*leaves[ref])}")
+                lines.append(f"{pad}  {ref} {_leaf_line(leaves[ref])}")
             else:
                 lines.append(f"{pad}  {ref} ?? unresolved")
 
