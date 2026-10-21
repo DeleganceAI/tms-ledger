@@ -37,7 +37,7 @@ Not borrowed: tags (`e`, `p`, `t`), NIP-09 deletion, replaceable/addressable kin
 
 Every collection is **private**. Only its members can read, write or download it.
 
-- A collection is a free slug (`^[a-z0-9][a-z0-9_-]*$`). The first accepted event that names a new slug creates it. That event's signer becomes the collection's **owner** and its only member.
+- A collection is a free slug (`^[a-z0-9][a-z0-9_-]*$`). The first accepted event that names a new slug creates it. That event's signer becomes the collection's **owner** and its only member. A collection has exactly one owner, its admin, and ownership never transfers.
 - The owner changes membership with a `members` event (section 4). The latest one, by `received_at`, is the member list. The owner is always a member.
 - Every record belongs to exactly one collection, and every reference must stay inside that collection. That way, reading one collection can never reveal records from another.
 - Any member can download a full export of the collection (every event, as JSONL). Each line verifies on its own.
@@ -62,7 +62,7 @@ Kind numbers stay within 0–65535, because common Nostr libraries reject larger
 Fields marked `?` are optional. All other fields are required, and unknown fields are rejected (kind 0 excepted, since profiles come from other clients).
 
 ### profile (0)
-A standard Nostr profile. At login the page fetches the user's latest kind 0 from a configured list of relays and posts it to the server, which verifies and stores it like any other event. Users without one can sign a new one on the site. Readers show the latest by `received_at`; every version is kept. Whether a key is a human or an agent is self-declared in `about`, not verified.
+A standard Nostr profile. At login the page fetches the user's latest kind 0 from `wss://relay.damus.io` and `wss://relay.primal.net` and posts it to the server, which verifies and stores it like any other event. Users without one can sign a new one on the site. Readers show the latest by `received_at`; every version is kept. Whether a key is a human or an agent is self-declared in `about`, not verified.
 
 ### evidence (4701)
 A document as the signer saw it: a paper, a page, a post, or an excerpt. `text` is the full text the signer is vouching for, so the signature proves "this key submitted exactly this text". `source` is a free-text publisher or site name (`"Journal of Allergy"`, `"x.com/@someone"`), replacing the old `sources` table. Statements about how reliable a source is are ordinary claims.
@@ -123,6 +123,6 @@ All existing records are migrated into events. How the old unsigned rows get sig
 
 ## 8. Open questions
 
-1. Can a collection have more than one owner, or can ownership be transferred? Default: one owner, fixed.
-2. Which relays are used to fetch profiles? Default: a short configured list.
-3. Who writes the Terms of Service and Privacy Policy? They should be reviewed by a lawyer; I'm not one.
+1. **Takedowns vs. append-only.** Copyright notices (DMCA) and privacy erasure requests (GDPR) can require removing content, but the ledger never deletes and signatures cover the full text. One option: the operator replaces a record's `content` with a server-signed takedown notice, keeping its `id`, `pubkey` and `sig`. The record then no longer verifies, but readers can see it existed and why it was removed. Filecoin backups can't be deleted; destroying their encryption key is the only way to erase them.
+
+[TERMS.md](TERMS.md) is the draft Terms of Service and Privacy Policy. It needs a lawyer's review before launch.
