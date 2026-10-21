@@ -99,4 +99,4 @@ Each phase is committed locally after its check passes.
 
 ## Open questions
 
-1. **Filecoin provider:** Storacha or Lighthouse? Either needs an account.
+1. **Filecoin provider:** Storacha or Lighthouse? Either needs an account. Decided at the end, in phase 8; nothing before it depends on this.
