@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TMS ledger</title>
+<style>
+:root{--bg:#f4f4f2;--panel:#fff;--line:#e2e2de;--ink:#171716;--ink2:#5a5a55;--ink3:#8c8c86;--accent:#2f6fde;--accent2:#e3ecfb;--bad:#b4232c;--good:#0a7d0a;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;--sans:Inter,system-ui,-apple-system,"Segoe UI",sans-serif}
+@media(prefers-color-scheme:dark){:root{--bg:#121211;--panel:#1a1a19;--line:#2b2b29;--ink:#ececea;--ink2:#a7a7a1;--ink3:#74746d;--accent:#7aa6f5;--accent2:#1c2d4f;--bad:#f08a8a;--good:#6fd36f}}
+a{color:var(--accent)}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 var(--sans)}
+header{display:flex;align-items:center;gap:16px;padding:10px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+header b{font-size:15px}header nav{display:flex;gap:12px}header a{color:var(--ink2);text-decoration:none}header a:hover{color:var(--accent)}
+#who{margin-left:auto;color:var(--ink3);font-family:var(--mono);font-size:12px;display:flex;gap:8px;align-items:center}
+main{max-width:860px;margin:0 auto;padding:16px;display:grid;gap:14px}
+section{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px 16px}
+h2{margin:0 0 10px;font-size:13px;letter-spacing:.05em;text-transform:uppercase;color:var(--ink3)}
+button{font:inherit;padding:6px 12px;border-radius:6px;border:1px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer}
+button.ghost{background:none;color:var(--accent)}button:disabled{opacity:.5;cursor:default}
+input,textarea,select{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;width:100%}
+textarea{font:12.5px/1.45 var(--mono);min-height:90px}label{display:grid;gap:4px;color:var(--ink2);font-size:12.5px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}@media(max-width:640px){.grid2{grid-template-columns:1fr}}
+.row{display:grid;grid-template-columns:2fr 130px 2fr 2fr 28px;gap:6px;align-items:start;margin-bottom:6px}@media(max-width:720px){.row{grid-template-columns:1fr}}
+.mono{font-family:var(--mono);font-size:12px;word-break:break-all}.muted{color:var(--ink3)}.err{color:var(--bad)}.ok{color:var(--good)}
+.profile{display:flex;gap:12px;align-items:center}.profile img{width:48px;height:48px;border-radius:50%;object-fit:cover;background:var(--line)}
+pre{white-space:pre-wrap;background:var(--bg);padding:10px;border-radius:6px;font:12.5px/1.5 var(--mono);margin:0 0 10px}
+table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:6px 4px;border-top:1px solid var(--line);vertical-align:top}th{font-size:11.5px;color:var(--ink3);font-weight:600;border-top:0}
+td.n{font-family:var(--mono);text-align:right}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center}
+[hidden]{display:none!important}
+</style></head><body>
+<header><b>TMS ledger</b><nav><a href="/">Home</a><a href="/submit">Submit</a><a href="/dashboard">Dashboard</a></nav>
+  <div id="who"></div></header>
+<main>
+  <section id="connect" hidden><h2>Connect</h2>
+    <p>Every record here is signed by its author's Nostr key. Connect with a NIP-07 browser extension (Alby, nos2x, Keys.band) to read and write the collections you belong to.</p>
+    <button id="connectBtn">Connect</button> <span id="connectMsg" class="muted"></span></section>
+  <section id="profileBox" hidden><h2>Profile</h2><div id="profile"></div></section>
+  <section id="termsBox" hidden><h2>Terms</h2><pre id="termsText"></pre>
+    <button id="termsBtn">I agree: sign the terms</button> <span id="termsMsg"></span></section>
+  <section id="home" hidden><h2>Your collections</h2><div id="collections"></div>
+    <div class="actions" id="newCol" hidden><input id="newSlug" placeholder="new-collection-slug" style="max-width:260px">
+      <button id="newBtn" class="ghost">Create collection</button><span id="newMsg"></span></div></section>
+  <section id="submit" hidden><h2>Submit evidence</h2>
+    <div class="grid2"><label>Collection<select id="sCol"></select></label>
+      <label>URL<div style="display:flex;gap:6px"><input id="sUrl" placeholder="https://..."><button id="fetchBtn" class="ghost">Fetch</button></div></label>
+      <label>Title<input id="sTitle"></label><label>Source (publisher or site)<input id="sSource" placeholder="Journal of Allergy"></label></div>
+    <label style="margin-top:10px">Full text you are vouching for<textarea id="sText" style="min-height:200px"></textarea></label>
+    <h2 style="margin-top:16px">Claims and links from this evidence</h2>
+    <p class="muted" style="margin-top:0">Each row signs a link from this evidence to a claim. Write the claim's text to sign a new claim, or paste an existing claim's event id. The quote must appear in the text above.</p>
+    <div id="rows"></div>
+    <div class="actions"><button id="addRow" class="ghost">Add row</button><button id="submitBtn">Sign and publish</button><span id="submitMsg"></span></div></section>
+  <section id="members" hidden><h2>Members of <span id="mSlug"></span></h2><table id="mTable"></table>
+    <label style="margin-top:12px">Members besides you, one npub or hex pubkey per line (the full list: anyone left out is removed)<textarea id="mList"></textarea></label>
+    <div class="actions"><button id="mSave">Sign members list</button><a id="mExport" href="#">Download export (JSONL)</a><span id="mMsg"></span></div></section>
+</main>
+<script>
+const $ = id => document.getElementById(id)
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))
+const RELAYS = ['wss://relay.damus.io', 'wss://relay.primal.net']
+const now = () => Math.floor(Date.now() / 1000)
+let ME = null
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, opts), d = await r.json().catch(() => ({}))
+  if (!r.ok) { const e = new Error(d.error || `${r.status} ${r.statusText}`); e.status = r.status; throw e }
+  return d
+}
+const post = (path, body) => api(path, {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(body)})
+const sign = (kind, content) => window.nostr.signEvent({kind, created_at: now(), tags: [], content: typeof content === 'string' ? content : JSON.stringify(content)})
+const publish = events => post('/api/publish', {events})
+const say = (el, text, cls = 'muted') => { $(el).className = cls; $(el).textContent = text }
+
+// The newest kind 0 for pk across the relays; null if none answers within four seconds.
+function relayProfile(pk) {
+  return Promise.all(RELAYS.map(url => new Promise(done => {
+    let best = null, ws
+    const finish = () => { try { ws.close() } catch {} done(best) }
+    const timer = setTimeout(finish, 4000)
+    try { ws = new WebSocket(url) } catch { clearTimeout(timer); return done(null) }
+    ws.onopen = () => ws.send(JSON.stringify(['REQ', 'p', {kinds: [0], authors: [pk], limit: 1}]))
+    ws.onmessage = m => { const d = JSON.parse(m.data)
+      if (d[0] === 'EVENT' && d[2]?.pubkey === pk && (!best || d[2].created_at > best.created_at)) best = d[2]
+      if (d[0] === 'EOSE') { clearTimeout(timer); finish() } }
+    ws.onerror = () => { clearTimeout(timer); finish() }
+  }))).then(all => all.filter(Boolean).sort((a, b) => b.created_at - a.created_at)[0] || null)
+}
+
+// NIP-19 npub -> hex, checksum verified.
+const CH = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l'
+function polymod(v) { let c = 1; for (const x of v) { const t = c >>> 25; c = ((c & 0x1ffffff) << 5) ^ x
+  ;[0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3].forEach((g, i) => { if ((t >>> i) & 1) c ^= g }) } return c >>> 0 }
+function toHex(s) {
+  s = s.trim().toLowerCase()
+  if (/^[0-9a-f]{64}$/.test(s)) return s
+  if (!s.startsWith('npub1')) throw new Error(`not an npub or hex pubkey: ${s}`)
+  const d = [...s.slice(5)].map(c => { const i = CH.indexOf(c); if (i < 0) throw new Error(`bad character in ${s}`); return i })
+  const hrp = [...'npub'].map(c => c.charCodeAt(0) >> 5).concat([0], [...'npub'].map(c => c.charCodeAt(0) & 31))
+  if (polymod(hrp.concat(d)) !== 1) throw new Error(`bad checksum: ${s}`)
+  let acc = 0, bits = 0, out = []
+  for (const v of d.slice(0, -6)) { acc = ((acc << 5) | v) & 0xfff; bits += 5; if (bits >= 8) { bits -= 8; out.push((acc >> bits) & 255) } }
+  if (out.length !== 32) throw new Error(`not a 32-byte key: ${s}`)
+  return out.map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+function renderWho() {
+  $('who').innerHTML = ME ? `<span>${esc(ME.profile?.name || ME.npub.slice(0, 16) + '…')}</span><button class="ghost" id="logout">Log out</button>` : ''
+  if (ME) $('logout').onclick = async () => { await post('/logout', {}); location.href = '/' }
+}
+
+function renderProfile(relay) {
+  const p = ME.profile, box = $('profile')
+  $('profileBox').hidden = false
+  if (relay && (!p || p.id !== relay.id)) {
+    let c = {}; try { c = JSON.parse(relay.content) } catch {}
+    box.innerHTML = `<div class="profile">${c.picture ? `<img src="${esc(c.picture)}" alt="">` : ''}<div><b>${esc(c.name || c.display_name || '(no name)')}</b><div class="muted">${esc(c.about || '')}</div></div></div>
+      <div class="actions"><button id="useRelay">Use this profile here</button><span id="profMsg" class="muted">Found on ${RELAYS.map(r => r.slice(6)).join(' and ')}.</span></div>`
+    $('useRelay').onclick = async () => {
+      try {  // relay profiles may carry tags; the ledger takes tags [] only, so re-sign the same content
+        const ev = relay.tags.length || !c.name ? await sign(0, {...c, name: c.name || c.display_name || ME.npub.slice(0, 12)}) : relay
+        await publish([ev]); await refresh()
+      } catch (e) { say('profMsg', e.message, 'err') }
+    }
+  } else if (p) {
+    box.innerHTML = `<div class="profile">${p.picture ? `<img src="${esc(p.picture)}" alt="">` : ''}<div><b>${esc(p.name)}</b><div class="muted">${esc(p.about || '')}</div><div class="mono muted">${esc(ME.npub)}</div></div></div>`
+  } else {
+    box.innerHTML = `<div class="grid2"><label>Name<input id="pName"></label><label>About (say whether you are a human or an agent)<input id="pAbout"></label></div>
+      <div class="actions"><button id="pSave">Sign profile</button><span id="profMsg"></span></div>`
+    $('pSave').onclick = async () => {
+      try { await publish([await sign(0, {name: $('pName').value.trim(), about: $('pAbout').value.trim()})]); await refresh() }
+      catch (e) { say('profMsg', e.message, 'err') }
+    }
+  }
+}
+
+function renderHome() {
+  $('home').hidden = false
+  const cs = ME.collections
+  $('collections').innerHTML = cs.length ? `<table><tr><th>Collection</th><th>Members</th><th>Evidence</th><th>Claims</th><th>Links</th><th>Contra.</th><th></th></tr>${cs.map(c => `
+    <tr><td><b>${esc(c.slug)}</b>${c.owner === ME.pubkey ? ' <span class="muted">(owner)</span>' : ''}</td><td class="n">${c.members.length}</td>
+    <td class="n">${c.evidence}</td><td class="n">${c.claims}</td><td class="n">${c.links}</td><td class="n">${c.contradictions}</td>
+    <td>${c.owner === ME.pubkey ? `<a href="/c/${esc(c.slug)}/members">members</a> · ` : ''}<a href="/c/${esc(c.slug)}/export.jsonl">export</a></td></tr>`).join('')}</table>`
+    : '<p class="muted">You are not a member of any collection yet.</p>'
+  $('newCol').hidden = !ME.approved
+}
+
+$('newBtn').onclick = async () => {  // an empty members list names the collection, so this event creates it
+  try { await publish([await sign(4705, {collection: $('newSlug').value.trim(), members: []})]); await refresh() }
+  catch (e) { say('newMsg', e.message, 'err') }
+}
+
+$('termsBtn').onclick = async () => {
+  try { await publish([await sign(4706, ME.terms)]); await refresh() } catch (e) { say('termsMsg', e.message, 'err') }
+}
+
+async function connect() {
+  if (!window.nostr) return say('connectMsg', 'No NIP-07 extension found. Install one (Alby, nos2x, Keys.band) and reload.', 'err')
+  try {
+    say('connectMsg', 'Asking your extension for your public key…')
+    const pk = await window.nostr.getPublicKey()
+    say('connectMsg', 'Looking up your profile…')
+    const relay = await relayProfile(pk)
+    say('connectMsg', 'Sign the login request in your extension…')
+    ME = await post('/login', await sign(4707, {tool: 'login', args: {}}))
+    $('connect').hidden = true
+    show(relay)
+  } catch (e) {
+    say('connectMsg', e.status === 403 ? `${e.message}. Ask the operator to approve your key, or a collection owner to add you.` : e.message, 'err')
+  }
+}
+$('connectBtn').onclick = connect
+
+async function refresh() { ME = await api('/api/me'); show(null) }
+
+function show(relay) {
+  renderWho()
+  const path = location.pathname
+  $('termsBox').hidden = ME.terms_signed
+  $('termsText').textContent = ME.terms_text
+  if (path === '/') { renderProfile(relay); renderHome() }
+  else if (path === '/submit') renderSubmit()
+  else if (path.startsWith('/c/')) renderMembers(decodeURIComponent(path.split('/')[2]))
+}
+
+// ------------------------------------------------------------ submit
+function addRow() {
+  const d = document.createElement('div'); d.className = 'row'
+  d.innerHTML = `<textarea placeholder="Claim text, or an existing claim's event id" class="claim" style="min-height:60px"></textarea>
+    <select class="rel"><option>SUPPORTS</option><option>REBUTS</option><option>QUALIFIES</option></select>
+    <textarea placeholder="Verbatim quote from the text" class="quote" style="min-height:60px"></textarea>
+    <textarea placeholder="Why this quote bears on the claim" class="reason" style="min-height:60px"></textarea>
+    <button class="ghost" title="Remove">×</button>`
+  d.querySelector('button').onclick = () => d.remove()
+  $('rows').append(d)
+}
+function renderSubmit() {
+  $('submit').hidden = false
+  $('sCol').innerHTML = ME.collections.map(c => `<option>${esc(c.slug)}</option>`).join('')
+  if (!$('rows').children.length) addRow()
+}
+$('addRow').onclick = addRow
+$('fetchBtn').onclick = async () => {
+  try { say('submitMsg', 'Fetching…'); const d = await api('/api/fetch?' + new URLSearchParams({url: $('sUrl').value.trim()}))
+    $('sText').value = d.text; if (!$('sTitle').value) $('sTitle').value = d.title || ''; say('submitMsg', `Fetched ${d.text.length} characters.`) }
+  catch (e) { say('submitMsg', e.message, 'err') }
+}
+$('submitBtn').onclick = async () => {
+  const collection = $('sCol').value, text = $('sText').value
+  if (!collection || !text.trim()) return say('submitMsg', 'Pick a collection and paste the text.', 'err')
+  try {
+    $('submitBtn').disabled = true
+    const ev = {collection, text}
+    for (const [k, id] of [['url', 'sUrl'], ['title', 'sTitle'], ['source', 'sSource']]) if ($(id).value.trim()) ev[k] = $(id).value.trim()
+    say('submitMsg', 'Signing…')
+    const doc = await sign(4701, ev), batch = [doc]
+    for (const row of $('rows').children) {
+      const claim = row.querySelector('.claim').value.trim(), quote = row.querySelector('.quote').value, reason = row.querySelector('.reason').value.trim()
+      if (!claim) continue
+      let to = claim
+      if (!/^[0-9a-f]{64}$/.test(claim)) { const c = await sign(4702, {collection, text: claim}); batch.push(c); to = c.id }
+      batch.push(await sign(4703, {collection, from: doc.id, to, relation: row.querySelector('.rel').value, quote, reason}))
+    }
+    const res = await publish(batch)
+    say('submitMsg', `Published ${res.accepted.length} events${res.skipped.length ? `, ${res.skipped.length} already stored` : ''}. Evidence id ${doc.id}`, 'ok')
+  } catch (e) { say('submitMsg', e.message, 'err') } finally { $('submitBtn').disabled = false }
+}
+
+// ----------------------------------------------------------- members
+async function renderMembers(slug) {
+  $('members').hidden = false; $('mSlug').textContent = slug; $('mExport').href = `/c/${encodeURIComponent(slug)}/export.jsonl`
+  try {
+    const d = await api(`/api/c/${encodeURIComponent(slug)}`)
+    $('mTable').innerHTML = '<tr><th>Name</th><th>npub</th></tr>' + d.members.map(m =>
+      `<tr><td>${esc(m.name || '—')}${m.pubkey === d.owner ? ' <span class="muted">(owner)</span>' : ''}<div class="muted">${esc(m.about || '')}</div></td><td class="mono">${esc(m.npub)}</td></tr>`).join('')
+    $('mList').value = d.members.filter(m => m.pubkey !== d.owner).map(m => m.npub).join('\n')
+  } catch (e) { say('mMsg', e.message, 'err') }
+  $('mSave').onclick = async () => {
+    try {
+      const members = [...new Set($('mList').value.split(/[\s,]+/).filter(Boolean).map(toHex))]
+      await publish([await sign(4705, {collection: slug, members})]); say('mMsg', 'Saved.', 'ok'); renderMembers(slug)
+    } catch (e) { say('mMsg', e.message, 'err') }
+  }
+}
+
+api('/api/me').then(d => { ME = d; show(null) }).catch(() => { $('connect').hidden = false; renderWho() })
+</script>
+</body></html>

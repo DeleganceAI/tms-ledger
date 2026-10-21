@@ -1,13 +1,25 @@
-"""Browser side: NIP-07 login cookie and the web pages (EVENTS.md section 6)."""
+"""Browser side (EVENTS.md section 6): NIP-07 login cookie, the pages, and their JSON.
+
+    /                       connect, profile, terms, your collections
+    /submit                 sign and publish evidence, claims and links
+    /c/<slug>/members       owner only: sign a new members list
+    /c/<slug>/export.jsonl  members: every event in the collection, one signed event per line
+
+Pages are one static file (web.html); everything they show comes from the JSON routes, which
+read the login cookie. Writes are signed in the browser and go to /api/publish.
+"""
 from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import os
 import time
+from pathlib import Path
 
+from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from starlette.routing import Route
 
 from . import events as E
@@ -15,6 +27,7 @@ from . import ledger as L
 
 COOKIE = "tms"
 COOKIE_TTL = 12 * 3600
+PAGE_FILE = Path(__file__).with_name("web.html")
 
 
 def _mac(payload: str) -> str:
@@ -39,6 +52,10 @@ def _error(err: Exception, status: int = 400) -> JSONResponse:
     return JSONResponse({"error": str(err)}, status_code=403 if isinstance(err, L.Denied) else status)
 
 
+def _account(conn, pubkey: str) -> dict:
+    return {**L.account(conn, pubkey), "terms_text": L.TERMS_TEXT.decode()}
+
+
 async def login(request: Request) -> JSONResponse:
     """POST a request event signed with tool "login"; get a 12-hour HttpOnly cookie."""
     from .server import authenticate
@@ -46,7 +63,7 @@ async def login(request: Request) -> JSONResponse:
         ev = await request.json()
         with L.connect() as conn:
             pubkey, _ = authenticate(conn, ev, "login")
-            acct = L.account(conn, pubkey)
+            acct = _account(conn, pubkey)
     except ValueError as err:
         return _error(err)
     resp = JSONResponse(acct)
@@ -61,7 +78,107 @@ async def logout(request: Request) -> JSONResponse:
     return resp
 
 
+async def page(request: Request):
+    return HTMLResponse(PAGE_FILE.read_text(encoding="utf-8"))  # re-read so edits show on refresh
+
+
+async def members_page(request: Request):
+    pubkey, slug = cookie_pubkey(request), request.path_params["slug"]
+    if pubkey is None:
+        return HTMLResponse('<meta http-equiv="refresh" content="0;url=/">', status_code=401)
+    with L.connect() as conn:
+        row = conn.execute("SELECT owner FROM collections WHERE slug = %s", (slug,)).fetchone()
+    if row is None or row["owner"] != pubkey:
+        return PlainTextResponse(f"Only the owner of '{slug}' manages its members.", status_code=403)
+    return await page(request)
+
+
+async def me(request: Request) -> JSONResponse:
+    pubkey = cookie_pubkey(request)
+    if pubkey is None:
+        return JSONResponse({"error": "not logged in"}, status_code=401)
+    with L.connect() as conn:
+        return JSONResponse(_account(conn, pubkey))
+
+
+async def collection(request: Request) -> JSONResponse:
+    """Members of one collection with their profile names, for the members page."""
+    pubkey, slug = cookie_pubkey(request), request.path_params["slug"]
+    if pubkey is None:
+        return JSONResponse({"error": "not logged in"}, status_code=401)
+    try:
+        with L.connect() as conn:
+            L.require_member(conn, pubkey, slug)
+            owner = conn.execute("SELECT owner FROM collections WHERE slug = %s", (slug,)).fetchone()["owner"]
+            members = [L._clean(r) for r in conn.execute(
+                """SELECT m.pubkey, p.name, p.about FROM members m LEFT JOIN profiles p ON p.pubkey = m.pubkey
+                   WHERE m.collection = %s ORDER BY m.pubkey = %s DESC, p.name NULLS LAST, m.pubkey""", (slug, owner))]
+    except ValueError as err:
+        return _error(err)
+    for m in members:
+        m["npub"] = E.bech32_encode("npub", m["pubkey"])
+    return JSONResponse({"slug": slug, "owner": owner, "members": members})
+
+
+async def publish(request: Request) -> JSONResponse:
+    """Signed events need no cookie: each one is its own proof."""
+    def run(body):
+        with L.connect() as conn:
+            return L.publish(conn, body.get("events") if isinstance(body, dict) else body)
+    try:
+        return JSONResponse(await run_in_threadpool(run, await request.json()))
+    except (ValueError, TypeError) as err:
+        return _error(err)
+    except Exception as err:  # psycopg errors carry the acceptance rule that failed
+        msg = getattr(getattr(err, "diag", None), "message_primary", None)
+        if msg:
+            return _error(ValueError(msg))
+        raise
+
+
+async def fetch(request: Request) -> JSONResponse:
+    """Fetch a URL's text for the submit form (logged-in users only; http(s), no internal hosts)."""
+    pubkey = cookie_pubkey(request)
+    if pubkey is None:
+        return JSONResponse({"error": "not logged in"}, status_code=401)
+    url = request.query_params.get("url", "")
+    try:
+        with L.connect() as conn:
+            L.require_allowed(conn, pubkey)
+        text, title = await run_in_threadpool(L.fetch_text, url)  # over HTTP, ALLOW_LOCAL is off: http(s) only
+    except Exception as err:
+        return _error(err)
+    return JSONResponse({"url": url, "title": title, "text": text})
+
+
+async def export(request: Request):
+    pubkey, slug = cookie_pubkey(request), request.path_params["slug"]
+    if pubkey is None:
+        return PlainTextResponse("log in first", status_code=401)
+    with L.connect() as conn:
+        try:
+            L.require_member(conn, pubkey, slug)
+        except ValueError as err:
+            return PlainTextResponse(str(err), status_code=403)
+
+    def lines():
+        with L.connect() as conn:
+            for ev in L.export(conn, pubkey, slug):
+                yield json.dumps(ev, ensure_ascii=False) + "\n"
+
+    return StreamingResponse(lines(), media_type="application/x-ndjson", headers={
+        "Content-Disposition": f'attachment; filename="{slug}-{time.strftime("%Y%m%d")}.jsonl"'})
+
+
 routes = [
+    Route("/", page),
+    Route("/submit", page),
+    Route("/c/{slug}/members", members_page),
+    Route("/c/{slug}/export.jsonl", export),
     Route("/login", login, methods=["POST"]),
     Route("/logout", logout, methods=["POST"]),
+    Route("/api/me", me),
+    Route("/api/c/{slug}", collection),
+    Route("/api/publish", publish, methods=["POST"]),
+    Route("/api/fetch", fetch),
 ]

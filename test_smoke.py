@@ -208,7 +208,7 @@ def ledger(conn) -> list[str]:
     for line in lines:
         E.verify(json.loads(line))
     rejects(lambda: list(L.export(conn, PK[OUTSIDER], "smoke")), "not a member")
-    return [c1["id"]]
+    return [c1["id"], doc["id"]]
 
 
 def server(ids) -> None:
@@ -273,6 +273,30 @@ def server(ids) -> None:
         r = client.post("/login", json=req(BOB, "login"))
         assert r.status_code == 200 and r.json()["pubkey"] == PK[BOB] and "httponly" in r.headers["set-cookie"].lower()
         assert client.post("/login", json=req(BOB, "list_collections")).status_code == 400
+
+        # Web pages: Bob is a member of smoke, not its owner; the owner manages members; export verifies.
+        from tms import web as W
+        assert "Connect" in client.get("/").text and client.get("/submit").status_code == 200
+        me = client.get("/api/me").json()
+        assert me["pubkey"] == PK[BOB] and [c["slug"] for c in me["collections"]] == ["smoke"] and "Version" in me["terms_text"]
+        assert {m["name"] for m in client.get("/api/c/smoke").json()["members"]} == {"Owner", "Bob"}
+        assert client.get("/api/c/outside").status_code == 403
+        assert client.get("/c/smoke/members").status_code == 403
+        lines = client.get("/c/smoke/export.jsonl").text.splitlines()
+        assert lines and all(E.verify(json.loads(x)) for x in lines)
+        assert client.get("/c/outside/export.jsonl").status_code == 403
+        r = client.post("/api/publish", json={"events": [sign(BOB, E.CLAIM, {"collection": "smoke", "text": "From the web."})]})
+        assert r.status_code == 200 and len(r.json()["accepted"]) == 1, r.text
+        bad = sign(BOB, E.LINK, {"collection": "smoke", "from": ids[1], "to": ids[0], "relation": "SUPPORTS",
+                                 "quote": "not in the text", "reason": "r"})
+        r = client.post("/api/publish", json={"events": [bad]})
+        assert r.status_code == 400 and "quote not found" in r.json()["error"], r.text
+        client.cookies.set(W.COOKIE, W.make_cookie(PK[OWNER]))
+        assert client.get("/c/smoke/members").status_code == 200
+        client.cookies.set(W.COOKIE, W.make_cookie(PK[OWNER])[:-1] + "0")
+        assert client.get("/api/me").status_code == 401 and client.get("/c/smoke/export.jsonl").status_code == 401
+        client.cookies.clear()
+        assert client.get("/api/me").status_code == 401
 
     with L.connect() as conn:
         rows = conn.execute("SELECT tool, pubkey, collection, ok FROM mcp_calls WHERE method = 'tools/call'").fetchall()
