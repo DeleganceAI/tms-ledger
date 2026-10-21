@@ -10,11 +10,13 @@ dependencies = [
     "trafilatura>=2",
     "uvicorn>=0.30",
     "starlette>=0.40",
+    "coincurve>=21.0.0",
+    "psycopg-pool>=3.3.3",
 ]
 
 [project.scripts]
 tms-server = "tms.server:main"
-tms-ui = "tms.ui:main"
+tms-sign = "tms.events:main"
 
 [build-system]
 requires = ["hatchling"]

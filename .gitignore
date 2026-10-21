@@ -3,3 +3,4 @@
 __pycache__/
 .omc/
 .env
+node_modules/
