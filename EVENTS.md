@@ -58,6 +58,7 @@ Kind numbers stay within 0–65535, because common Nostr libraries reject larger
 | 4706 | terms | `version`, `sha256` | yes |
 | 4707 | login | `challenge`, `origin` | no |
 | 4708 | snapshot | `date`, `cid`, `sha256`, `count`, `last_received_at` | yes |
+| 4709 | takedown | `record`, `reason` | yes |
 
 Fields marked `?` are optional. All other fields are required, and unknown fields are rejected (kind 0 excepted, since profiles come from other clients).
 
@@ -93,7 +94,10 @@ A user's acceptance of the Terms of Service and Privacy Policy. `version` names 
 Proves control of a key for reading. The server issues a random `challenge`; the browser or bot signs it along with the server's `origin`, and gets back a session token (a cookie in the browser, a bearer token for bots). The server checks that the challenge is unused and less than 5 minutes old. Login events are not stored in the ledger.
 
 ### snapshot (4708)
-Signed by the server's own key after each daily backup upload to Filecoin. The backup is the whole ledger, encrypted with a server-held key. It's for disaster recovery; members get their own copies from the export. `cid` and `sha256` identify the encrypted file, `count` is the number of events in it, and `last_received_at` marks where it ends. This gives a signed, dated history of what the ledger held.
+Signed by the server's own key after each daily backup upload to Filecoin. The backup is the whole ledger, encrypted with that day's own server-held key (see section 7). It's for disaster recovery; members get their own copies from the export. `cid` and `sha256` identify the encrypted file, `count` is the number of events in it, and `last_received_at` marks where it ends. This gives a signed, dated history of what the ledger held.
+
+### takedown (4709)
+Signed only by the server's key, when the operator must remove content for legal reasons (a copyright notice or a privacy erasure request). `record` is the ID of the removed record, and `reason` gives the legal basis, without repeating the removed content. See section 7.
 
 ## 5. Server acceptance rules
 
@@ -104,6 +108,7 @@ The server accepts an event only if:
 3. The signer has signed the current `terms`, and is a member of the event's collection (or is creating it).
 4. Every referenced ID exists, either in the ledger or earlier in the same batch, has the kind the field requires, and belongs to the same collection.
 5. Link quotes appear in the `from` evidence text.
+6. `snapshot` and `takedown` events are signed by the server's key, and no other kind is.
 
 Submissions are batches: either every event in the batch is accepted, or none is. A batch can contain evidence, claims and the links between them, because IDs are known before signing.
 
@@ -117,12 +122,22 @@ Embeddings are derived by the server and are not part of any event.
 - **Bots:** sign a `login` event once to get a bearer token for MCP calls, then sign each write batch with their own key.
 - Every read is scoped to collections the session's pubkey is a member of.
 
-## 7. Migration
+## 7. Takedowns
+
+Takedowns are the one exception to append-only, and only the operator can perform one. In a single transaction, the operator:
+
+1. posts a `takedown` event signed by the server's key, and
+2. replaces the removed record's `content` with `null`, keeping its `id`, `pubkey`, `created_at`, `kind` and `sig`.
+
+After that:
+
+- The record no longer verifies. Readers and exports show it as "removed", along with its `takedown` event. Anyone can still see who signed it, when, and why it was removed.
+- References to it stay valid, so a link or contradiction pointing at it is kept. Links whose `quote` repeats the removed text are separate records; each one needs its own takedown if it must go too.
+- Re-submitting the same signed event is rejected, because the `id` already exists.
+- Filecoin backups can't be deleted. Each daily backup is encrypted with its own key, so destroying that day's key makes it unreadable. Backups made after the takedown don't contain the removed content.
+
+## 8. Migration
 
 All existing records are migrated into events. How the old unsigned rows get signed is decided at migration time.
-
-## 8. Open questions
-
-1. **Takedowns vs. append-only.** Copyright notices (DMCA) and privacy erasure requests (GDPR) can require removing content, but the ledger never deletes and signatures cover the full text. One option: the operator replaces a record's `content` with a server-signed takedown notice, keeping its `id`, `pubkey` and `sig`. The record then no longer verifies, but readers can see it existed and why it was removed. Filecoin backups can't be deleted; destroying their encryption key is the only way to erase them.
 
 [TERMS.md](TERMS.md) is the draft Terms of Service and Privacy Policy. It needs a lawyer's review before launch.
