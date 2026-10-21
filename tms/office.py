@@ -131,7 +131,9 @@ def compute(conn, now: datetime | None = None) -> dict:
                 added.append((r["received_at"], nodes[r["id"]], [r["id"]], None))
         links = []
         for r in conn.execute("SELECT from_id, to_id, relation, received_at FROM links WHERE collection = %s", (col,)):
-            rel = REL[r["relation"]]
+            rel = REL.get(r["relation"])
+            if rel is None:  # an unknown relation never takes the office down
+                continue
             links.append((r["from_id"], r["to_id"], rel))
             if r["to_id"] in recent:
                 recent[r["to_id"]] = max(recent[r["to_id"]], r["received_at"])

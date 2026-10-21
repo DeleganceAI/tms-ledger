@@ -363,6 +363,7 @@ def server(ids) -> None:
         assert "prefers-reduced-motion" in office.text and "aria-describedby=\"office-desc\"" in office.text
         assert "smoke" not in office.text and ids[0] not in office.text
         landing = client.get("/")  # logged out: the office is the landing page
+        assert landing.headers["cache-control"] == "private, no-store"
         assert 'id="landing"' in landing.text and "Request access" in landing.text and client.get("/connect").status_code == 200
         r = client.get("/office.json", headers={"Accept-Encoding": "gzip"})
         assert r.status_code == 200 and r.headers["cache-control"].startswith("public") and "totals" in r.json()
@@ -388,11 +389,22 @@ def access(client, W) -> None:
     assert client.post("/login", json=E.request(visitor, "login")).status_code == 403
     r = ask(E.bech32_encode("npub", vpk), "I read papers on histamine intolerance.")
     assert r.status_code == 201 and r.json()["status"] == "pending", r.text
-    assert ask(vpk).status_code == 409, "the same key (hex this time) can't have two pending requests"
+    assert ask(vpk).status_code == 201, "a duplicate gets the same answer, so replies reveal nothing"
+    with L.connect() as conn:
+        assert conn.execute("SELECT count(*) AS n FROM access_requests WHERE npub = %s",
+                            (E.bech32_encode("npub", vpk),)).fetchone()["n"] == 1, "but only one request is stored"
     assert ask(opk, "x" * 501).status_code == 400 and ask("npub1nope").status_code == 400
     assert ask(opk).status_code == 201
     # Five requests per address per hour: these five calls used it up.
-    assert ask(E.pubkey_of(hashlib.sha256(b"sixth").hexdigest())).status_code == 429
+    sixth = E.pubkey_of(hashlib.sha256(b"sixth").hexdigest())
+    assert ask(sixth).status_code == 429
+    # A forged X-Forwarded-For doesn't help: the proxy's own (rightmost) entry is what counts.
+    W._recent.clear()
+    via = lambda forged: {"headers": {"X-Forwarded-For": f"{forged}, 203.0.113.7"}}  # noqa: E731
+    for i in range(5):
+        assert ask(E.pubkey_of(hashlib.sha256(f"spoof{i}".encode()).hexdigest()), **via(f"10.0.0.{i}")).status_code == 201
+    assert ask(sixth, **via("10.0.0.99")).status_code == 429
+    assert ask(sixth, headers={"X-Forwarded-For": "203.0.113.8"}).status_code == 201, "a different real address has its own limit"
     W._recent.clear()
 
     with L.connect() as conn:
@@ -400,7 +412,7 @@ def access(client, W) -> None:
     vid, oid = reqs[E.bech32_encode("npub", vpk)], reqs[E.bech32_encode("npub", opk)]
     client.cookies.set(W.COOKIE, W.make_cookie(PK[OWNER]))  # OWNER is the admin
     page = client.get("/admin").text
-    assert "Access requests (2 pending)" in page and "histamine intolerance" in page
+    assert "Access requests (8 pending)" in page and "histamine intolerance" in page
     assert client.post(f"/admin/requests/{vid}/approve", headers={"Origin": "https://evil.example"}).status_code == 403
     r = client.post(f"/admin/requests/{vid}/approve", follow_redirects=False)
     assert r.status_code == 303 and r.headers["location"] == "/admin"
@@ -422,7 +434,7 @@ def access(client, W) -> None:
     with L.connect() as conn:
         assert conn.execute("SELECT approved_by FROM approvals WHERE pubkey = %s", (vpk,)).fetchone()["approved_by"] == PK[OWNER]
         assert conn.execute("SELECT count(*) AS n FROM approvals WHERE pubkey = %s", (opk,)).fetchone()["n"] == 0
-        assert {r["status"] for r in conn.execute("SELECT status FROM access_requests")} == {"approved", "dismissed"}
+        assert {r["status"] for r in conn.execute("SELECT status FROM access_requests")} == {"approved", "dismissed", "pending"}
 
 
 def office_data() -> None:

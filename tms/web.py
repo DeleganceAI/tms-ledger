@@ -106,18 +106,31 @@ async def page(request: Request):
 
 async def home(request: Request):
     """Logged out, the landing page is the office; logged in, the connect and collections page."""
-    return await page(request) if cookie_pubkey(request) else await office(request)
+    resp = await page(request) if cookie_pubkey(request) else await office(request)
+    resp.headers["Cache-Control"] = "private, no-store"  # the page depends on the cookie
+    return resp
 
 
 REQUEST_LIMIT, REQUEST_WINDOW = 5, 3600  # access requests per IP per hour
+MAX_PENDING = 200                        # all pending requests together, whatever the addresses
 _recent: dict[str, deque] = {}
 _recent_lock = threading.Lock()
+
+
+def _client_ip(request: Request) -> str:
+    """The address our proxy saw: the rightmost X-Forwarded-For entry, which DigitalOcean's proxy
+    appends. Not request.client.host: uvicorn trusts every proxy here, so that is the leftmost
+    entry, which the client can set to anything."""
+    xff = request.headers.get("x-forwarded-for", "")
+    return xff.rsplit(",", 1)[-1].strip() or (request.client.host if request.client else "?")
 
 
 def _rate_limited(ip: str) -> bool:
     """ponytail: in-process, per instance; a table if the app ever runs more than one instance."""
     now = time.monotonic()
     with _recent_lock:
+        for key in [k for k, q in _recent.items() if not q or now - q[-1] > REQUEST_WINDOW]:
+            del _recent[key]  # forget quiet addresses, so the map can't grow without bound
         q = _recent.setdefault(ip, deque())
         while q and now - q[0] > REQUEST_WINDOW:
             q.popleft()
@@ -129,7 +142,7 @@ def _rate_limited(ip: str) -> bool:
 
 async def access_request(request: Request) -> JSONResponse:
     """Unsigned on purpose: the visitor may not have a Nostr extension yet. An admin decides in /admin."""
-    if _rate_limited(request.client.host if request.client else "?"):
+    if _rate_limited(_client_ip(request)):
         return JSONResponse({"error": "too many requests from this address; try again later"}, status_code=429)
     try:
         body = await request.json()
@@ -140,13 +153,16 @@ async def access_request(request: Request) -> JSONResponse:
     if len(note) > 500:
         return JSONResponse({"error": "the note is limited to 500 characters"}, status_code=400)
 
-    def store():
+    def store() -> bool:
         with L.connect() as conn:
-            return conn.execute("""INSERT INTO access_requests (npub, note) VALUES (%s, %s)
-                                   ON CONFLICT (npub) WHERE status = 'pending' DO NOTHING RETURNING id""",
-                                (npub, note or None)).fetchone()
-    if await run_in_threadpool(store) is None:
-        return JSONResponse({"error": "a request for this key is already pending"}, status_code=409)
+            if conn.execute("SELECT count(*) AS n FROM access_requests WHERE status = 'pending'").fetchone()["n"] >= MAX_PENDING:
+                return False
+            conn.execute("""INSERT INTO access_requests (npub, note) VALUES (%s, %s)
+                            ON CONFLICT (npub) WHERE status = 'pending' DO NOTHING""", (npub, note or None))
+            return True
+    if not await run_in_threadpool(store):
+        return JSONResponse({"error": "too many requests are waiting; try again later"}, status_code=429)
+    # The same answer whether or not this key already had a request waiting: the reply says nothing about anyone.
     return JSONResponse({"status": "pending", "npub": npub}, status_code=201)
 
 
