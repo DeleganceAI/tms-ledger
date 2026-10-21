@@ -23,7 +23,7 @@ The server enforces exactly two mechanical things beyond structure: a link's quo
 | [tms/ledger.py](tms/ledger.py) | `publish(events)`, member-scoped reads, retrieval, fetch, embeddings, proof check, the connection pool. |
 | [tms/server.py](tms/server.py) | MCP tools and prompts; signed-request verification; stdio or HTTP. |
 | [tms/web.py](tms/web.py), [tms/web.html](tms/web.html) | `/`, `/submit`, `/c/<slug>/members`, `/c/<slug>/export.jsonl`, `/login`. |
-| [tms/office.html](tms/office.html) | `/office`, a looping picture of bots filing papers. No ledger data. |
+| [tms/office.html](tms/office.html), [tms/office.py](tms/office.py) | The office ([OFFICE.md](OFFICE.md)): the logged-out home page and `/office`, driven by `/office.json`, anonymous slices of real collections and the last hour's events, recomputed hourly. |
 | [tms/ui.py](tms/ui.py), [tms/ui.html](tms/ui.html) | `/dashboard`, behind the login cookie, scoped to your collections. |
 | [tms/admin.py](tms/admin.py) | `/admin` for `TMS_ADMINS`: embedding spend, users, database size, events per day. |
 | [DOCS.md](DOCS.md) | The user and agent guide, served at `/docs` and `/docs.md`. |
@@ -112,7 +112,7 @@ Prompts: `briefing` (answer from one collection with a checked proof) and `claim
 
 ## Web
 
-`/`: connect with a NIP-07 extension, show the profile fetched from Damus and Primal (stored once you agree), sign the terms, list your collections, create one (approved keys). `/submit`: sign one evidence document plus claims and links from it. `/c/<slug>/members`: owner only. `/c/<slug>/export.jsonl`: every event in the collection; each line verifies on its own. `/dashboard`: activity, browse, agents and sources, limited to your collections. `/office`: a public ambient animation of bots filing papers, pinning claims and pondering the strings between them. Sheets show only squiggles, and the page is not wired to the ledger. `/docs`: the full guide for people and agents ([DOCS.md](DOCS.md)). `/admin`: operator page for `TMS_ADMINS`. Logging in signs a `login` request and sets a 12-hour HttpOnly cookie; writes are always signed in the browser.
+`/connect` (and `/` when logged in): connect with a NIP-07 extension, show the profile fetched from Damus and Primal (stored once you agree), sign the terms, list your collections, create one (approved keys). `/submit`: sign one evidence document plus claims and links from it. `/c/<slug>/members`: owner only. `/c/<slug>/export.jsonl`: every event in the collection; each line verifies on its own. `/dashboard`: activity, browse, agents and sources, limited to your collections. `/office` (and `/` when logged out): bots replay the last hour on boards that show anonymous slices of real collections, with global totals and a **Request access** form. `/docs`: the full guide for people and agents ([DOCS.md](DOCS.md)). `/admin`: operator page for `TMS_ADMINS`, including pending access requests with Approve and Dismiss. Access is `TMS_ADMINS` + `TMS_APPROVED` (env, for bootstrapping) + the `approvals` table that Approve writes, so approving someone needs no redeploy. Logging in signs a `login` request and sets a 12-hour HttpOnly cookie; writes are always signed in the browser.
 
 ## Deploy (DigitalOcean)
 
@@ -122,7 +122,7 @@ Prompts: `briefing` (answer from one collection with a checked proof) and `claim
    psql "$DIRECT_URL" -c "CREATE EXTENSION IF NOT EXISTS vector" -v ON_ERROR_STOP=1 -f db/init.sql
    ```
 
-   Then grant the app's user access, if it isn't `doadmin`: `GRANT SELECT, INSERT ON ALL TABLES IN SCHEMA public TO tms; GRANT UPDATE, DELETE ON embeddings, auth_seen, mcp_calls TO tms; GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO tms;`
+   Then grant the app's user access, if it isn't `doadmin`: `GRANT SELECT, INSERT ON ALL TABLES IN SCHEMA public TO tms; GRANT UPDATE, DELETE ON embeddings, auth_seen, mcp_calls TO tms; GRANT UPDATE ON access_requests TO tms; GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO tms;`
 2. Create a connection pool `tms-pool` in **transaction** mode on database `tms` (size around 10):
 
    ```bash

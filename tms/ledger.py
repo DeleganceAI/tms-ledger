@@ -227,9 +227,15 @@ def my_collections(conn, pubkey: str) -> list[str]:
         "SELECT collection FROM members WHERE pubkey = %s ORDER BY collection", (pubkey,))]
 
 
+def is_approved(conn, pubkey: str) -> bool:
+    """Approved by the operator: TMS_ADMINS, TMS_APPROVED (env, for bootstrap), or the approvals table."""
+    return pubkey in APPROVED or pubkey in ADMINS or conn.execute(
+        "SELECT 1 FROM approvals WHERE pubkey = %s", (pubkey,)).fetchone() is not None
+
+
 def allowed(conn, pubkey: str) -> bool:
-    """Approved by the operator, or a member of some collection (EVENTS.md section 3)."""
-    return pubkey in APPROVED or conn.execute(
+    """Approved, or a member of some collection (EVENTS.md section 3)."""
+    return is_approved(conn, pubkey) or conn.execute(
         "SELECT 1 FROM members WHERE pubkey = %s LIMIT 1", (pubkey,)).fetchone() is not None
 
 
@@ -255,7 +261,7 @@ def signed_terms(conn, pubkey: str) -> bool:
 def account(conn, pubkey: str) -> dict:
     """What the web pages need to know about a signer."""
     profile = _clean(conn.execute("SELECT * FROM profiles WHERE pubkey = %s", (pubkey,)).fetchone())
-    return {"pubkey": pubkey, "npub": E.bech32_encode("npub", pubkey), "approved": pubkey in APPROVED,
+    return {"pubkey": pubkey, "npub": E.bech32_encode("npub", pubkey), "approved": is_approved(conn, pubkey),
             "allowed": allowed(conn, pubkey), "terms_signed": signed_terms(conn, pubkey), "terms": TERMS,
             "profile": profile, "collections": list_collections(conn, pubkey)}
 
@@ -281,7 +287,7 @@ def _authorize(conn, ev: dict, data: dict) -> str | None:
     col = data["collection"]
     row = conn.execute("SELECT owner FROM collections WHERE slug = %s", (col,)).fetchone()
     if row is None:
-        if pk not in APPROVED:
+        if not is_approved(conn, pk):
             raise Denied(f"{ev['id']}: collection '{col}' does not exist, and only approved pubkeys create collections")
         conn.execute("INSERT INTO collections (slug, owner) VALUES (%s, %s) ON CONFLICT DO NOTHING", (col, pk))
         row = conn.execute("SELECT owner FROM collections WHERE slug = %s", (col,)).fetchone()

@@ -362,12 +362,134 @@ def server(ids) -> None:
         assert office.status_code == 200 and "window.botOffice" in office.text
         assert "prefers-reduced-motion" in office.text and "aria-describedby=\"office-desc\"" in office.text
         assert "smoke" not in office.text and ids[0] not in office.text
+        landing = client.get("/")  # logged out: the office is the landing page
+        assert 'id="landing"' in landing.text and "Request access" in landing.text and client.get("/connect").status_code == 200
+        r = client.get("/office.json", headers={"Accept-Encoding": "gzip"})
+        assert r.status_code == 200 and r.headers["cache-control"].startswith("public") and "totals" in r.json()
+        access(client, W)
+
+    office_data()
 
     with L.connect() as conn:
         rows = conn.execute("SELECT tool, pubkey, collection, ok FROM mcp_calls WHERE method = 'tools/call'").fetchall()
     assert any(r["tool"] == "search_claims" and r["pubkey"] == PK[BOB] and r["collection"] == "smoke" and r["ok"] for r in rows)
     assert any(r["tool"] == "publish" and r["pubkey"] == PK[BOB] for r in rows)
     assert any(not r["ok"] and r["pubkey"] is None for r in rows), "failed auth logs no pubkey"
+
+
+def access(client, W) -> None:
+    """Request access (unsigned, rate-limited, one pending request per npub); Approve in /admin
+    grants access with no restart; Dismiss doesn't; only admins can decide."""
+    visitor, other = hashlib.sha256(b"visitor").hexdigest(), hashlib.sha256(b"dismissed").hexdigest()
+    vpk, opk = E.pubkey_of(visitor), E.pubkey_of(other)
+    W._recent.clear()
+    client.cookies.clear()
+    ask = lambda key, note="", **kw: client.post("/api/access-request", json={"npub": key, "note": note}, **kw)  # noqa: E731
+    assert client.post("/login", json=E.request(visitor, "login")).status_code == 403
+    r = ask(E.bech32_encode("npub", vpk), "I read papers on histamine intolerance.")
+    assert r.status_code == 201 and r.json()["status"] == "pending", r.text
+    assert ask(vpk).status_code == 409, "the same key (hex this time) can't have two pending requests"
+    assert ask(opk, "x" * 501).status_code == 400 and ask("npub1nope").status_code == 400
+    assert ask(opk).status_code == 201
+    # Five requests per address per hour: these five calls used it up.
+    assert ask(E.pubkey_of(hashlib.sha256(b"sixth").hexdigest())).status_code == 429
+    W._recent.clear()
+
+    with L.connect() as conn:
+        reqs = {r["npub"]: r["id"] for r in conn.execute("SELECT id, npub FROM access_requests WHERE status = 'pending'")}
+    vid, oid = reqs[E.bech32_encode("npub", vpk)], reqs[E.bech32_encode("npub", opk)]
+    client.cookies.set(W.COOKIE, W.make_cookie(PK[OWNER]))  # OWNER is the admin
+    page = client.get("/admin").text
+    assert "Access requests (2 pending)" in page and "histamine intolerance" in page
+    assert client.post(f"/admin/requests/{vid}/approve", headers={"Origin": "https://evil.example"}).status_code == 403
+    r = client.post(f"/admin/requests/{vid}/approve", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/admin"
+    assert client.post(f"/admin/requests/{oid}/dismiss", follow_redirects=False).status_code == 303
+    assert client.post(f"/admin/requests/{oid}/burn").status_code == 404
+    client.cookies.set(W.COOKIE, W.make_cookie(PK[BOB]))
+    assert client.post(f"/admin/requests/{vid}/approve").status_code == 404, "non-admins can't decide"
+    client.cookies.clear()
+
+    # Approved without a restart: the visitor logs in, and can now create a collection. (Back-dated a
+    # few seconds: the 403 above used an identical request, and the server refuses replays.)
+    login = lambda sk: E.sign(sk, E.REQUEST, {"tool": "login", "args": {}}, created_at=int(time.time()) - 5)  # noqa: E731
+    assert client.post("/login", json=login(visitor)).status_code == 200
+    assert client.post("/login", json=login(other)).status_code == 403
+    client.cookies.clear()
+    r = client.post("/api/publish", json={"events": [E.sign(visitor, E.TERMS, L.TERMS),
+                                                     E.sign(visitor, E.CLAIM, {"collection": "visitor-col", "text": "Mine."})]})
+    assert r.status_code == 200 and r.json()["collections"] == ["visitor-col"], r.text
+    with L.connect() as conn:
+        assert conn.execute("SELECT approved_by FROM approvals WHERE pubkey = %s", (vpk,)).fetchone()["approved_by"] == PK[OWNER]
+        assert conn.execute("SELECT count(*) AS n FROM approvals WHERE pubkey = %s", (opk,)).fetchone()["n"] == 0
+        assert {r["status"] for r in conn.execute("SELECT status FROM access_requests")} == {"approved", "dismissed"}
+
+
+def office_data() -> None:
+    """/office.json: anonymous by construction, no boards for small collections, slices capped."""
+    from datetime import UTC, datetime, timedelta
+
+    from tms import office as O
+    with L.connect() as conn:
+        # Grow "smoke" past the board threshold, all in this hour so they replay next hour.
+        before = conn.execute("SELECT count(*) AS n FROM events WHERE collection = 'smoke' AND kind BETWEEN 4701 AND 4704").fetchone()["n"]
+        doc = sign(BOB, E.EVIDENCE, {"collection": "smoke", "text": "Office test paper about mast cells and tryptase.", "title": "Mast cells"})
+        claims = [sign(BOB, E.CLAIM, {"collection": "smoke", "text": f"Office claim number {i} about tryptase."}) for i in range(3)]
+        links = [sign(BOB, E.LINK, {"collection": "smoke", "from": doc["id"], "to": c["id"], "relation": rel,
+                                    "quote": "mast cells", "reason": "office"}) for c, rel in zip(claims, ("SUPPORTS", "QUALIFIES"))]
+        k = sign(BOB, E.CONTRADICTION, {"collection": "smoke", "claims": [claims[0]["id"], claims[2]["id"]], "reason": "office"})
+        L.publish(conn, [doc, *claims, *links, k])
+        assert before + 7 >= O.MIN_RECORDS
+        data = O.compute(conn, now=datetime.now(UTC) + timedelta(hours=1))
+        text = json.dumps(data)
+        sizes = {r["collection"]: r["n"] for r in conn.execute(
+            "SELECT collection, count(*) AS n FROM events WHERE kind BETWEEN 4701 AND 4704 GROUP BY 1")}
+        secrets_ = [r["slug"] for r in conn.execute("SELECT slug FROM collections")]
+        secrets_ += [x for r in conn.execute("SELECT id, pubkey FROM events") for x in (r["id"], r["id"][:12], r["pubkey"], r["pubkey"][:12])]
+        secrets_ += [E.bech32_encode("npub", r["pubkey"]) for r in conn.execute("SELECT DISTINCT pubkey FROM events")]
+        for r in conn.execute("""SELECT content::jsonb ->> 'text' AS t FROM events WHERE kind IN (4701, 4702)
+                                 UNION SELECT reason FROM links UNION SELECT quote FROM links UNION SELECT reason FROM contradictions"""):
+            secrets_.append(r["t"])
+        totals = data["totals"]
+        actual = conn.execute("""SELECT (SELECT count(*) FROM claims) AS claims, (SELECT count(*) FROM evidence) AS evidence,
+            (SELECT count(*) FROM collections) AS collections, (SELECT count(*) FROM contradictions) AS contradictions""").fetchone()
+    # Anonymous: no slug, pubkey, npub, record id (or its prefix) or text anywhere in the payload.
+    leaks = [x for x in secrets_ if x and x in text]
+    assert not leaks, leaks[:5]
+    assert set(data) == {"generated_at", "totals", "boards", "replay"} and data["generated_at"].endswith(":00:00Z")
+    assert all(totals[k] == actual[k] for k in actual), (totals, actual)  # small collections still count
+    # Small collections count toward totals but get no board.
+    assert len(data["boards"]) == sum(1 for n in sizes.values() if n >= O.MIN_RECORDS) == 1, (sizes, len(data["boards"]))
+    board = data["boards"][0]
+    assert 0 <= board["confusion"] <= 4 and board["id"].startswith("b_")
+    # The previous hour (this one, from an hour ahead) replays: every kind, pointing into its own slice.
+    kinds = {e["kind"] for e in data["replay"]}
+    assert {"evidence", "claim", "link", "contradiction"} <= kinds, kinds
+    slices = {sl["id"]: sl for sl in board["slices"]}
+    for e in data["replay"]:
+        sl = slices[e["slice"]]
+        assert e["board"] == board["id"] and 0 <= e["node"] < len(sl["nodes"]) and 0 <= e["t"] < 3600
+        if e["kind"] == "link" and e["to"] is not None:
+            assert [e["node"], e["to"], e["relation"]] in sl["edges"]
+        if e["kind"] == "contradiction":
+            assert e["claims"] == 2 and e["node"] in sl["contradictions"][e["c"]]
+
+    # Slices stop at about 40 nodes however big the collection: a tree of ~5,000 claims and papers.
+    tree = {"n0": "claim"}
+    tree_links = []
+    for i in range(1, 5000):
+        tree[f"n{i}"] = "evidence" if i % 2 else "claim"
+        tree_links.append((f"n{i}", f"n{(i - 1) // 4}", "S"))
+    sl, _ = O.Graph(tree, tree_links, []).slice(["n0"], O.random.Random(1))
+    assert 35 <= len(sl["nodes"]) <= O.SLICE_NODES, len(sl["nodes"])
+    assert sl["off_edge"], "a big collection spills strings off the board"
+    # A hub contributes at most BRANCH neighbours; the rest of its strings run off the board.
+    nodes = {"hub": "claim", **{f"e{i}": "evidence" for i in range(500)}, **{f"c{i}": "claim" for i in range(500)}}
+    links_ = [(f"e{i}", "hub", "S") for i in range(500)] + [(f"e{i}", f"c{i}", "R") for i in range(500)]
+    sl, idx = O.Graph(nodes, links_, [["hub", "c1", "c2"]]).slice(["hub"], O.random.Random(1))
+    assert len([e for e in sl["edges"] if e[1] == idx["hub"]]) <= O.BRANCH
+    assert any(i == idx["hub"] and n == O.MAX_OFF_EDGE for i, n in sl["off_edge"])
+    assert len(sl["nodes"]) <= O.SLICE_NODES and all(len(m) >= 2 for m in sl["contradictions"])
 
 
 if __name__ == "__main__":

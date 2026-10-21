@@ -14,14 +14,44 @@
   #stage{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;container-type:size}
   canvas{display:block;aspect-ratio:16/9;width:min(100%,calc((100dvh - 4.5rem)*1.7778));height:auto;max-width:100%;max-height:calc(100dvh - 4.5rem)}
   @supports (width:1cqw){canvas{width:min(100cqw,calc(100cqh*16/9));max-height:100cqh}}
+  #stage{position:relative}
+  #overlay{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);width:min(92%,760px);display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none;text-align:center}
+  #overlay>*{pointer-events:auto}
+  #totals{background:rgba(30,24,38,.82);border-radius:999px;padding:6px 16px;font-size:14px}
+  #live-label{font-size:12px;color:#e7dcf0;background:rgba(30,24,38,.6);border-radius:999px;padding:2px 10px}
+  #landing{background:rgba(30,24,38,.88);border-radius:12px;padding:12px 18px;display:flex;flex-wrap:wrap;gap:10px 14px;align-items:center;justify-content:center}
+  #landing h1{font-size:16px;margin:0;flex-basis:100%}
+  .btn{font:inherit;padding:7px 14px;border-radius:7px;border:1px solid #8ab6f9;background:#8ab6f9;color:#1e1826;cursor:pointer;text-decoration:none;font-weight:600}
+  .btn.ghost{background:none;color:#cfe0ff}
+  dialog{background:#2b2433;color:#f4efe6;border:1px solid #4a3f57;border-radius:12px;width:min(92vw,440px)}
+  dialog::backdrop{background:rgba(10,6,14,.6)}
+  dialog label{display:grid;gap:4px;margin:10px 0;font-size:13px;color:#cbbfd4}
+  dialog input,dialog textarea{font:13px/1.4 ui-monospace,Menlo,monospace;color:#f4efe6;background:#1e1826;border:1px solid #4a3f57;border-radius:6px;padding:7px}
+  dialog textarea{min-height:80px;font-family:system-ui,sans-serif}
+  #req-msg{min-height:1.2em;font-size:13px}#req-msg.err{color:#f4a6a0}#req-msg.ok{color:#a9d6c4}
+  [hidden]{display:none!important}
 </style>
 </head>
 <body>
-<header><b>TMS ledger</b><nav><a href="/">Home</a><a href="/submit">Submit</a><a href="/dashboard">Dashboard</a><a href="/docs">Docs</a><a href="/office" aria-current="page">Office</a></nav>
-<p id="office-desc">Little bots file papers into cabinets, pin claims to the corkboard, and ponder the string between them. A yellow card with no string is a hypothesis. The marks on every sheet are only squiggles.</p></header>
+<header><b>TMS ledger</b><nav><a href="/">Home</a><a href="/submit">Submit</a><a href="/dashboard">Dashboard</a><a href="/docs">Docs</a><a href="/office" aria-current="page">Office</a><a href="/connect">Connect</a></nav>
+<p id="office-desc">Little bots file papers, pin them to boards and string them together. Each board is a slice of a private collection, shown by its shape only: index cards are claims, papers are evidence, green string supports, red rebuts, amber qualifies, and a red zigzag marks a contradiction. A yellow card with no string is a hypothesis. Every mark is a squiggle; no text, names or records are shown.</p></header>
 <main id="stage">
-<canvas id="c" role="img" aria-label="Animated office of little bots filing papers and pinning them to a corkboard" aria-describedby="office-desc"></canvas>
+<canvas id="c" role="img" aria-label="Animated office of little bots pinning anonymous papers and cards to boards" aria-describedby="office-desc"></canvas>
+<div id="overlay">
+  <div id="landing" hidden><h1>A private evidence ledger for people and AI agents</h1>
+    <button class="btn" id="req-open" type="button">Request access</button><a class="btn ghost" href="/connect">Connect</a><a class="btn ghost" href="/docs">How it works</a></div>
+  <div id="totals" hidden></div>
+  <div id="live-label" hidden></div>
+</div>
 </main>
+<dialog id="req"><form id="req-form" method="dialog">
+  <b>Request access</b>
+  <p style="margin:6px 0 0;font-size:13px;color:#cbbfd4">Every record here is signed with a Nostr key. Paste yours and an admin will review it. No key yet? A browser extension such as <a href="https://getalby.com" style="color:#cfe0ff">Alby</a> makes one.</p>
+  <label>Your npub<input id="req-npub" name="npub" required autocomplete="off" placeholder="npub1..."></label>
+  <label>Note (optional)<textarea id="req-note" name="note" maxlength="500" placeholder="Who you are and what you would like to work on"></textarea></label>
+  <div id="req-msg" role="status"></div>
+  <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn ghost" type="button" id="req-close">Close</button><button class="btn" type="submit" id="req-send">Send request</button></div>
+</form></dialog>
 <script>
 /*
   Bot Office: a self-contained, looping ambient animation. No network deps.
@@ -37,7 +67,11 @@
     botOffice.evidence(n)     -> n sheets drop out of the tube into the inbox
     botOffice.claim(n)        -> n yellow claim cards drop into the inbox
     botOffice.link()          -> next evidence pinned to the board gets a red string
-    botOffice.contradiction() -> next string drawn is a blue "contradiction" string
+    botOffice.contradiction() -> next string drawn is a red string (a rebuttal)
+    botOffice.status()        -> read-only: live mode, replay position, flips, speech bubbles
+
+  Live mode: /office.json (anonymous boards, slices and the last hour's events) replaces the
+  random pinning. Pinners replay real events on flipping boards; filers keep filing.
   Papers only ever show squiggles, so nothing real is revealed.
 */
 (() => {
@@ -75,23 +109,27 @@ let T = 0;
 
 // ---------- papers ----------
 let paperId = 0;
-function newPaper(kind) {
-  const n = kind === 'claim' ? 3 : (rr(4, 6.99) | 0);
+function newPaper(kind, R = rnd) {
+  const r = (a, b) => a + (b - a) * R();
+  const n = kind === 'claim' ? 3 : (r(4, 6.99) | 0);
   const lines = [];
-  for (let i = 0; i < n; i++) lines.push({ len: rr(.45, .95), ph: rr(0, 6.28), fr: rr(.28, .42) });
-  return { id: paperId++, kind, lines, photo: kind === 'ev' && rnd() < .35, tint: pick(['#ffffff', '#fbf8f0', '#f4f7ff']) };
+  for (let i = 0; i < n; i++) lines.push({ len: r(.45, .95), ph: r(0, 6.28), fr: r(.28, .42) });
+  return { id: paperId++, kind, lines, photo: kind === 'ev' && R() < .35, tint: ['#ffffff', '#fbf8f0', '#f4f7ff'][R() * 3 | 0] };
 }
 const SIZE = { ev: [34, 42], claim: [42, 30] };
 function drawPaper(p, x, y, w, h, rot = 0, alpha = 1, shadow = true) {
   ctx.save(); ctx.globalAlpha *= alpha; ctx.translate(x, y); ctx.rotate(rot);
   if (shadow) { ctx.fillStyle = 'rgba(60,35,20,.20)'; ctx.fillRect(-w / 2 + 2, -h / 2 + 3, w, h); }
-  ctx.fillStyle = p.kind === 'claim' ? '#ffe39a' : p.tint; ctx.fillRect(-w / 2, -h / 2, w, h);
+  // claim = index card; a claim with no string = yellow hypothesis card; evidence = a paper
+  const card = p.kind === 'card', claimish = card || p.kind === 'claim';
+  ctx.fillStyle = card ? '#fbfaf3' : p.kind === 'claim' ? '#ffe39a' : p.tint; ctx.fillRect(-w / 2, -h / 2, w, h);
+  if (card) { ctx.fillStyle = '#e48a80'; ctx.fillRect(-w / 2, -h / 2 + h * .2, w, Math.max(.8, h * .04)); }
   const f = Math.min(w, h) * .2;
   ctx.fillStyle = 'rgba(0,0,0,.07)'; ctx.beginPath(); ctx.moveTo(w / 2 - f, -h / 2); ctx.lineTo(w / 2, -h / 2 + f); ctx.lineTo(w / 2 - f, -h / 2 + f); ctx.closePath(); ctx.fill();
   let top = -h / 2 + h * .16;
   if (p.photo) { ctx.fillStyle = '#c4d0e4'; ctx.fillRect(-w / 2 + w * .14, top, w * .42, h * .26); top += h * .32; }
-  ctx.strokeStyle = p.kind === 'claim' ? '#b98d36' : '#98a2b8';
-  ctx.lineWidth = Math.max(.7, h * (p.kind === 'claim' ? .055 : .035)); ctx.lineCap = 'round';
+  ctx.strokeStyle = card ? '#8fa6c8' : p.kind === 'claim' ? '#b98d36' : '#98a2b8';
+  ctx.lineWidth = Math.max(.7, h * (claimish ? .055 : .035)); ctx.lineCap = 'round';
   const n = p.lines.length, gap = (h / 2 - h * .1 - top) / n;
   for (let i = 0; i < n; i++) {
     const L = p.lines[i], ly = top + gap * (i + .5), x0 = -w / 2 + w * .14, x1 = x0 + w * .72 * L.len;
@@ -141,6 +179,163 @@ let archiving = false;
   addString(ev[2], cl[1], 'sup', true); addString(ev[3], cl[1], 'contra', true);
   addString(ev[4], cl[2], 'sup', true);
 })();
+
+// ---------- live data (/office.json) ----------
+// Boards, slices and replay events are anonymous: node kinds, local indices and relation letters only.
+let DATA = null, LIVE = false;
+const view = { board: null, slice: null, flip: null, hide: null, reveal: null, pop: {}, idleT: 3, bi: 0, si: {} };
+const jobs = []; let activeJobs = 0;
+const replay = { i: 0, wait: 2.5 };
+let replaySlices = new Set();
+
+function hashSeed(str) { let h = 2166136261; for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 16777619); return h >>> 0; }
+function seeded(a) { return () => { a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const INNER = { x0: BOARD.x + 30, x1: BOARD.x + BOARD.w - 30, y0: BOARD.y + 34, y1: BOARD.y + BOARD.h - 26 };
+const layouts = new Map();
+function layout(sl) {
+  // force-directed, seeded by the slice id: the same slice always looks the same
+  let L = layouts.get(sl.id); if (L) return L;
+  const R = seeded(hashSeed(sl.id)), n = sl.nodes.length, I = INNER, Wd = I.x1 - I.x0, Hd = I.y1 - I.y0;
+  const P = sl.nodes.map(() => ({ x: I.x0 + R() * Wd, y: I.y0 + R() * Hd }));
+  const springs = sl.edges.map(e => [e[0], e[1]]);
+  sl.contradictions.forEach(g => g.forEach((a, k) => { if (k) springs.push([g[k - 1], a]); }));
+  const k = Math.sqrt(Wd * Hd / Math.max(1, n)) * .75;
+  let temp = Wd / 6;
+  for (let it = 0; it < 220; it++) {
+    const D = P.map(() => ({ x: 0, y: 0 }));
+    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+      const dx = P[i].x - P[j].x, dy = P[i].y - P[j].y, d = Math.hypot(dx, dy) || .01, f = k * k / d / d;
+      D[i].x += dx * f; D[i].y += dy * f; D[j].x -= dx * f; D[j].y -= dy * f;
+    }
+    springs.forEach(([a, b]) => { const dx = P[a].x - P[b].x, dy = P[a].y - P[b].y, d = Math.hypot(dx, dy) || .01, f = d / k;
+      D[a].x -= dx * f; D[a].y -= dy * f; D[b].x += dx * f; D[b].y += dy * f; });
+    for (let i = 0; i < n; i++) {
+      D[i].x += ((I.x0 + I.x1) / 2 - P[i].x) * .02; D[i].y += ((I.y0 + I.y1) / 2 - P[i].y) * .02;
+      const d = Math.hypot(D[i].x, D[i].y) || .01, m = Math.min(d, temp);
+      P[i].x = clamp(P[i].x + D[i].x / d * m, I.x0, I.x1); P[i].y = clamp(P[i].y + D[i].y / d * m, I.y0, I.y1);
+    }
+    temp = Math.max(.5, temp * .975);
+  }
+  // strings that leave the slice run off the nearest edge of the board. A small collection sits inside
+  // its frame; a big one spills strings off every side. Capped so a hub doesn't hide the board.
+  const B = BOARD, off = [], OFF_PER_NODE = 3, OFF_TOTAL = 18;
+  sl.off_edge.slice().sort((a, b) => b[1] - a[1]).forEach(([i, c]) => {
+    const p = P[i], sides = [[p.x - B.x, -1, 0], [B.x + B.w - p.x, 1, 0], [p.y - B.y, 0, -1], [B.y + B.h - p.y, 0, 1]].sort((a, b) => a[0] - b[0]);
+    for (let j = 0; j < Math.min(c, OFF_PER_NODE) && off.length < OFF_TOTAL; j++) {
+      const [, sx, sy] = sides[0], spread = (j - (Math.min(c, OFF_PER_NODE) - 1) / 2) * 12 + (R() - .5) * 8;
+      off.push({ i, end: sx ? { x: sx < 0 ? B.x - 10 : B.x + B.w + 10, y: clamp(p.y + spread, B.y + 4, B.y + B.h - 4) }
+                             : { x: clamp(p.x + spread, B.x + 4, B.x + B.w - 4), y: sy < 0 ? B.y - 10 : B.y + B.h + 10 } });
+    }
+  });
+  L = { pos: P, off, scale: clamp(1.15 - n / 45, .5, 1),
+        papers: sl.nodes.map(nd => newPaper(nd.t === 'claim' ? 'claim' : 'ev', R)),
+        rot: P.map(() => (R() - .5) * .16), pins: P.map(() => PIN_COLORS[R() * PIN_COLORS.length | 0]) };
+  layouts.set(sl.id, L); return L;
+}
+function nodeSize(sl, L, i) { const [w, h] = SIZE[sl.nodes[i].t === 'claim' ? 'claim' : 'ev']; return [w * L.scale, h * L.scale]; }
+function livePin(sl, L, i) { const [, h] = nodeSize(sl, L, i); return { x: L.pos[i].x, y: L.pos[i].y - h / 2 + 4 * L.scale }; }
+
+function flipTo(board, sl, hide = null) {
+  if (view.slice && view.slice.id === sl.id) { view.board = board; view.hide = hide; return; }
+  if (!view.slice) { Object.assign(view, { board, slice: sl, hide, pop: {} }); return; }
+  view.flip = { p: 0, swapped: false, board, sl, hide };
+}
+function stepLive(dt) {
+  const f = view.flip;
+  if (f) {
+    f.p += dt / 1.1;
+    if (!f.swapped && f.p >= .5) { f.swapped = true; Object.assign(view, { board: f.board, slice: f.sl, hide: f.hide, pop: {} }); }
+    if (f.p >= 1) view.flip = null;
+  }
+  for (const i in view.pop) view.pop[i] = Math.min(1, view.pop[i] + dt * 3);
+  const idle = !activeJobs && !jobs.length;
+  if (idle && DATA.replay.length) {
+    replay.wait -= dt;
+    if (replay.wait <= 0) {
+      if (replay.i >= DATA.replay.length) { replay.i = 0; replay.wait = 30; } // the hour is over: pause, then play it again
+      else {
+        const ev = DATA.replay[replay.i++], next = DATA.replay[replay.i];
+        jobs.push(ev);
+        replay.wait = next ? clamp((next.t - ev.t) / 20, 1.5, 10) : 25; // sped up: twenty minutes of the hour per minute
+      }
+    }
+  }
+  if (idle && !view.flip) { view.idleT -= dt; if (view.idleT <= 0) { idleCycle(); view.idleT = 16; } }
+  else view.idleT = Math.max(view.idleT, 8);
+}
+function idleCycle() {
+  // when nothing is happening, boards cycle slowly through collections and their recently active claims
+  const board = DATA.boards[view.bi++ % DATA.boards.length];
+  const idle = board.slices.filter(s => !replaySlices.has(s.id)), pool = idle.length ? idle : board.slices;
+  const k = view.si[board.id] = ((view.si[board.id] ?? -1) + 1) % pool.length;
+  flipTo(board, pool[k]);
+}
+
+function* liveJob(b, ev) {
+  const board = DATA.boards.find(x => x.id === ev.board), sl = board && board.slices.find(x => x.id === ev.slice);
+  if (!sl) return;
+  const paperKind = ev.kind === 'evidence' ? 'ev' : ev.kind === 'claim' ? 'claim' : null;
+  if (paperKind) { dropPaper(paperKind); yield* fetchPaper(b); b.carry = newPaper(paperKind); b.carryScale = .55; }
+  const edge = ev.kind === 'link' && ev.to != null ? sl.edges.findIndex(e => e[0] === ev.node && e[1] === ev.to) : -1;
+  const hide = paperKind ? { node: ev.node } : edge >= 0 ? { edge } : ev.kind === 'contradiction' && ev.c != null ? { contra: ev.c } : null;
+  flipTo(board, sl, hide); // the board the bot is heading to turns to this collection first
+  yield until(() => !view.flip);
+  const L = layout(sl), at = L.pos[ev.node];
+  yield mv(clamp(at.x + rr(-10, 10), 565, 905), 330 + rr(-3, 3));
+  b.view = 'back';
+  if (paperKind) {
+    b.arm = { tx: at.x, ty: at.y, p: 0 };
+    yield anim(1, (b, p) => { b.arm.p = ease(p); b.carryScale = lerp(.55, L.scale, ease(p)); });
+    b.carry = null; b.carryScale = 1; view.hide = null; view.pop[ev.node] = 0;
+    const pp = livePin(sl, L, ev.node); fx.push({ x: pp.x, y: pp.y, t: 0, kind: 'ring' });
+    yield anim(.4, (b, p) => { b.arm.p = 1 - ease(p); });
+  } else if (edge >= 0) {
+    const e = sl.edges[edge], from = livePin(sl, L, e[0]), to = livePin(sl, L, e[1]);
+    b.arm = { tx: from.x, ty: from.y, p: 0 };
+    yield anim(.7, (b, p) => { b.arm.p = ease(p); });
+    view.reveal = { edge, p: 0 };
+    yield anim(1.1, (b, p) => { const q = curvePt(from, to, ease(p)); view.reveal.p = ease(p); b.arm.tx = q.x; b.arm.ty = q.y; });
+    view.reveal = null; view.hide = null; fx.push({ x: to.x, y: to.y, t: 0, kind: 'ring' });
+    yield anim(.4, (b, p) => { b.arm.p = 1 - ease(p); });
+  } else if (hide && hide.contra != null) {
+    const pts = sl.contradictions[hide.contra].map(i => L.pos[i]);
+    b.arm = { tx: pts[0].x, ty: pts[0].y, p: 0 };
+    yield anim(.7, (b, p) => { b.arm.p = ease(p); });
+    view.reveal = { contra: hide.contra, p: 0 };
+    yield anim(1.4, (b, p) => { view.reveal.p = p; const q = polyAt(pts, p); b.arm.tx = q.x; b.arm.ty = q.y; });
+    view.reveal = null; view.hide = null;
+    yield anim(.4, (b, p) => { b.arm.p = 1 - ease(p); });
+  } else view.hide = null; // a link disputing a link or contradiction: nothing new to string
+  b.arm = null; b.view = 'front';
+  yield* react(b, ev);
+}
+function* runJob(b, ev) { activeJobs++; yield* liveJob(b, ev); activeJobs--; }
+
+function* react(b, ev) {
+  // ! evidence, ✓ supports, ~ qualifies, !? rebuts, one ? per claim in a contradiction (plus a head-scratch)
+  const sym = ev.kind === 'evidence' ? '!' : ev.kind === 'link' ? { S: '✓', Q: '~', R: '!?' }[ev.relation]
+    : ev.kind === 'contradiction' ? '?'.repeat(clamp(ev.claims, 2, 4)) : null;
+  if (!sym) { yield* happy(b); return; }
+  b.say = { sym, p: 0 };
+  if (ev.kind === 'contradiction') {
+    b.arm = { tx: b.x + 15, ty: b.y - 62, p: 0 };
+    yield anim(2.6, (b, p) => {
+      b.say.p = p; b.arm.p = Math.min(1, p * 5) * (p > .85 ? (1 - p) / .15 : 1);
+      b.arm.tx = b.x + 15; b.arm.ty = b.y - b.bob() - 62 + Math.sin(p * 46) * 3; b.tilt = Math.sin(p * 16) * .12;
+    });
+    b.arm = null; b.tilt = 0;
+  } else {
+    const hop = ev.kind === 'evidence' || ev.relation === 'S';
+    yield anim(1.7, (b, p) => { b.say.p = p; b.hopY = hop ? Math.sin(clamp(p * 2.5, 0, 1) * Math.PI) * 5 : 0; });
+  }
+  b.say = null; b.hopY = 0;
+}
+
+function* idleLive(b) {
+  yield mv(rr(575, 900), rr(360, 432));
+  b.face = pick([-1, 1]);
+  yield wait(rr(1, 2.5));
+}
 
 // ---------- bots ----------
 const mv = (x, y) => ({ type: 'move', x, y });
@@ -314,8 +509,17 @@ function* ponder(b) {
 
 const ROLES = {
   filer: function* (b) { yield* fetchPaper(b); yield* fileInto(b); if (rnd() < .35) yield* wander(b); },
-  pinner: function* (b) { yield* fetchPaper(b); yield* pinToBoard(b); if (rnd() < .25) yield* wander(b); },
+  pinner: function* (b) {
+    if (LIVE) { const j = jobs.shift(); if (j) yield* runJob(b, j); else yield* idleLive(b); return; }
+    yield* fetchPaper(b); yield* pinToBoard(b); if (rnd() < .25) yield* wander(b);
+  },
   ponderer: function* (b) { yield* ponder(b); },
+  // stands beside the board facing out, with 0-4 floating ? for how contradicted its collection is
+  watcher: function* (b) {
+    yield mv(519 + rr(-3, 3), 352 + rr(-4, 4)); b.face = 1;
+    yield anim(rr(3, 6), (b, p) => { b.view = p < .8 ? 'back' : 'front'; b.tilt = Math.sin(p * 9) * .06; });
+    b.tilt = 0; b.view = 'front'; yield wait(rr(1, 3));
+  },
 };
 
 const bots = [
@@ -344,6 +548,7 @@ function step(dt) {
   items.forEach(it => { it.pop = Math.min(1, it.pop + dt * 3); });
   for (let i = strings.length - 1; i >= 0; i--) { const s = strings[i]; if (s.fading) { s.alpha -= dt * 1.5; if (s.alpha <= 0) strings.splice(i, 1); } }
   for (let i = fx.length - 1; i >= 0; i--) { fx[i].t += dt * 2; if (fx[i].t >= 1) fx.splice(i, 1); }
+  if (LIVE) stepLive(dt);
   bots.forEach(b => b.update(dt));
 }
 
@@ -442,31 +647,113 @@ function drawCabinets() {
   });
 }
 
+const REL_COL = { S: '#3f9d4f', R: '#d8443b', Q: '#e0a231' }; // green supports, red rebuts, amber qualifies
+function drawStand() {
+  // a whiteboard stand: side posts with a pivot halfway up, so the board flips over its horizontal axis
+  const B = BOARD, cy = B.y + B.h / 2;
+  [B.x - 9, B.x + B.w + 9].forEach(x => {
+    ctx.fillStyle = 'rgba(60,35,20,.18)'; ctx.beginPath(); ctx.ellipse(x, 327, 22, 4, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#7d5638'; rrect(x - 4, cy - 14, 8, 340 - cy, 3); ctx.fill();
+    ctx.fillStyle = '#6a4930'; rrect(x - 20, 320, 40, 7, 3); ctx.fill();
+    ctx.fillStyle = '#c8a45a'; ctx.beginPath(); ctx.arc(x, cy, 5, 0, 7); ctx.fill();
+  });
+}
 function drawBoard() {
-  const B = BOARD;
+  const B = BOARD, f = view.flip, cy = B.y + B.h / 2;
+  drawStand();
+  const sc = f ? Math.abs(Math.cos(f.p * Math.PI)) : 1;
+  ctx.save(); ctx.translate(0, cy); ctx.scale(1, Math.max(.03, sc)); ctx.translate(0, -cy);
   ctx.fillStyle = 'rgba(70,40,20,.18)'; rrect(B.x + 5, B.y + 7, B.w, B.h, 8); ctx.fill();
   ctx.fillStyle = '#a5714b'; rrect(B.x, B.y, B.w, B.h, 8); ctx.fill();
   ctx.fillStyle = '#d9aa70'; ctx.fillRect(B.x + 10, B.y + 10, B.w - 20, B.h - 20);
   cork.forEach(([u, v, r, dark]) => { ctx.fillStyle = dark ? 'rgba(140,90,40,.25)' : 'rgba(255,235,190,.3)'; ctx.fillRect(B.x + 10 + u * (B.w - 22), B.y + 10 + v * (B.h - 22), r, r); });
   ctx.fillStyle = 'rgba(255,255,255,.12)'; ctx.fillRect(B.x + 10, B.y + 10, B.w - 20, 4);
-  // items
+  if (LIVE) drawLiveSlice(); else drawAmbientBoard();
+  if (f) { ctx.fillStyle = `rgba(40,20,10,${(1 - sc) * .5})`; ctx.fillRect(B.x, B.y, B.w, B.h); }
+  ctx.restore();
+}
+function drawAmbientBoard() {
+  const linked = it => strings.some(s => !s.fading && s.prog >= 1 && (s.a === it || s.b === it));
   items.forEach(it => {
     const [w, h] = SIZE[it.paper.kind]; const s = .7 + .3 * ease(it.pop);
-    drawPaper(it.paper, it.slot.x, it.slot.y, w * s, h * s, it.rot, 1);
+    const kind = it.paper.kind === 'claim' && linked(it) ? 'card' : it.paper.kind;
+    drawPaper(kind === it.paper.kind ? it.paper : { ...it.paper, kind }, it.slot.x, it.slot.y, w * s, h * s, it.rot, 1);
   });
-  // strings
   strings.forEach(s => {
     const a = pinPos(s.a), b = pinPos(s.b);
     ctx.save(); ctx.globalAlpha = s.alpha;
-    const glow = s.glow > 0 ? .5 + .5 * Math.sin(T * 5) : 0;
-    const col = s.kind === 'contra' ? '#3e6fd8' : '#d8443b';
-    if (glow > 0) { ctx.strokeStyle = s.kind === 'contra' ? 'rgba(120,170,255,.45)' : 'rgba(255,140,120,.45)'; ctx.lineWidth = 5 + glow * 3; drawCurve(a, b, s); }
+    const col = s.kind === 'contra' ? REL_COL.R : REL_COL.S, glow = s.glow > 0 ? .5 + .5 * Math.sin(T * 5) : 0;
+    if (glow > 0) { ctx.strokeStyle = s.kind === 'contra' ? 'rgba(255,140,120,.45)' : 'rgba(150,230,150,.45)'; ctx.lineWidth = 5 + glow * 3; drawCurve(a, b, s); }
     ctx.strokeStyle = 'rgba(60,20,10,.18)'; ctx.lineWidth = 1.6; ctx.save(); ctx.translate(1.5, 2.5); drawCurve(a, b, s); ctx.restore();
-    ctx.strokeStyle = col; ctx.lineWidth = 1.8; if (s.kind === 'contra') ctx.setLineDash([5, 4]); drawCurve(a, b, s); ctx.setLineDash([]);
+    ctx.strokeStyle = col; ctx.lineWidth = 1.8; drawCurve(a, b, s);
     ctx.restore();
   });
-  // pins on top
-  items.forEach(it => { const p = pinPos(it); ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.arc(p.x + 1.5, p.y + 2, 3.6, 0, 7); ctx.fill(); ctx.fillStyle = it.pin; ctx.beginPath(); ctx.arc(p.x, p.y, 3.8, 0, 7); ctx.fill(); ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.beginPath(); ctx.arc(p.x - 1.2, p.y - 1.2, 1.3, 0, 7); ctx.fill(); });
+  items.forEach(it => drawPin(pinPos(it), it.pin, 1));
+}
+function drawPin(p, col, s) {
+  ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.arc(p.x + 1.5 * s, p.y + 2 * s, 3.6 * s, 0, 7); ctx.fill();
+  ctx.fillStyle = col; ctx.beginPath(); ctx.arc(p.x, p.y, 3.8 * s, 0, 7); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.beginPath(); ctx.arc(p.x - 1.2 * s, p.y - 1.2 * s, 1.3 * s, 0, 7); ctx.fill();
+}
+function drawString(a, b, col, prog, width = 1.8) {
+  const st = { prog, revProg: 0 };
+  ctx.strokeStyle = 'rgba(60,20,10,.18)'; ctx.lineWidth = width * .9; ctx.save(); ctx.translate(1.5, 2.5); drawCurve(a, b, st); ctx.restore();
+  ctx.strokeStyle = col; ctx.lineWidth = width; drawCurve(a, b, st);
+}
+function zigzag(pts, prog) {
+  // a red zigzag through the member cards, drawn up to `prog` of its length
+  const segs = []; for (let k = 1; k < pts.length; k++) segs.push([pts[k - 1], pts[k]]);
+  const total = segs.length; let left = prog * total;
+  ctx.strokeStyle = '#c8322b'; ctx.lineWidth = 2.4; ctx.lineJoin = 'round'; ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
+  for (const [a, b] of segs) {
+    const part = clamp(left, 0, 1); left -= 1; if (part <= 0) break;
+    const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 1, nx = -dy / d, ny = dx / d, teeth = Math.max(2, Math.round(d / 9));
+    for (let t = 1; t <= teeth * part; t++) { const u = t / teeth, o = t === teeth ? 0 : (t % 2 ? 4.5 : -4.5); ctx.lineTo(a.x + dx * u + nx * o, a.y + dy * u + ny * o); }
+  }
+  ctx.stroke();
+}
+function polyAt(pts, p) {
+  const n = pts.length - 1, x = clamp(p, 0, 1) * n, k = Math.min(n - 1, Math.floor(x)), u = x - k;
+  return { x: lerp(pts[k].x, pts[k + 1].x, u), y: lerp(pts[k].y, pts[k + 1].y, u) };
+}
+function drawLiveSlice() {
+  const sl = view.slice; if (!sl) return;
+  const L = layout(sl), H = view.hide || {}, R = view.reveal;
+  const vis = i => H.node !== i;
+  const edgeOn = k => H.edge !== k || (R && R.edge === k);
+  const contraOn = k => H.contra !== k || (R && R.contra === k);
+  const linked = new Set(); sl.edges.forEach((e, k) => { if (H.edge !== k && vis(e[0]) && vis(e[1])) { linked.add(e[0]); linked.add(e[1]); } });
+  sl.off_edge.forEach(([i]) => linked.add(i));
+  // strings running off the board: the slice continues beyond the frame
+  L.off.forEach(o => { if (vis(o.i)) { const a = livePin(sl, L, o.i); ctx.globalAlpha = .55; drawString(a, o.end, '#8a6a52', 1, 1.2); ctx.globalAlpha = 1; } });
+  sl.nodes.forEach((nd, i) => {
+    if (!vis(i)) return;
+    const [w, h] = nodeSize(sl, L, i), pop = view.pop[i] ?? 1, s = .7 + .3 * ease(pop);
+    const kind = nd.t === 'claim' ? (linked.has(i) ? 'card' : 'claim') : 'ev';
+    drawPaper({ ...L.papers[i], kind }, L.pos[i].x, L.pos[i].y, w * s, h * s, L.rot[i], 1);
+  });
+  sl.edges.forEach((e, k) => {
+    if (!vis(e[0]) || !vis(e[1]) || !edgeOn(k)) return;
+    drawString(livePin(sl, L, e[0]), livePin(sl, L, e[1]), REL_COL[e[2]], R && R.edge === k ? R.p : 1);
+  });
+  sl.contradictions.forEach((g, k) => {
+    if (g.some(i => !vis(i)) || !contraOn(k)) return;
+    zigzag(g.map(i => L.pos[i]), R && R.contra === k ? R.p : 1);
+  });
+  sl.nodes.forEach((nd, i) => { if (vis(i)) drawPin(livePin(sl, L, i), L.pins[i], L.scale); });
+}
+function drawThumbs() {
+  // the thumbnail wall: every board, with the one facing out highlighted
+  if (!LIVE) return;
+  const bs = DATA.boards, n = Math.min(bs.length, 24), tw = 18, th = 11, gap = 4, x0 = 300, y0 = 22;
+  const current = view.flip ? view.flip.board : view.board;
+  for (let k = 0; k < n; k++) {
+    const x = x0 + (k % 8) * (tw + gap), y = y0 + Math.floor(k / 8) * (th + gap), on = bs[k] === current;
+    ctx.fillStyle = 'rgba(70,40,20,.18)'; ctx.fillRect(x + 1, y + 2, tw, th);
+    ctx.fillStyle = '#a5714b'; ctx.fillRect(x, y, tw, th); ctx.fillStyle = '#d9aa70'; ctx.fillRect(x + 2, y + 2, tw - 4, th - 4);
+    ctx.fillStyle = 'rgba(255,255,255,.8)'; ctx.fillRect(x + 4, y + 3, 4, 3); ctx.fillRect(x + 11, y + 5, 4, 3);
+    if (on) { ctx.strokeStyle = '#fff3b0'; ctx.lineWidth = 2; ctx.strokeRect(x - 2, y - 2, tw + 4, th + 4); }
+  }
 }
 function drawCurve(a, b, s) {
   const t0 = s.revProg ? 1 - s.revProg : 0, t1 = s.revProg ? 1 : s.prog;
@@ -569,6 +856,8 @@ function drawBot(b) {
   if (b.carry && !carryBehind) drawCarry(b);
   if (b.arm) { const h = b.hand(); ctx.fillStyle = b.accent; ctx.beginPath(); ctx.arc(h.x, h.y, 4.5, 0, 7); ctx.fill(); }
   if (b.ponder) drawBubble(b);
+  if (b.say) drawSay(b);
+  if (b.role === 'watcher' && LIVE && view.board && !view.flip) drawConfusion(b, view.board.confusion);
   if (b.mood === 'happy') { ctx.fillStyle = '#ffd35c'; sparkle(x - 22, y - bob - 74, 4); sparkle(x + 24, y - bob - 66, 3); }
 }
 function drawCarry(b) {
@@ -605,6 +894,27 @@ function drawBubble(b) {
   ctx.restore();
 }
 
+function drawSay(b) {
+  const p = b.say.p, sc = ease(clamp(p * 6, 0, 1)) * (1 - ease(clamp((p - .88) * 8.3, 0, 1)));
+  if (sc <= .01) return;
+  ctx.save(); ctx.translate(b.x + 24, b.y - b.bob() - 100); ctx.scale(sc, sc);
+  ctx.font = 'bold 18px "Trebuchet MS", "Segoe UI", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const w = Math.max(30, ctx.measureText(b.say.sym).width + 18);
+  ctx.fillStyle = 'rgba(60,40,70,.14)'; rrect(-w / 2 + 2, -13, w, 28, 10); ctx.fill();
+  ctx.fillStyle = '#fff'; rrect(-w / 2, -15, w, 28, 10); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-10, 11); ctx.lineTo(-18, 22); ctx.lineTo(-2, 12); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = { '✓': '#3f9d4f', '~': '#c98a1c', '!?': '#d8443b', '!': '#3e6fd8' }[b.say.sym] || '#6a5a8a';
+  ctx.fillText(b.say.sym, 0, 0);
+  ctx.restore();
+}
+function drawConfusion(b, n) {
+  ctx.font = 'bold 15px "Trebuchet MS", "Segoe UI", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (let i = 0; i < n; i++) {
+    const ph = (T * .35 + i / n) % 1;
+    ctx.fillStyle = `rgba(106,90,138,${Math.sin(ph * Math.PI) * .9})`;
+    ctx.fillText('?', b.x - 16 + i * 11 + Math.sin(T * 1.7 + i) * 3, b.y - b.bob() - 84 - ph * 26);
+  }
+}
 function drawFx() {
   fx.forEach(f => { ctx.strokeStyle = `rgba(255,255,255,${1 - f.t})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(f.x, f.y, 4 + f.t * 14, 0, 7); ctx.stroke(); });
 }
@@ -614,6 +924,7 @@ function render() {
   ctx.setTransform(cv.width / W, 0, 0, cv.height / H, 0, 0);
   ctx.clearRect(0, 0, W, H);
   drawBackground();
+  drawThumbs();
   drawCabinets();
   drawBoard();
   drawPlant(507, 312, .9, 1);
@@ -632,11 +943,54 @@ function render() {
 // ---------- loop / API ----------
 const DT = 1 / 60;
 window.__advance = (sec) => { const n = Math.round(sec / DT); for (let i = 0; i < n; i++) step(DT); render(); };
+// ---------- live data: load /office.json, the overlay and the access request ----------
+const $ = id => document.getElementById(id);
+const fmt = n => Number(n).toLocaleString('en-US');
+function showTotals(t) {
+  const plural = (n, one, many) => `${fmt(n)} ${n === 1 ? one : many}`;
+  $('totals').textContent = `${plural(t.evidence, 'paper', 'papers')} · ${plural(t.claims, 'claim', 'claims')} · ${plural(t.contradictions, 'contradiction', 'contradictions')} across ${plural(t.collections, 'private collection', 'private collections')}`;
+  $('totals').hidden = false;
+}
+function goLive(d) {
+  DATA = d; LIVE = true;
+  replaySlices = new Set(d.replay.map(e => e.slice));
+  const w = bots.find(b => b.role === 'ponderer');
+  if (w) Object.assign(w, { role: 'watcher', cur: null, ponder: null, spot: null, tilt: 0, arm: null, gen: ROLES.watcher(w) });
+  bots.filter(b => b.role === 'pinner').forEach(b => { b.speed *= 1.6; }); // replaying an hour: keep the pinners brisk
+  idleCycle(); view.idleT = 10;
+  $('live-label').textContent = d.replay.length ? 'Replay: the last hour in the office' : 'A quiet hour in the office';
+  $('live-label').hidden = false;
+}
+if (location.pathname === '/') $('landing').hidden = false;
+fetch('/office.json').then(r => r.ok ? r.json() : null).then(d => {
+  if (!d) return;
+  showTotals(d.totals);
+  if (d.boards.length) goLive(d); // with no boards yet, the ambient loop keeps playing
+  if (reduceMotion || CAPTURE) render();
+}).catch(() => {});
+const dlg = $('req');
+$('req-open').onclick = () => { $('req-msg').textContent = ''; dlg.showModal ? dlg.showModal() : dlg.setAttribute('open', ''); };
+$('req-close').onclick = () => dlg.close();
+$('req-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const msg = $('req-msg'); msg.className = ''; msg.textContent = 'Sending…'; $('req-send').disabled = true;
+  try {
+    const r = await fetch('/api/access-request', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ npub: $('req-npub').value.trim(), note: $('req-note').value.trim() }) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || `${r.status}`);
+    msg.className = 'ok'; msg.textContent = 'Request sent. Once an admin approves it, connect with your extension.';
+  } catch (err) { msg.className = 'err'; msg.textContent = err.message; }
+  finally { $('req-send').disabled = false; }
+});
 window.botOffice = {
   evidence(n = 1) { for (let i = 0; i < n; i++) pendingDrops.push('ev'); },
   claim(n = 1) { for (let i = 0; i < n; i++) pendingDrops.push('claim'); },
   link() { forceLink++; },
   contradiction() { forceContra++; },
+  // read-only, for tuning: whether live data drives the office, and what is happening now
+  status() { return { live: LIVE, boards: DATA ? DATA.boards.length : 0, replay: `${replay.i}/${DATA ? DATA.replay.length : 0}`,
+                      job: activeJobs > 0, flipping: !!view.flip, saying: bots.filter(b => b.say).map(b => b.say.sym) }; },
 };
 const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
 let reduceMotion = motion.matches;

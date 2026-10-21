@@ -1,6 +1,7 @@
 """Browser side (EVENTS.md section 6): NIP-07 login cookie, the pages, and their JSON.
 
-    /                       connect, profile, terms, your collections
+    /                       logged out: the office, totals and Request access; logged in: as /connect
+    /connect                connect, profile, terms, your collections
     /submit                 sign and publish evidence, claims and links
     /office                 ambient animation; no ledger data
     /c/<slug>/members       owner only: sign a new members list
@@ -15,7 +16,9 @@ import hashlib
 import hmac
 import json
 import os
+import threading
 import time
+from collections import deque
 from pathlib import Path
 
 from starlette.concurrency import run_in_threadpool
@@ -99,6 +102,52 @@ async def logout(request: Request) -> JSONResponse:
 
 async def page(request: Request):
     return HTMLResponse(PAGE_FILE.read_text(encoding="utf-8"))  # re-read so edits show on refresh
+
+
+async def home(request: Request):
+    """Logged out, the landing page is the office; logged in, the connect and collections page."""
+    return await page(request) if cookie_pubkey(request) else await office(request)
+
+
+REQUEST_LIMIT, REQUEST_WINDOW = 5, 3600  # access requests per IP per hour
+_recent: dict[str, deque] = {}
+_recent_lock = threading.Lock()
+
+
+def _rate_limited(ip: str) -> bool:
+    """ponytail: in-process, per instance; a table if the app ever runs more than one instance."""
+    now = time.monotonic()
+    with _recent_lock:
+        q = _recent.setdefault(ip, deque())
+        while q and now - q[0] > REQUEST_WINDOW:
+            q.popleft()
+        if len(q) >= REQUEST_LIMIT:
+            return True
+        q.append(now)
+        return False
+
+
+async def access_request(request: Request) -> JSONResponse:
+    """Unsigned on purpose: the visitor may not have a Nostr extension yet. An admin decides in /admin."""
+    if _rate_limited(request.client.host if request.client else "?"):
+        return JSONResponse({"error": "too many requests from this address; try again later"}, status_code=429)
+    try:
+        body = await request.json()
+        npub = E.bech32_encode("npub", E.pubkey_hex(str(body.get("npub", ""))))
+        note = str(body.get("note") or "").strip()
+    except (ValueError, TypeError, AttributeError):
+        return JSONResponse({"error": "enter an npub (npub1...) or a 64-character hex pubkey"}, status_code=400)
+    if len(note) > 500:
+        return JSONResponse({"error": "the note is limited to 500 characters"}, status_code=400)
+
+    def store():
+        with L.connect() as conn:
+            return conn.execute("""INSERT INTO access_requests (npub, note) VALUES (%s, %s)
+                                   ON CONFLICT (npub) WHERE status = 'pending' DO NOTHING RETURNING id""",
+                                (npub, note or None)).fetchone()
+    if await run_in_threadpool(store) is None:
+        return JSONResponse({"error": "a request for this key is already pending"}, status_code=409)
+    return JSONResponse({"status": "pending", "npub": npub}, status_code=201)
 
 
 async def office(request: Request) -> HTMLResponse:
@@ -222,7 +271,9 @@ routes = [
     Route("/healthz", healthz),
     Route("/docs", docs),
     Route("/docs.md", docs_md),
-    Route("/", page),
+    Route("/", home),
+    Route("/connect", page),
+    Route("/api/access-request", access_request, methods=["POST"]),
     Route("/submit", page),
     Route("/office", office),
     Route("/c/{slug}/members", members_page),
