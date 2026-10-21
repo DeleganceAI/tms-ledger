@@ -293,7 +293,17 @@ def server(ids) -> None:
         assert r.status_code == 400 and "quote not found" in r.json()["error"], r.text
         client.cookies.set(W.COOKIE, W.make_cookie(PK[OWNER]))
         assert client.get("/c/smoke/members").status_code == 200
-        client.cookies.set(W.COOKIE, W.make_cookie(PK[OWNER])[:-1] + "0")
+        # Dashboard: scoped to the viewer's collections.
+        snap = client.get("/dashboard/api/snapshot").json()
+        assert {c["slug"] for c in snap["collections"]} == {"smoke", "other"}, snap["collections"]
+        client.cookies.set(W.COOKIE, W.make_cookie(PK[OUTSIDER]))
+        assert client.get("/dashboard").status_code == 200
+        for path in ("snapshot", "browse?kind=claim", "agents", "sources", "collections"):
+            r = client.get(f"/dashboard/api/{path}")
+            assert r.status_code == 200 and "smoke" not in r.text and ids[0] not in r.text, (path, r.text[:300])
+        assert client.get(f"/dashboard/api/record/{ids[0]}").status_code == 404
+        good = W.make_cookie(PK[OWNER])
+        client.cookies.set(W.COOKIE, good[:-1] + ("1" if good.endswith("0") else "0"))
         assert client.get("/api/me").status_code == 401 and client.get("/c/smoke/export.jsonl").status_code == 401
         client.cookies.clear()
         assert client.get("/api/me").status_code == 401

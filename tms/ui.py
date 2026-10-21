@@ -1,329 +1,301 @@
-"""Local dashboard for watching the ledger and MCP activity.
+"""Dashboard for watching the ledger and MCP activity, served at /dashboard behind the login cookie.
 
-    tms-ui   ->  http://127.0.0.1:8780
-
-Read-only, localhost only, no auth: never put it behind the tunnel. Polls the
-database every two seconds; the server's `mcp_calls` table supplies call stats.
+Read-only. Every query is scoped to the viewer's collections (EVENTS.md section 3), mcp_calls
+included: a call row is visible when one of its collections is the viewer's, and a call with no
+collection only to the key that made it. The page polls every two seconds.
 """
 from __future__ import annotations
 
-import argparse
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from starlette.applications import Starlette
-from starlette.responses import HTMLResponse, JSONResponse
+from starlette.requests import Request
+from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse
 from starlette.routing import Route
 
+from . import events as E
 from . import ledger as L
+from .web import cookie_pubkey
 
-COUNTS_SQL = """SELECT
-  (SELECT count(*) FROM collections) AS collections, (SELECT count(*) FROM authors) AS authors,
-  (SELECT count(*) FROM sources) AS sources, (SELECT count(*) FROM observations) AS observations,
-  (SELECT count(*) FROM claims) AS claims, (SELECT count(*) FROM evidence) AS evidence,
-  (SELECT count(*) FROM contradictions) AS contradictions"""
-
-RECENT_SQL = """SELECT kind, id, collection_id, author_id, asserted_at, summary FROM (
-  SELECT 'observation' AS kind, id, collection_id, author_id, asserted_at, coalesce(title, left(uri, 160)) AS summary FROM observations
-  UNION ALL SELECT 'claim', id, collection_id, author_id, asserted_at, left(text, 240) FROM claims
-  UNION ALL SELECT 'evidence', id, NULL, author_id, asserted_at,
-    relation || ' ' || target_kind || ' ' || coalesce(target_claim_id, target_contradiction_id, target_evidence_id,
-                                                      target_source_id, target_observation_id)
-    || ' · ' || left(quote, 160) FROM evidence
-  UNION ALL SELECT 'contradiction', id, collection_id, author_id, asserted_at, left(reason, 240) FROM contradictions
-  UNION ALL SELECT 'source', id, NULL, author_id, asserted_at, name FROM sources
-  UNION ALL SELECT 'collection', id, id, author_id, asserted_at, name FROM collections
-  UNION ALL SELECT 'author', id, NULL, id, asserted_at, name || ' (' || kind || ')' FROM authors
-) r ORDER BY asserted_at DESC, id LIMIT %s"""
-
-RECORDS_PER_MIN_SQL = """SELECT date_trunc('minute', asserted_at) AS m, count(*) AS n FROM (
-  SELECT asserted_at FROM observations UNION ALL SELECT asserted_at FROM claims
-  UNION ALL SELECT asserted_at FROM evidence UNION ALL SELECT asserted_at FROM contradictions
-  UNION ALL SELECT asserted_at FROM sources) r
-  WHERE asserted_at > now() - interval '60 minutes' GROUP BY 1 ORDER BY 1"""
+# Display name: the latest kind-0 profile, else the first 12 hex chars of the key.
+WHO = "coalesce((SELECT p.name FROM profiles p WHERE p.pubkey = {0}.pubkey), left({0}.pubkey, 12)) AS author"
+# Calls the viewer may see. Publish logs join several collections with commas.
+CALLS = """(SELECT * FROM mcp_calls WHERE string_to_array(collection, ',') && %(cols)s::text[]
+            OR (collection IS NULL AND pubkey = %(pk)s))"""
+# Show only the viewer's slugs from a comma-joined row, and drop the error text of a row that
+# also names collections the viewer can't read (it may quote their IDs).
+CALL_COLS = """id, at, method, tool, pubkey, ms, ok, {who},
+    array_to_string(ARRAY(SELECT unnest(string_to_array(c.collection, ',')) INTERSECT SELECT unnest(%(cols)s::text[])), ',') AS collection,
+    CASE WHEN c.collection IS NULL OR string_to_array(c.collection, ',') <@ %(cols)s::text[] THEN left(error, 240) END AS error"""
+SUMMARY = """CASE x.kind
+    WHEN 4701 THEN coalesce(x.content::jsonb ->> 'title', x.content::jsonb ->> 'url', left(x.content::jsonb ->> 'text', 160))
+    WHEN 4702 THEN left(x.content::jsonb ->> 'text', 240)
+    WHEN 4703 THEN (x.content::jsonb ->> 'relation') || ' ' || left(x.content::jsonb ->> 'to', 12) || ' · ' || left(x.content::jsonb ->> 'quote', 160)
+    WHEN 4704 THEN left(x.content::jsonb ->> 'reason', 240)
+    WHEN 4705 THEN jsonb_array_length(x.content::jsonb -> 'members') || ' members'
+  END AS summary"""
 
 
-def snapshot(conn, limit: int = 100) -> dict:
-    rows = lambda sql, *params: [L._clean(r) for r in conn.execute(sql, params or None)]
+def _rows(conn, sql: str, params) -> list[dict]:
+    return [L._clean(r) for r in conn.execute(sql, params)]
+
+
+def _kinds(rows: list[dict], field: str = "kind") -> list[dict]:
+    for r in rows:
+        r[field] = E.NAMES.get(r[field], r[field])
+    return rows
+
+
+def snapshot(conn, pk: str, cols: list[str], limit: int = 100) -> dict:
+    p = {"pk": pk, "cols": cols, "limit": limit}
     return {
         "now": datetime.now(UTC).isoformat(),
-        "counts": L._clean(conn.execute(COUNTS_SQL).fetchone()),
-        "collections": rows("""SELECT c.id, c.name,
-              (SELECT count(*) FROM observations o WHERE o.collection_id = c.id) AS observations,
-              (SELECT count(*) FROM claims k WHERE k.collection_id = c.id) AS claims,
-              (SELECT count(*) FROM contradictions x WHERE x.collection_id = c.id) AS contradictions
-            FROM collections c ORDER BY c.asserted_at, c.id"""),
-        "calls": L._clean(conn.execute("""SELECT count(*) AS total, count(*) FILTER (WHERE NOT ok) AS errors,
+        "counts": L._clean(conn.execute("""SELECT cardinality(%(cols)s::text[]) AS collections,
+              count(*) FILTER (WHERE kind = 4701) AS evidence, count(*) FILTER (WHERE kind = 4702) AS claims,
+              count(*) FILTER (WHERE kind = 4703) AS links, count(*) FILTER (WHERE kind = 4704) AS contradictions,
+              count(DISTINCT pubkey) AS contributors
+            FROM events WHERE collection = ANY(%(cols)s)""", p).fetchone()),
+        "collections": _rows(conn, """SELECT c.slug, count(*) FILTER (WHERE e.kind = 4701) AS evidence,
+              count(*) FILTER (WHERE e.kind = 4702) AS claims, count(*) FILTER (WHERE e.kind = 4703) AS links,
+              count(*) FILTER (WHERE e.kind = 4704) AS contradictions
+            FROM collections c LEFT JOIN events e ON e.collection = c.slug
+            WHERE c.slug = ANY(%(cols)s) GROUP BY c.slug, c.created_at ORDER BY c.created_at, c.slug""", p),
+        "calls": L._clean(conn.execute(f"""SELECT count(*) AS total, count(*) FILTER (WHERE NOT ok) AS errors,
               count(*) FILTER (WHERE at > now() - interval '1 hour') AS last_hour,
               count(*) FILTER (WHERE at > now() - interval '5 minutes') AS last_5m,
-              count(*) FILTER (WHERE tool LIKE 'add_%') AS writes,
-              count(DISTINCT author_id) FILTER (WHERE at > now() - interval '5 minutes') AS active_authors
-            FROM mcp_calls""").fetchone()),
-        "calls_per_min": rows("""SELECT date_trunc('minute', at) AS m, count(*) AS n, count(*) FILTER (WHERE NOT ok) AS errors
-            FROM mcp_calls WHERE at > now() - interval '60 minutes' GROUP BY 1 ORDER BY 1"""),
-        "records_per_min": rows(RECORDS_PER_MIN_SQL),
-        "by_tool": rows("""SELECT coalesce(tool, method) AS name, count(*) AS n, count(*) FILTER (WHERE NOT ok) AS errors,
-              round(avg(ms))::int AS avg_ms FROM mcp_calls GROUP BY 1 ORDER BY n DESC, 1"""),
-        "by_author": rows("""SELECT coalesce(author_id, '—') AS author_id, count(*) AS n,
-              count(*) FILTER (WHERE tool LIKE 'add_%') AS writes, count(*) FILTER (WHERE NOT ok) AS errors, max(at) AS last_at
-            FROM mcp_calls GROUP BY 1 ORDER BY max(at) DESC"""),
-        "recent_calls": rows("""SELECT id, at, method, tool, author_id, collection, ok, left(error, 240) AS error, ms
-            FROM mcp_calls ORDER BY at DESC, id DESC LIMIT %s""", limit),
-        "recent_records": rows(RECENT_SQL, limit),
+              count(*) FILTER (WHERE tool = 'publish') AS writes,
+              count(DISTINCT pubkey) FILTER (WHERE at > now() - interval '5 minutes') AS active_authors
+            FROM {CALLS} c""", p).fetchone()),
+        "calls_per_min": _rows(conn, f"""SELECT date_trunc('minute', at) AS m, count(*) AS n, count(*) FILTER (WHERE NOT ok) AS errors
+            FROM {CALLS} c WHERE at > now() - interval '60 minutes' GROUP BY 1 ORDER BY 1""", p),
+        "records_per_min": _rows(conn, """SELECT date_trunc('minute', received_at) AS m, count(*) AS n FROM events
+            WHERE collection = ANY(%(cols)s) AND received_at > now() - interval '60 minutes' GROUP BY 1 ORDER BY 1""", p),
+        "by_tool": _rows(conn, f"""SELECT coalesce(tool, method) AS name, count(*) AS n, count(*) FILTER (WHERE NOT ok) AS errors,
+              round(avg(ms))::int AS avg_ms FROM {CALLS} c GROUP BY 1 ORDER BY n DESC, 1""", p),
+        "by_author": _rows(conn, f"""SELECT c.pubkey, {WHO.format('c')}, count(*) AS n,
+              count(*) FILTER (WHERE tool = 'publish') AS writes, count(*) FILTER (WHERE NOT ok) AS errors, max(at) AS last_at
+            FROM {CALLS} c WHERE c.pubkey IS NOT NULL GROUP BY c.pubkey ORDER BY max(at) DESC""", p),
+        "recent_calls": _rows(conn, f"""SELECT {CALL_COLS.format(who=WHO.format('c'))} FROM {CALLS} c
+            ORDER BY at DESC, id DESC LIMIT %(limit)s""", p),
+        "recent_records": _kinds(_rows(conn, f"""SELECT x.id, x.kind, x.collection, x.pubkey, {WHO.format('x')},
+              x.received_at, {SUMMARY}
+            FROM events x WHERE x.collection = ANY(%(cols)s) ORDER BY x.received_at DESC, x.id LIMIT %(limit)s""", p)),
     }
 
 
-CLAIM_COUNTS, SORTS = L.CLAIM_COUNTS, L.CLAIM_SORTS
-
-# kind -> (table, columns for the list, expression a text filter applies to)
+# kind -> (view, columns for the list, expression a text filter applies to)
 BROWSE = {
-    "observation": ("observations", "id, collection_id, author_id, asserted_at, coalesce(title, uri) AS summary",
-                    "coalesce(title, '') || ' ' || uri || ' ' || coalesce(content, '')"),
-    "claim": ("claims", "id, collection_id, author_id, asserted_at, text AS summary, " + CLAIM_COUNTS, "text"),
-    "contradiction": ("contradictions", "id, collection_id, author_id, asserted_at, reason AS summary", "reason"),
-    "evidence": ("evidence", "id, NULL::text AS collection_id, author_id, asserted_at, "
-                 "relation || ' ' || target_kind || ' · ' || left(quote, 200) AS summary", "quote || ' ' || reason"),
-    "source": ("sources", "id, NULL::text AS collection_id, author_id, asserted_at, name || coalesce(' · ' || uri, '') AS summary",
-               "name || ' ' || coalesce(uri, '')"),
-    "author": ("authors", "id, NULL::text AS collection_id, id AS author_id, asserted_at, name || ' (' || kind || ')' AS summary",
-               "id || ' ' || name"),
+    "claim": ("claims", f"x.text AS summary, {L.CLAIM_COUNTS}", "x.text"),
+    "evidence": ("evidence", """coalesce(x.title, x.url, left(x.text, 200)) AS summary, x.source, x.url,
+                 char_length(x.text) AS chars, (SELECT count(*) FROM links l WHERE l.from_id = x.id) AS link_count""",
+                 "concat_ws(' ', x.title, x.url, x.source, x.text)"),
+    "link": ("links", "x.relation || ' · ' || left(x.quote, 200) AS summary, x.relation, x.to_id, x.from_id",
+             "x.quote || ' ' || x.reason"),
+    "contradiction": ("contradictions", "x.reason AS summary, cardinality(x.claim_ids) AS members", "x.reason"),
 }
 
 
-def browse(conn, kind: str, q: str, collection: str, method: str, page: int, sort: str = "recent", size: int = 50) -> dict:
+def browse(conn, pk: str, cols: list[str], kind: str, q: str, collection: str, method: str, page: int,
+           sort: str = "recent", size: int = 50) -> dict:
     if kind not in BROWSE:
         raise ValueError(f"kind must be one of {sorted(BROWSE)}")
-    table, cols, searchable = BROWSE[kind]
+    scope = [collection] if collection in cols else [] if collection else cols
+    view, extra, searchable = BROWSE[kind]
+    base = f"x.id, x.collection, x.pubkey, {WHO.format('x')}, x.received_at"
     if method == "vector" and kind == "claim" and q:
-        vec = L.embed(q, query=True)
-        extra, params = ("AND collection_id = %s", [collection]) if collection else ("", [])
-        items = [L._clean(r) for r in conn.execute(
-            f"""SELECT id, collection_id, author_id, asserted_at, text AS summary, {CLAIM_COUNTS},
-                       round((embedding <=> %s::vector)::numeric, 3)::float8 AS distance
-                FROM claims WHERE embedding IS NOT NULL {extra}
-                ORDER BY embedding <=> %s::vector, id LIMIT %s""", (vec, *params, vec, size))]
+        vec = L.embed([q], query=True)[0]
+        items = _rows(conn, f"""SELECT {base}, {extra}, round((v.vector <=> %s::vector)::numeric, 3)::float8 AS distance
+            FROM claims x JOIN embeddings v ON v.event_id = x.id WHERE x.collection = ANY(%s)
+            ORDER BY v.vector <=> %s::vector, x.id LIMIT %s""", (vec, scope, vec, size))
         return {"items": items, "more": False, "method": "vector"}
-    where, params = [], []
-    if collection and kind in ("observation", "claim", "contradiction"):
-        where.append("collection_id = %s")
-        params.append(collection)
+    where, params = ["x.collection = ANY(%s)"], [scope]
     if q:
         where.append(f"({searchable}) ILIKE %s")
         params.append(f"%{q}%")
-    order = SORTS.get(sort, SORTS["recent"]) if kind == "claim" else SORTS["recent"]
-    sql = f"SELECT * FROM (SELECT {cols} FROM {table}" + (" WHERE " + " AND ".join(where) if where else "") \
-        + f") b ORDER BY {order} LIMIT %s OFFSET %s"
-    items = [L._clean(r) for r in conn.execute(sql, (*params, size + 1, page * size))]
+    order = L.CLAIM_SORTS.get(sort, L.CLAIM_SORTS["recent"]) if kind == "claim" else L.CLAIM_SORTS["recent"]
+    items = _rows(conn, f"""SELECT * FROM (SELECT {base}, {extra} FROM {view} x WHERE {' AND '.join(where)}) b
+        ORDER BY {order} LIMIT %s OFFSET %s""", (*params, size + 1, page * size))
     return {"items": items[:size], "more": len(items) > size, "method": "keyword"}
 
 
-def record(conn, kind: str, id: str) -> dict | None:
-    """One record plus the records it links to, for the drawer."""
-    rec = L.get_record(conn, kind, id, max_chars=6000)
-    if rec is None:
+LINK_COLS = f"""x.id, x.pubkey, {WHO.format('x')}, x.from_id, x.to_id, x.relation, x.quote, x.reason, x.received_at,
+    (SELECT kind FROM events t WHERE t.id = x.to_id) AS to_kind"""
+RAW_MAX = 20000
+
+
+def record(conn, cols: list[str], id: str) -> dict | None:
+    """One event (if it is in the viewer's collections) plus the records around it, for the drawer."""
+    row = conn.execute("SELECT * FROM events WHERE id = %s AND collection = ANY(%s)", (id, cols)).fetchone()
+    if row is None:
         return None
-    if kind == "claim":
-        rec["evidence"] = L.get_evidence(conn, "claim", id)
-        rec["contradictions"] = L.search_contradictions(conn, rec["collection_id"], claim_id=id)
-    elif kind == "contradiction":
-        rec["evidence"] = L.get_evidence(conn, "contradiction", id)
-        rec["claims"] = [L._clean(r) for r in conn.execute(
-            "SELECT id, text, author_id FROM claims WHERE id = ANY(%s) ORDER BY id", (rec["claim_ids"],))]
-    elif kind == "observation":
-        rec["evidence_from"] = L.get_evidence(conn, from_observation_id=id)
-    elif kind == "evidence":
-        rec["observation"] = L.get_record(conn, "observation", rec["from_observation_id"], max_chars=0)
-        rec["target"] = L.get_record(conn, rec["target_kind"], rec["target_id"], max_chars=0)
-    elif kind == "source":
-        rec["observations"] = [L._clean(r) for r in conn.execute(
-            "SELECT id, title, uri, collection_id, asserted_at FROM observations WHERE source_id = %s ORDER BY asserted_at DESC LIMIT 200", (id,))]
-    elif kind == "author":
-        rec["recent"] = [L._clean(r) for r in conn.execute(
-            RECENT_SQL.replace(") r ORDER BY", ") r WHERE author_id = %s ORDER BY"), (id, 100))]
-        rec["tools"] = [L._clean(r) for r in conn.execute(
-            """SELECT coalesce(tool, method) AS name, count(*) AS n, count(*) FILTER (WHERE NOT ok) AS errors, round(avg(ms))::int AS avg_ms
-               FROM mcp_calls WHERE author_id = %s GROUP BY 1 ORDER BY n DESC, 1""", (id,))]
-        rec["failures"] = [L._clean(r) for r in conn.execute(
-            "SELECT at, tool, left(error, 300) AS error FROM mcp_calls WHERE author_id = %s AND NOT ok ORDER BY at DESC LIMIT 20", (id,))]
+    col, kind = row["collection"], row["kind"]
+    data = json.loads(row["content"])
+    raw = {k: row[k] for k in ("id", "pubkey", "created_at", "kind")} | {"tags": [], "content": row["content"], "sig": row["sig"]}
+    rec = L._clean({k: row[k] for k in ("id", "pubkey", "collection", "created_at", "received_at")})
+    rec |= {"kind": E.NAMES[kind], "raw": raw, "author": conn.execute(
+        f"SELECT {WHO.format('e')} FROM events e WHERE e.id = %s", (id,)).fetchone()["author"]}
+    if len(row["content"]) > RAW_MAX:  # ponytail: drawer only; the export has every byte
+        raw["content"], rec["raw_truncated"] = row["content"][:RAW_MAX], True
+    if kind == E.EVIDENCE:
+        rec["chars"] = len(data["text"])
+        data["text"] = data["text"][:6000]
+        rec["links_from"] = _kinds(_rows(conn, f"SELECT {LINK_COLS} FROM links x WHERE x.from_id = %s AND x.collection = %s ORDER BY x.received_at, x.id", (id, col)), "to_kind")
+    rec["content"] = data
+    # Links that target this record: evidence on a claim, or a dispute of a link or contradiction.
+    rec["links"] = _kinds(_rows(conn, f"SELECT {LINK_COLS} FROM links x WHERE x.to_id = %s AND x.collection = %s ORDER BY x.received_at, x.id", (id, col)), "to_kind")
+    if kind == E.CLAIM:
+        rec["contradictions"] = _rows(conn, """SELECT x.id, x.reason, x.claim_ids, x.received_at,
+              (SELECT count(*) FROM links l WHERE l.to_id = x.id) AS link_count
+            FROM contradictions x WHERE x.collection = %s AND %s = ANY(x.claim_ids) ORDER BY x.received_at, x.id""", (col, id))
+    elif kind == E.CONTRADICTION:
+        rec["claims"] = _rows(conn, f"SELECT x.id, x.pubkey, {WHO.format('x')}, x.text FROM claims x WHERE x.id = ANY(%s) AND x.collection = %s ORDER BY x.id", (data["claims"], col))
+    elif kind == E.LINK:
+        rec["evidence"] = L._clean(conn.execute(f"""SELECT x.id, x.pubkey, {WHO.format('x')}, x.title, x.url, x.source, x.received_at,
+              char_length(x.text) AS chars FROM evidence x WHERE x.id = %s AND x.collection = %s""", (data["from"], col)).fetchone())
+        target = _kinds(_rows(conn, f"SELECT x.id, x.kind, {SUMMARY} FROM events x WHERE x.id = %s AND x.collection = %s",
+                              (data["to"], col)))
+        rec["target"] = target[0] if target else None
     return rec
 
-
-RECORDS_BY_AUTHOR_SQL = """SELECT author_id, max(asserted_at) AS last_record_at, count(*) AS records FROM (
-  SELECT author_id, asserted_at FROM observations UNION ALL SELECT author_id, asserted_at FROM claims
-  UNION ALL SELECT author_id, asserted_at FROM evidence UNION ALL SELECT author_id, asserted_at FROM contradictions
-  UNION ALL SELECT author_id, asserted_at FROM sources) r GROUP BY author_id"""
 
 DOMAIN = r"lower(regexp_replace(%s, '^([a-z]+://)?(www\.)?([^/:]+).*$', '\3'))"  # scheme optional
 
 
-def agents(conn) -> dict:
-    """Every author plus any author_id seen only in calls, with record and call counts and a 60-minute series."""
-    rows = [L._clean(r) for r in conn.execute(f"""
-        WITH calls AS (
-          SELECT author_id, count(*) AS calls, count(*) FILTER (WHERE tool LIKE 'add_%%') AS writes,
-                 count(*) FILTER (WHERE tool IS NOT NULL AND tool NOT LIKE 'add_%%') AS reads,
-                 count(*) FILTER (WHERE NOT ok) AS errors, min(at) AS first_call, max(at) AS last_call,
-                 round(avg(ms))::int AS avg_ms
-          FROM mcp_calls WHERE author_id IS NOT NULL GROUP BY author_id),
-        recs AS ({RECORDS_BY_AUTHOR_SQL})
-        SELECT coalesce(a.id, c.author_id) AS id, a.name, a.kind, a.asserted_at AS registered_at,
-               a.id IS NULL AS unregistered,
-               (SELECT count(*) FROM observations o WHERE o.author_id = a.id) AS observations,
-               (SELECT count(*) FROM claims k WHERE k.author_id = a.id) AS claims,
-               (SELECT count(*) FROM evidence e WHERE e.author_id = a.id) AS evidence,
-               (SELECT count(*) FROM contradictions x WHERE x.author_id = a.id) AS contradictions,
-               (SELECT count(*) FROM sources s WHERE s.author_id = a.id) AS sources,
-               coalesce(recs.records, 0) AS records, recs.last_record_at,
+def agents(conn, pk: str, cols: list[str]) -> dict:
+    """Every key the viewer can see (signers and members of their collections, plus callers in their
+    visible calls) with event counts by kind, call counts and a 60-minute series."""
+    p = {"pk": pk, "cols": cols}
+    rows = _rows(conn, f"""
+        WITH vis AS {CALLS},
+        ev AS (SELECT pubkey, kind, received_at FROM events WHERE collection = ANY(%(cols)s)),
+        keys AS (SELECT pubkey FROM ev UNION SELECT pubkey FROM vis WHERE pubkey IS NOT NULL
+                 UNION SELECT pubkey FROM members WHERE collection = ANY(%(cols)s)),
+        calls AS (SELECT pubkey, count(*) AS calls, count(*) FILTER (WHERE tool = 'publish') AS writes,
+                         count(*) FILTER (WHERE tool IS NOT NULL AND tool <> 'publish') AS reads,
+                         count(*) FILTER (WHERE NOT ok) AS errors, max(at) AS last_call, round(avg(ms))::int AS avg_ms
+                  FROM vis WHERE pubkey IS NOT NULL GROUP BY pubkey),
+        recs AS (SELECT pubkey, count(*) AS records, max(received_at) AS last_record_at,
+                        count(*) FILTER (WHERE kind = 4701) AS evidence, count(*) FILTER (WHERE kind = 4702) AS claims,
+                        count(*) FILTER (WHERE kind = 4703) AS links, count(*) FILTER (WHERE kind = 4704) AS contradictions,
+                        count(*) FILTER (WHERE kind = 4705) AS members
+                 FROM ev GROUP BY pubkey)
+        SELECT k.pubkey AS id, pr.name, pr.about, pr.received_at AS profile_at,
+               coalesce(r.records, 0) AS records, r.last_record_at, coalesce(r.evidence, 0) AS evidence,
+               coalesce(r.claims, 0) AS claims, coalesce(r.links, 0) AS links,
+               coalesce(r.contradictions, 0) AS contradictions, coalesce(r.members, 0) AS members,
                coalesce(c.calls, 0) AS calls, coalesce(c.writes, 0) AS writes, coalesce(c.reads, 0) AS reads,
-               coalesce(c.errors, 0) AS errors, c.first_call, c.last_call, c.avg_ms
-        FROM authors a FULL OUTER JOIN calls c ON c.author_id = a.id
-        LEFT JOIN recs ON recs.author_id = coalesce(a.id, c.author_id)
-        ORDER BY greatest(coalesce(c.last_call, 'epoch'), coalesce(recs.last_record_at, 'epoch')) DESC, 1""")]
+               coalesce(c.errors, 0) AS errors, c.last_call, c.avg_ms
+        FROM keys k LEFT JOIN profiles pr USING (pubkey) LEFT JOIN calls c USING (pubkey) LEFT JOIN recs r USING (pubkey)
+        ORDER BY greatest(coalesce(c.last_call, 'epoch'), coalesce(r.last_record_at, 'epoch')) DESC, 1""", p)
     per_min: dict[str, list] = {}
-    for r in conn.execute("""SELECT author_id, date_trunc('minute', at) AS m, count(*) AS n, count(*) FILTER (WHERE NOT ok) AS errors
-                             FROM mcp_calls WHERE at > now() - interval '60 minutes' AND author_id IS NOT NULL
-                             GROUP BY 1, 2 ORDER BY 1, 2"""):
-        per_min.setdefault(r["author_id"], []).append(L._clean(r))
+    for r in conn.execute(f"""SELECT pubkey, date_trunc('minute', at) AS m, count(*) AS n, count(*) FILTER (WHERE NOT ok) AS errors
+                              FROM {CALLS} c WHERE at > now() - interval '60 minutes' AND pubkey IS NOT NULL
+                              GROUP BY 1, 2 ORDER BY 1, 2""", p):
+        per_min.setdefault(r["pubkey"], []).append(L._clean(r))
     return {"agents": rows, "per_min": per_min}
 
 
 SOURCE_SORTS = {
-    "observations": "observations DESC, evidence DESC, name",
-    "evidence": "evidence DESC, observations DESC, name",
-    "recent": "last_observation_at DESC NULLS LAST, asserted_at DESC",
-    "name": "lower(name), id",
+    "evidence": "evidence DESC, links DESC, source",
+    "links": "links DESC, evidence DESC, source",
+    "recent": "last_at DESC NULLS LAST, source",
+    "name": "lower(source) NULLS LAST",
 }
 
 
-def sources(conn, q: str = "", sort: str = "observations", limit: int = 300) -> dict:
-    """Sources with what they contributed, plus a rollup of observation domains."""
-    order = SOURCE_SORTS.get(sort, SOURCE_SORTS["observations"])
-    like = f"%{q}%"
-    rows = [L._clean(r) for r in conn.execute(f"""
+def sources(conn, cols: list[str], q: str = "", sort: str = "evidence", limit: int = 300) -> dict:
+    """Evidence grouped by its free-text source field, plus a rollup of evidence URL domains."""
+    order = SOURCE_SORTS.get(sort, SOURCE_SORTS["evidence"])
+    p = {"cols": cols, "like": f"%{q}%", "limit": limit}
+    rows = _rows(conn, f"""
         SELECT * FROM (
-          SELECT s.id, s.name, s.uri, s.author_id, s.asserted_at, {DOMAIN % 'coalesce(s.uri, s.name)'} AS domain,
-                 (SELECT count(*) FROM observations o WHERE o.source_id = s.id) AS observations,
-                 (SELECT count(*) FROM evidence e JOIN observations o ON o.id = e.from_observation_id WHERE o.source_id = s.id) AS evidence,
-                 (SELECT count(DISTINCT e.target_claim_id) FROM evidence e JOIN observations o ON o.id = e.from_observation_id
-                   WHERE o.source_id = s.id AND e.target_claim_id IS NOT NULL) AS claims,
-                 (SELECT count(*) FROM evidence e WHERE e.target_source_id = s.id) AS evidence_about,
-                 (SELECT max(o.asserted_at) FROM observations o WHERE o.source_id = s.id) AS last_observation_at,
-                 (SELECT string_agg(DISTINCT o.collection_id, ', ') FROM observations o WHERE o.source_id = s.id) AS collections
-          FROM sources s WHERE s.name ILIKE %s OR coalesce(s.uri, '') ILIKE %s) b
-        ORDER BY {order} LIMIT %s""", (like, like, limit))]
-    domains = [L._clean(r) for r in conn.execute(f"""
-        SELECT {DOMAIN % 'o.uri'} AS domain, count(*) AS observations, count(DISTINCT o.source_id) AS sources,
-               (SELECT count(*) FROM evidence e WHERE e.from_observation_id = ANY(array_agg(o.id))) AS evidence
-        FROM observations o GROUP BY 1 ORDER BY observations DESC, 1 LIMIT 40""")]
-    totals = L._clean(conn.execute("""
-        SELECT (SELECT count(*) FROM sources) AS sources,
-               (SELECT count(DISTINCT source_id) FROM observations) AS with_observations,
-               (SELECT count(DISTINCT """ + DOMAIN % 'uri' + """) FROM observations) AS domains,
-               (SELECT count(*) FROM observations) AS observations,
-               (SELECT count(*) FROM evidence) AS evidence""").fetchone())
+          SELECT x.source, count(*) AS evidence, max(x.received_at) AS last_at, count(DISTINCT x.pubkey) AS contributors,
+                 string_agg(DISTINCT x.collection, ', ') AS collections, min({DOMAIN % 'x.url'}) AS domain,
+                 (SELECT count(*) FROM links l WHERE l.from_id = ANY(array_agg(x.id))) AS links,
+                 (SELECT count(DISTINCT l.to_id) FROM links l JOIN events t ON t.id = l.to_id AND t.kind = 4702
+                   WHERE l.from_id = ANY(array_agg(x.id))) AS claims
+          FROM evidence x WHERE x.collection = ANY(%(cols)s)
+            AND (coalesce(x.source, '') ILIKE %(like)s OR coalesce(x.url, '') ILIKE %(like)s)
+          GROUP BY x.source) b
+        ORDER BY {order} LIMIT %(limit)s""", p)
+    domains = _rows(conn, f"""
+        SELECT {DOMAIN % 'x.url'} AS domain, count(*) AS evidence, count(DISTINCT x.source) AS sources,
+               (SELECT count(*) FROM links l WHERE l.from_id = ANY(array_agg(x.id))) AS links
+        FROM evidence x WHERE x.collection = ANY(%(cols)s) AND x.url IS NOT NULL
+        GROUP BY 1 ORDER BY evidence DESC, 1 LIMIT 40""", p)
+    totals = L._clean(conn.execute(f"""
+        SELECT count(DISTINCT x.source) AS sources, count(*) FILTER (WHERE x.source IS NULL) AS unsourced,
+               count(DISTINCT {DOMAIN % 'x.url'}) AS domains, count(*) AS evidence,
+               count(*) FILTER (WHERE EXISTS (SELECT 1 FROM links l WHERE l.from_id = x.id)) AS grounding
+        FROM evidence x WHERE x.collection = ANY(%(cols)s)""", p).fetchone())
     return {"sources": rows, "domains": domains, "totals": totals}
 
 
-COLLECTION_ROWS = """SELECT author_id, asserted_at FROM observations WHERE collection_id = c.id
-  UNION ALL SELECT author_id, asserted_at FROM claims WHERE collection_id = c.id
-  UNION ALL SELECT author_id, asserted_at FROM contradictions WHERE collection_id = c.id
-  UNION ALL SELECT e.author_id, e.asserted_at FROM evidence e JOIN observations o ON o.id = e.from_observation_id
-    WHERE o.collection_id = c.id"""
+def collections(conn, cols: list[str]) -> dict:
+    """The landing page: each of the viewer's collections with what it holds, who wrote it and what it weighs."""
+    # ponytail: bytes are row data as stored (compressed, no indexes), summed per collection; no global DB figures
+    rows = _rows(conn, f"""
+        SELECT c.slug, c.owner, coalesce((SELECT p.name FROM profiles p WHERE p.pubkey = c.owner), left(c.owner, 12)) AS owner_name,
+               c.created_at, (SELECT count(*) FROM members m WHERE m.collection = c.slug) AS members,
+               s.evidence, s.claims, s.links, s.contradictions, s.contributors, s.last_at, s.bytes,
+               (SELECT coalesce(sum(pg_column_size(v.*)), 0) FROM embeddings v JOIN events e ON e.id = v.event_id
+                 WHERE e.collection = c.slug) AS vector_bytes
+        FROM collections c, LATERAL (
+          SELECT count(*) FILTER (WHERE e.kind = 4701) AS evidence, count(*) FILTER (WHERE e.kind = 4702) AS claims,
+                 count(*) FILTER (WHERE e.kind = 4703) AS links, count(*) FILTER (WHERE e.kind = 4704) AS contradictions,
+                 count(DISTINCT e.pubkey) AS contributors, max(e.received_at) AS last_at,
+                 coalesce(sum(pg_column_size(e.*)), 0) AS bytes
+          FROM events e WHERE e.collection = c.slug) s
+        WHERE c.slug = ANY(%s) ORDER BY c.created_at, c.slug""", (cols,))
+    return {"collections": rows}
 
 
-def collections(conn) -> dict:
-    """The landing page: each collection with what it holds, who wrote it and roughly what it weighs."""
-    # ponytail: per-collection bytes are row data as stored (compressed, no indexes); db_bytes is the real disk figure
-    rows = [L._clean(r) for r in conn.execute(f"""
-        SELECT c.id, c.name, c.author_id, c.asserted_at,
-               (SELECT count(*) FROM observations o WHERE o.collection_id = c.id) AS observations,
-               (SELECT count(DISTINCT o.source_id) FROM observations o WHERE o.collection_id = c.id) AS sources,
-               (SELECT count(*) FROM claims k WHERE k.collection_id = c.id) AS claims,
-               (SELECT count(*) FROM evidence e JOIN observations o ON o.id = e.from_observation_id WHERE o.collection_id = c.id) AS evidence,
-               (SELECT count(*) FROM contradictions x WHERE x.collection_id = c.id) AS contradictions,
-               (SELECT count(DISTINCT author_id) FROM ({COLLECTION_ROWS}) r) AS contributors,
-               (SELECT max(asserted_at) FROM ({COLLECTION_ROWS}) r) AS last_at,
-               (SELECT coalesce(sum(pg_column_size(o.*)), 0) FROM observations o WHERE o.collection_id = c.id)
-             + (SELECT coalesce(sum(pg_column_size(k.*)), 0) FROM claims k WHERE k.collection_id = c.id)
-             + (SELECT coalesce(sum(pg_column_size(e.*)), 0) FROM evidence e JOIN observations o ON o.id = e.from_observation_id
-                 WHERE o.collection_id = c.id)
-             + (SELECT coalesce(sum(pg_column_size(x.*)), 0) FROM contradictions x WHERE x.collection_id = c.id) AS bytes
-        FROM collections c ORDER BY c.asserted_at, c.id""")]
-    tables = [L._clean(r) for r in conn.execute("""
-        SELECT relname AS name, pg_total_relation_size(oid) AS bytes FROM pg_class
-        WHERE relkind = 'r' AND relnamespace = 'public'::regnamespace ORDER BY 2 DESC, 1""")]
-    db_bytes = conn.execute("SELECT pg_database_size(current_database()) AS b").fetchone()["b"]
-    return {"collections": rows, "tables": tables, "db_bytes": db_bytes}
+# ------------------------------------------------------------------ HTTP
+
+PAGE_FILE = Path(__file__).with_name("ui.html")
 
 
-async def index(request) -> HTMLResponse:
+def index(request: Request):
+    if cookie_pubkey(request) is None:
+        return RedirectResponse("/", status_code=302)
     return HTMLResponse(PAGE_FILE.read_text(encoding="utf-8"))  # re-read so edits show on refresh
 
 
-async def api_snapshot(request) -> JSONResponse:
-    with L.connect() as conn:  # ponytail: sync psycopg on the event loop; one local viewer
-        return JSONResponse(snapshot(conn))
-
-
-async def api_browse(request) -> JSONResponse:
-    qp = request.query_params
-    try:
-        page = max(0, int(qp.get("page", "0") or 0))
-        with L.connect() as conn:
-            return JSONResponse(browse(conn, qp.get("kind", "claim"), qp.get("q", "").strip(),
-                                       qp.get("collection", ""), qp.get("method", "keyword"), page, qp.get("sort", "recent")))
-    except Exception as err:  # Ollama down, bad kind: show it on the page
-        return JSONResponse({"error": str(err)}, status_code=400)
-
-
-async def api_agents(request) -> JSONResponse:
-    with L.connect() as conn:
-        return JSONResponse(agents(conn))
-
-
-async def api_sources(request) -> JSONResponse:
-    qp = request.query_params
-    with L.connect() as conn:
-        return JSONResponse(sources(conn, qp.get("q", "").strip(), qp.get("sort", "observations")))
-
-
-async def api_collections(request) -> JSONResponse:
-    with L.connect() as conn:
-        return JSONResponse(collections(conn))
-
-
-async def api_record(request) -> JSONResponse:
-    kind, id = request.path_params["kind"], request.path_params["id"]
-    with L.connect() as conn:
+def _api(fn):
+    """Cookie check, a pooled connection and the viewer's collections for each JSON endpoint.
+    Sync handlers: Starlette runs them in its threadpool, so psycopg never blocks the event loop."""
+    def handler(request: Request) -> JSONResponse:
+        pk = cookie_pubkey(request)
+        if pk is None:
+            return JSONResponse({"error": "not logged in"}, status_code=401)
         try:
-            rec = record(conn, kind, id)
-        except ValueError as err:
-            return JSONResponse({"error": str(err)}, status_code=400)
-    return JSONResponse(rec or {"error": "not found"}, status_code=200 if rec else 404)
+            with L.connect() as conn:
+                out = fn(conn, pk, L.my_collections(conn, pk), request)
+        except Exception as err:  # embedding service down, bad kind: show it on the page
+            return JSONResponse({"error": str(err)[:500]}, status_code=400)
+        return out if isinstance(out, JSONResponse) else JSONResponse(out)
+    return handler
 
 
-app = Starlette(routes=[
-    Route("/", index),
-    Route("/api/snapshot", api_snapshot),
-    Route("/api/browse", api_browse),
-    Route("/api/agents", api_agents),
-    Route("/api/sources", api_sources),
-    Route("/api/collections", api_collections),
-    Route("/api/record/{kind}/{id}", api_record),
-])
+def _browse(conn, pk, cols, request):
+    qp = request.query_params
+    return browse(conn, pk, cols, qp.get("kind", "claim"), qp.get("q", "").strip(), qp.get("collection", ""),
+                  qp.get("method", "keyword"), max(0, int(qp.get("page", "0") or 0)), qp.get("sort", "recent"))
 
 
-PAGE_FILE = Path(__file__).with_name("ui.html")
-PAGE = PAGE_FILE.read_text(encoding="utf-8")  # kept for tests and tools that import it
+def _record(conn, pk, cols, request):
+    rec = record(conn, cols, request.path_params["id"])
+    return rec or JSONResponse({"error": "not found"}, status_code=404)
 
 
-def main() -> None:
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--port", type=int, default=8780)
-    a = p.parse_args()
-    import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=a.port, log_level="warning")
-
-
-if __name__ == "__main__":
-    main()
+routes = [
+    Route("/dashboard", index),
+    Route("/dashboard/api/snapshot", _api(lambda conn, pk, cols, r: snapshot(conn, pk, cols))),
+    Route("/dashboard/api/browse", _api(_browse)),
+    Route("/dashboard/api/agents", _api(lambda conn, pk, cols, r: agents(conn, pk, cols))),
+    Route("/dashboard/api/sources", _api(lambda conn, pk, cols, r: sources(
+        conn, cols, r.query_params.get("q", "").strip(), r.query_params.get("sort", "evidence")))),
+    Route("/dashboard/api/collections", _api(lambda conn, pk, cols, r: collections(conn, cols))),
+    Route("/dashboard/api/record/{id}", _api(_record)),
+]

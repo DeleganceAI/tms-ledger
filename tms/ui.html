@@ -70,13 +70,14 @@ table.wide th.n{text-align:right}.spark{width:120px;height:18px;display:block}td
   <div class="bar">
     <div class="brand">TMS <span>ledger</span></div>
     <nav class="tabs"><button class="tab on" data-tab="collections">Collections</button><button class="tab" data-tab="activity">Activity</button><button class="tab" data-tab="browse">Browse</button><button class="tab" data-tab="agents">Agents</button><button class="tab" data-tab="sources">Sources</button></nav>
-    <div class="live" id="live"><i class="dot"></i><span id="status">connecting</span></div>
+    <a class="ext2" href="/" style="margin-left:auto;text-decoration:none">Ledger home</a>
+    <div class="live" id="live" style="margin-left:0"><i class="dot"></i><span id="status">connecting</span></div>
   </div>
   <div class="strip" id="strip"></div>
 </div>
 <main id="collections">
   <section class="cards" id="ccards"></section>
-  <section class="panel storage"><div class="ph"><h2>Storage</h2><span class="muted" id="dbsize"></span></div><div class="bars tbl" id="tables"></div></section>
+  <section class="panel storage"><div class="ph"><h2>Storage <span style="text-transform:none;letter-spacing:0">· your collections</span></h2><span class="muted" id="dbsize"></span></div><div class="bars tbl" id="tables"></div></section>
 </main>
 <main id="activity" hidden>
   <section class="row charts">
@@ -95,11 +96,11 @@ table.wide th.n{text-align:right}.spark{width:120px;height:18px;display:block}td
 <main id="browse" hidden>
   <section class="panel">
     <div class="tools">
-      <select id="bkind"><option value="claim">claims</option><option value="observation">observations</option><option value="evidence">evidence</option><option value="contradiction">contradictions</option><option value="source">sources</option><option value="author">authors</option></select>
+      <select id="bkind"><option value="claim">claims</option><option value="evidence">evidence</option><option value="link">links</option><option value="contradiction">contradictions</option></select>
       <select id="bcol"><option value="">all collections</option></select>
       <input id="bq" placeholder="filter text…" autocomplete="off">
-      <label id="bsemwrap" title="semantic search over claim embeddings (local Ollama)"><input type="checkbox" id="bsem"> semantic</label>
-      <select id="bsort"><option value="recent">newest</option><option value="evidence">most evidence</option><option value="contested">most contested</option><option value="unsupported">least evidence</option></select>
+      <label id="bsemwrap" title="semantic search over claim embeddings"><input type="checkbox" id="bsem"> semantic</label>
+      <select id="bsort"><option value="recent">newest</option><option value="links">most links</option><option value="contested">most contested</option><option value="unsupported">fewest links</option></select>
       <span class="legend" id="blegend"><span><i style="background:var(--good)"></i>supports</span><span><i style="background:var(--warn)"></i>qualifies</span><span><i style="background:var(--crit)"></i>rebuts</span></span>
       <span class="grow"></span><span class="muted" id="bnote"></span><button class="pg" id="bprev">‹</button><button class="pg" id="bnext">›</button>
     </div>
@@ -115,9 +116,9 @@ table.wide th.n{text-align:right}.spark{width:120px;height:18px;display:block}td
 <main id="sources" hidden>
   <section class="strip2" id="sstrip"></section>
   <section class="row srow">
-    <div class="panel"><div class="ph"><h2>Observations by domain</h2><span class="muted" id="dnote"></span></div><div class="bars dom" id="domains"></div></div>
+    <div class="panel"><div class="ph"><h2>Evidence by URL domain</h2><span class="muted" id="dnote"></span></div><div class="bars dom" id="domains"></div></div>
     <div class="panel">
-      <div class="tools"><input id="sq" placeholder="filter sources…" autocomplete="off"><select id="ssort"><option value="observations">most observations</option><option value="evidence">most evidence</option><option value="recent">recently used</option><option value="name">name</option></select><span class="grow"></span><span class="muted" id="snote"></span></div>
+      <div class="tools"><input id="sq" placeholder="filter sources…" autocomplete="off"><select id="ssort"><option value="evidence">most evidence</option><option value="links">most links</option><option value="recent">recently used</option><option value="name">name</option></select><span class="grow"></span><span class="muted" id="snote"></span></div>
       <div class="scroll tall"><table class="dense wide" id="stable"></table></div>
     </div>
   </section>
@@ -132,11 +133,16 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt
 const ago = iso => { if (!iso) return ''; const s = Math.max(0, (Date.now() - new Date(iso)) / 1000);
   return s < 60 ? `${s|0}s` : s < 3600 ? `${(s/60)|0}m` : s < 86400 ? `${(s/3600)|0}h` : `${(s/86400)|0}d`; };
 const hm = t => new Date(t).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
-const KIND = {c: 'claim', o: 'observation', k: 'contradiction', e: 'evidence', src: 'source'};
-const kindOf = id => KIND[String(id).split('_')[0]];
-const link = id => `<a href="#" class="idl" data-id="${esc(id)}">${esc(id)}</a>`;
-const linkify = s => esc(s).replace(/\b(c|o|k|e|src)_[0-9a-f]{10}\b/g, m => link(m));
+// Event IDs are 64 hex chars; show the first 10, open the drawer with the whole one.
+const link = id => id ? `<a href="#" class="idl" data-id="${esc(id)}" title="${esc(id)}">${esc(String(id).slice(0, 10))}</a>` : '';
+const short = pk => String(pk || '').slice(0, 12);
+const who = (author, pk) => `<span title="${esc(pk || '')}">${esc(author || short(pk))}</span>`;
 const seenRec = new Set(), seenCall = new Set(); let first = true, selected = null, colsKnown = '';
+async function api(path) {  // the cookie expired: back to the ledger home to log in again
+  const r = await fetch('/dashboard/api/' + path);
+  if (r.status === 401) { location.href = '/'; throw new Error('not logged in'); }
+  return r.json();
+}
 
 // ---- activity -------------------------------------------------------------
 function series(rows) {
@@ -161,15 +167,15 @@ function bars(svg, data, unit, withErrors) {
 const kpi = (k, v, cls = '') => `<div class="kpi ${cls}"><span class="v">${esc(v)}</span><span class="k">${esc(k)}</span></div>`;
 function render(d) {
   const c = d.counts, m = d.calls;
-  $('strip').innerHTML = ['observations', 'claims', 'evidence', 'contradictions', 'sources', 'authors', 'collections'].map(k => kpi(k, c[k])).join('')
+  $('strip').innerHTML = ['evidence', 'claims', 'links', 'contradictions', 'contributors', 'collections'].map(k => kpi(k, c[k])).join('')
     + '<div class="kpi sep"></div>' + kpi('calls', m.total) + kpi('writes', m.writes) + kpi('errors', m.errors, m.errors ? 'err' : '')
-    + kpi('last hour', m.last_hour) + kpi('last 5 min', m.last_5m) + kpi('active agents', m.active_authors);
-  $('cols').innerHTML = d.collections.map(x => `<span><b>${esc(x.id)}</b> ${esc(x.observations)}o ${esc(x.claims)}c ${esc(x.contradictions)}k</span>`).join('');
-  const key = d.collections.map(x => x.id).join(',');
+    + kpi('last hour', m.last_hour) + kpi('last 5 min', m.last_5m) + kpi('active keys', m.active_authors);
+  $('cols').innerHTML = d.collections.map(x => `<span><b>${esc(x.slug)}</b> ${esc(x.evidence)}e ${esc(x.claims)}c ${esc(x.links)}l ${esc(x.contradictions)}k</span>`).join('');
+  const key = d.collections.map(x => x.slug).join(',');
   if (key !== colsKnown) { colsKnown = key; const sel = $('bcol'), cur = sel.value;
-    sel.innerHTML = '<option value="">all collections</option>' + d.collections.map(x => `<option value="${esc(x.id)}">${esc(x.id)}</option>`).join(''); sel.value = cur; }
+    sel.innerHTML = '<option value="">all collections</option>' + d.collections.map(x => `<option value="${esc(x.slug)}">${esc(x.slug)}</option>`).join(''); sel.value = cur; }
   const cs = series(d.calls_per_min), rs = series(d.records_per_min);
-  bars($('callsChart'), cs, 'calls', true); bars($('recChart'), rs, 'records', false);
+  bars($('callsChart'), cs, 'calls', true); bars($('recChart'), rs, 'events', false);
   $('recRate').textContent = `${rs.reduce((a, b) => a + b.n, 0)} in 60m`;
   const tmax = Math.max(1, ...d.by_tool.map(t => t.n));
   $('toolNote').textContent = d.by_tool.length ? `${d.by_tool.length} tools` : '';
@@ -179,27 +185,27 @@ function render(d) {
     : '<div class="empty">no calls recorded yet</div>';
   $('authNote').textContent = d.by_author.length ? `${d.by_author.length} seen` : '';
   $('byauthor').innerHTML = d.by_author.length ? d.by_author.map(a =>
-    `<tr class="rec" data-kind="author" data-id="${esc(a.author_id)}"><td class="k">${esc(a.author_id)}</td><td class="n">${esc(a.n)}</td><td class="n" style="color:var(--ink3)">${esc(a.writes)}w</td>` +
+    `<tr><td class="k">${who(a.author, a.pubkey)}</td><td class="n">${esc(a.n)}</td><td class="n" style="color:var(--ink3)">${esc(a.writes)}w</td>` +
     `<td class="n" style="color:${a.errors ? 'var(--bad)' : 'var(--ink3)'}">${esc(a.errors)}e</td><td class="t" title="${esc(a.last_at)}">${ago(a.last_at)}</td></tr>`).join('')
     : '<tr><td class="empty">none yet</td></tr>';
   $('records').innerHTML = d.recent_records.length ? d.recent_records.map(r => {
     const isNew = !first && !seenRec.has(r.id); seenRec.add(r.id);
-    return `<tr class="rec${isNew ? ' new' : ''}${selected === r.id ? ' sel' : ''}" data-kind="${esc(r.kind)}" data-id="${esc(r.id)}">` +
-      `<td class="t" title="${esc(r.asserted_at)}">${ago(r.asserted_at)}</td><td class="k"><span class="tag">${esc(r.kind)}</span></td>` +
-      `<td class="a" title="${esc(r.author_id)}">${esc(r.author_id)}</td><td class="s">${esc(r.summary)}</td></tr>`; }).join('')
+    return `<tr class="rec${isNew ? ' new' : ''}${selected === r.id ? ' sel' : ''}" data-id="${esc(r.id)}" title="${esc(r.collection)} · ${esc(r.id)}">` +
+      `<td class="t" title="${esc(r.received_at)}">${ago(r.received_at)}</td><td class="k"><span class="tag">${esc(r.kind)}</span></td>` +
+      `<td class="a">${who(r.author, r.pubkey)}</td><td class="s">${esc(r.summary)}</td></tr>`; }).join('')
     : '<tr><td class="empty">no records yet</td></tr>';
   $('callsNote').textContent = d.recent_calls.length ? `last ${d.recent_calls.length}` : '';
   $('calls').innerHTML = d.recent_calls.length ? d.recent_calls.map(r => {
     const isNew = !first && !seenCall.has(r.id); seenCall.add(r.id);
     return `<tr class="${isNew ? 'new' : ''}"><td class="t" title="${esc(r.at)}">${ago(r.at)}</td><td class="k">${esc(r.tool || r.method)}</td>` +
-      `<td class="a" title="${esc(r.author_id || '')}">${esc(r.author_id || '')}</td><td class="n" style="color:var(--ink3)">${esc(r.ms)}ms</td>` +
-      `<td class="s${r.ok ? '' : ' err'}" title="${esc(r.error || '')}">${r.ok ? '<span style="color:var(--ink3)">ok</span>' : '✕ ' + esc(r.error)}</td></tr>`; }).join('')
+      `<td class="a">${r.pubkey ? who(r.author, r.pubkey) : ''}</td><td class="a" style="color:var(--ink3)">${esc(r.collection || '')}</td><td class="n" style="color:var(--ink3)">${esc(r.ms)}ms</td>` +
+      `<td class="s${r.ok ? '' : ' err'}" title="${esc(r.error || '')}">${r.ok ? '<span style="color:var(--ink3)">ok</span>' : '✕ ' + esc(r.error || '')}</td></tr>`; }).join('')
     : '<tr><td class="empty">no calls recorded yet</td></tr>';
   first = false;
 }
 async function poll() {
   const live = $('live'), st = $('status');
-  try { const r = await fetch('/api/snapshot'); if (!r.ok) throw new Error(r.status); render(await r.json());
+  try { render(await api('snapshot'));
     st.textContent = `live · ${new Date().toLocaleTimeString()}`; live.className = 'live'; }
   catch (e) { st.textContent = `unreachable: ${e.message}`; live.className = 'live err'; }
 }
@@ -213,22 +219,23 @@ const segBar = (s, q, r, max, cls = '') => { const tot = s + q + r; if (!tot) re
 const counts = (s, q, r) => `<span class="cnt"><b class="g">${s}</b> · <b class="w">${q}</b> · <b class="c">${r}</b></span>`;
 const B = {kind: 'claim', q: '', col: '', sem: false, sort: 'recent', page: 0};
 let btimer = null, bshown = false;
-function syncTools() { const cl = B.kind === 'claim'; $('bsemwrap').style.display = cl ? '' : 'none'; $('bsort').style.display = cl ? '' : 'none'; $('blegend').style.display = cl ? '' : 'none';
-  $('bcol').style.display = ['claim', 'observation', 'contradiction'].includes(B.kind) ? '' : 'none'; }
+function syncTools() { const cl = B.kind === 'claim'; $('bsemwrap').style.display = cl ? '' : 'none'; $('bsort').style.display = cl ? '' : 'none'; $('blegend').style.display = cl ? '' : 'none'; }
 async function browse() {
   syncTools();
   const p = new URLSearchParams({kind: B.kind, q: B.q, collection: B.col, page: B.page, sort: B.sort, method: B.sem && B.kind === 'claim' ? 'vector' : 'keyword'});
   $('bnote').textContent = 'loading…';
-  let d; try { d = await (await fetch('/api/browse?' + p)).json(); } catch (e) { d = {error: String(e)}; }
+  let d; try { d = await api('browse?' + p); } catch (e) { d = {error: String(e)}; }
   if (d.error) { $('bresults').innerHTML = `<tr><td class="empty">${esc(d.error)}</td></tr>`; $('bnote').textContent = ''; return; }
   const max = Math.max(1, ...d.items.map(r => (r.supports || 0) + (r.qualifies || 0) + (r.rebuts || 0)));
   $('bresults').innerHTML = d.items.length ? d.items.map(r => {
-    const row = `<tr class="rec${selected === r.id ? ' sel' : ''}" data-kind="${esc(B.kind)}" data-id="${esc(r.id)}" title="${esc(r.id)}">` +
-      `<td class="t" title="${esc(r.asserted_at)}">${ago(r.asserted_at)}</td>`;
+    const row = `<tr class="rec${selected === r.id ? ' sel' : ''}" data-id="${esc(r.id)}" title="${esc(r.collection)} · ${esc(r.id)}">` +
+      `<td class="t" title="${esc(r.received_at)}">${ago(r.received_at)}</td>`;
     if (B.kind === 'claim') return row + `<td class="ev">${segBar(r.supports, r.qualifies, r.rebuts, max)}</td><td class="n">${counts(r.supports, r.qualifies, r.rebuts)}</td>` +
       (r.distance != null ? `<td class="n" style="color:var(--ink3)" title="cosine distance">${esc(r.distance)}</td>` : '') +
-      `<td class="s">${esc(r.summary)}${r.findings ? ` <span class="tag">${esc(r.findings)} finding${r.findings > 1 ? 's' : ''}</span>` : ''}</td><td class="a" title="${esc(r.author_id)}">${esc(r.author_id)}</td></tr>`;
-    return row + `<td class="k">${esc(r.id)}</td><td class="a" title="${esc(r.author_id)}">${esc(r.author_id)}</td><td class="s">${esc(r.summary)}</td></tr>`;
+      `<td class="s">${esc(r.summary)}${r.findings ? ` <span class="tag">${esc(r.findings)} contradiction${r.findings > 1 ? 's' : ''}</span>` : ''}</td><td class="a">${who(r.author, r.pubkey)}</td></tr>`;
+    const extra = B.kind === 'evidence' ? ` <span class="muted">${esc(r.source || '')} · ${esc(r.link_count)} links</span>`
+      : B.kind === 'contradiction' ? ` <span class="muted">· ${esc(r.members)} claims</span>` : '';
+    return row + `<td class="k">${esc(String(r.id).slice(0, 10))}</td><td class="a">${who(r.author, r.pubkey)}</td><td class="s">${esc(r.summary)}${extra}</td></tr>`;
   }).join('') : '<tr><td class="empty">nothing matches</td></tr>';
   $('bnote').textContent = `${d.method === 'vector' ? 'semantic · ' : ''}page ${B.page + 1} · ${d.items.length}${d.more ? '+' : ''}`;
   $('bprev').disabled = B.page === 0; $('bnext').disabled = !d.more;
@@ -257,16 +264,17 @@ document.querySelectorAll('.tab').forEach(t => t.onclick = () => showTab(t.datas
 const fmtB = b => b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(0)} KB` : b < 1073741824 ? `${(b / 1048576).toFixed(1)} MB` : `${(b / 1073741824).toFixed(2)} GB`;
 const cell = (k, v, title = '') => `<div class="cell" title="${esc(title)}"><div class="v">${esc(v)}</div><div class="k">${esc(k)}</div></div>`;
 async function loadCollections() {
-  let d; try { d = await (await fetch('/api/collections')).json(); } catch (e) { $('ccards').innerHTML = `<div class="empty">${esc(e)}</div>`; return; }
+  let d; try { d = await api('collections'); } catch (e) { $('ccards').innerHTML = `<div class="empty">${esc(e)}</div>`; return; }
   $('ccards').innerHTML = d.collections.length ? d.collections.map(c =>
-    `<div class="panel card" data-col="${esc(c.id)}" title="browse ${esc(c.id)}"><div class="ph"><h2>${esc(c.id)}</h2><span class="muted">${c.last_at ? 'last record ' + ago(c.last_at) + ' ago' : 'empty'}</span></div>` +
-    `<div class="nm2">${esc(c.name)}</div><div class="grid4">${cell('sources', c.sources)}${cell('observations', c.observations)}${cell('contributors', c.contributors, 'distinct author ids on its records')}${cell('row data', fmtB(c.bytes), 'bytes as stored: compressed, without indexes')}` +
-    `${cell('claims', c.claims)}${cell('evidence', c.evidence)}${cell('findings', c.contradictions)}${cell('created', ago(c.asserted_at) + ' ago', `${c.author_id} · ${c.asserted_at}`)}</div></div>`).join('')
-    : '<div class="empty">no collections yet</div>';
-  $('dbsize').textContent = `${fmtB(d.db_bytes)} database on disk`;
-  const tmax = Math.max(1, ...d.tables.map(t => t.bytes));
-  $('tables').innerHTML = d.tables.map(t => `<span class="nm">${esc(t.name)}</span><div class="track"><div class="fill" style="width:${(100 * t.bytes / tmax).toFixed(1)}%"></div></div>` +
-    `<span class="n">${fmtB(t.bytes)}</span><span class="ms">${(100 * t.bytes / Math.max(1, d.db_bytes)).toFixed(0)}%</span>`).join('');
+    `<div class="panel card" data-col="${esc(c.slug)}" title="browse ${esc(c.slug)}"><div class="ph"><h2>${esc(c.slug)}</h2><span class="muted">${c.last_at ? 'last event ' + ago(c.last_at) + ' ago' : 'empty'}</span></div>` +
+    `<div class="nm2" title="${esc(c.owner)}">owner ${esc(c.owner_name)}</div><div class="grid4">${cell('members', c.members)}${cell('evidence', c.evidence)}${cell('contributors', c.contributors, 'distinct signing keys on its events')}${cell('row data', fmtB(c.bytes), 'event bytes as stored: compressed, without indexes')}` +
+    `${cell('claims', c.claims)}${cell('links', c.links)}${cell('contradictions', c.contradictions)}${cell('created', ago(c.created_at) + ' ago', `${c.owner} · ${c.created_at}`)}</div></div>`).join('')
+    : '<div class="empty">you are not a member of any collection yet</div>';
+  const tot = d.collections.reduce((a, c) => a + c.bytes + c.vector_bytes, 0);
+  $('dbsize').textContent = `${fmtB(tot)} events + vectors`;
+  const tmax = Math.max(1, ...d.collections.map(c => c.bytes + c.vector_bytes));
+  $('tables').innerHTML = d.collections.map(c => `<span class="nm">${esc(c.slug)}</span><div class="track"><div class="fill" style="width:${(100 * (c.bytes + c.vector_bytes) / tmax).toFixed(1)}%"></div></div>` +
+    `<span class="n">${fmtB(c.bytes)}</span><span class="ms" title="claim embeddings">+${fmtB(c.vector_bytes)} vec</span>`).join('');
 }
 
 // ---- agents ---------------------------------------------------------------
@@ -276,40 +284,42 @@ function spark(rows) {
     ? `<rect x="${i * 2}" y="${18 - Math.max(1, Math.round(17 * d.n / max))}" width="1.6" height="${Math.max(1, Math.round(17 * d.n / max))}" fill="${d.errors ? 'var(--bad)' : 'var(--accent)'}"/>` : '').join('') +
     `<line x1="0" y1="17.5" x2="120" y2="17.5" stroke="var(--line)" stroke-width=".6"/></svg>`;
 }
-const kindTag = a => a.unregistered ? '<span class="kindtag unreg">unregistered</span>' : `<span class="kindtag ${a.kind === 'human' ? 'human' : ''}">${esc(a.kind || '')}</span>`;
+// Human or agent is self-declared in the profile's about, not verified.
+const kindTag = a => a.name == null ? '<span class="kindtag unreg">no profile</span>'
+  : a.about ? `<span class="kindtag ${/human/i.test(a.about) ? 'human' : ''}" title="${esc(a.about)}">${esc(a.about.slice(0, 24))}</span>` : '';
 async function loadAgents() {
-  let d; try { d = await (await fetch('/api/agents')).json(); } catch (e) { $('atable').innerHTML = `<tr><td class="empty">${esc(e)}</td></tr>`; return; }
+  let d; try { d = await api('agents'); } catch (e) { $('atable').innerHTML = `<tr><td class="empty">${esc(e)}</td></tr>`; return; }
   $('anote').textContent = `${d.agents.length} · active ${d.agents.filter(a => a.last_call && Date.now() - new Date(a.last_call) < 300000).length} in last 5m`;
-  const th = '<tr><th>agent</th><th>name</th><th></th><th>last seen</th><th>last hour</th><th class="n" title="calls that named this author_id; reads carry none">calls</th><th class="n">writes</th><th class="n">errors</th><th class="n">avg</th>' +
-    '<th class="n">obs</th><th class="n">claims</th><th class="n">evidence</th><th class="n">findings</th><th class="n">sources</th><th>registered</th></tr>';
+  const th = '<tr><th>key</th><th>name</th><th>about</th><th>last seen</th><th>last hour</th><th class="n">calls</th><th class="n">writes</th><th class="n">reads</th><th class="n">errors</th><th class="n">avg</th>' +
+    '<th class="n">evidence</th><th class="n">claims</th><th class="n">links</th><th class="n">contra.</th><th class="n">members</th></tr>';
   $('atable').innerHTML = th + (d.agents.length ? d.agents.map(a => {
     const last = a.last_call && a.last_record_at ? (new Date(a.last_call) > new Date(a.last_record_at) ? a.last_call : a.last_record_at) : (a.last_call || a.last_record_at);
-    return `<tr class="rec" data-kind="author" data-id="${esc(a.id)}"><td class="k">${esc(a.id)}</td><td class="a" style="max-width:220px" title="${esc(a.name || '')}">${a.name && a.name !== a.id ? esc(a.name) : ''}</td><td>${kindTag(a)}</td>` +
+    return `<tr><td class="k" title="${esc(a.id)}">${esc(short(a.id))}</td><td class="a" style="max-width:220px" title="${esc(a.name || '')}">${esc(a.name || '')}</td><td>${kindTag(a)}</td>` +
       `<td class="t" title="${esc(last || '')}">${last ? ago(last) + ' ago' : '—'}</td><td class="sp">${spark(d.per_min[a.id])}</td>` +
-      `<td class="n">${esc(a.calls)}</td><td class="n">${esc(a.writes)}</td>` +
+      `<td class="n">${esc(a.calls)}</td><td class="n">${esc(a.writes)}</td><td class="n">${esc(a.reads)}</td>` +
       `<td class="n" style="color:${a.errors ? 'var(--bad)' : 'var(--ink3)'}">${esc(a.errors)}</td><td class="n" style="color:var(--ink3)">${a.avg_ms != null ? esc(a.avg_ms) + 'ms' : '—'}</td>` +
-      `<td class="n">${esc(a.observations)}</td><td class="n">${esc(a.claims)}</td><td class="n">${esc(a.evidence)}</td><td class="n">${esc(a.contradictions)}</td><td class="n">${esc(a.sources)}</td>` +
-      `<td class="t" title="${esc(a.registered_at || '')}">${a.registered_at ? ago(a.registered_at) + ' ago' : '—'}</td></tr>`; }).join('') : '<tr><td class="empty" colspan="15">no agents yet</td></tr>');
+      `<td class="n">${esc(a.evidence)}</td><td class="n">${esc(a.claims)}</td><td class="n">${esc(a.links)}</td><td class="n">${esc(a.contradictions)}</td><td class="n">${esc(a.members)}</td></tr>`; }).join('')
+    : '<tr><td class="empty" colspan="15">no keys yet</td></tr>');
 }
 
 // ---- sources --------------------------------------------------------------
-const S = {q: '', sort: 'observations'}; let stimer = null;
+const S = {q: '', sort: 'evidence'}; let stimer = null;
 async function loadSources() {
-  let d; try { d = await (await fetch('/api/sources?' + new URLSearchParams(S))).json(); } catch (e) { $('stable').innerHTML = `<tr><td class="empty">${esc(e)}</td></tr>`; return; }
+  let d; try { d = await api('sources?' + new URLSearchParams(S)); } catch (e) { $('stable').innerHTML = `<tr><td class="empty">${esc(e)}</td></tr>`; return; }
   const t = d.totals;
-  $('sstrip').innerHTML = kpi('sources', t.sources) + kpi('with observations', t.with_observations) + kpi('unused', t.sources - t.with_observations) + kpi('domains', t.domains) + kpi('observations', t.observations) + kpi('evidence grounded', t.evidence);
-  const dmax = Math.max(1, ...d.domains.map(x => x.observations));
+  $('sstrip').innerHTML = kpi('sources', t.sources) + kpi('evidence', t.evidence) + kpi('no source', t.unsourced) + kpi('domains', t.domains) + kpi('cited by a link', t.grounding);
+  const dmax = Math.max(1, ...d.domains.map(x => x.evidence));
   $('dnote').textContent = `top ${d.domains.length}`;
   $('domains').innerHTML = d.domains.length ? d.domains.map(x =>
-    `<span class="nm" title="${esc(x.domain)}">${esc(x.domain)}</span><div class="track"><div class="fill" style="width:${(100 * x.observations / dmax).toFixed(1)}%"></div></div>` +
-    `<span class="n">${esc(x.observations)}</span><span class="ms">${esc(x.evidence)} ev</span>`).join('') : '<div class="empty">no observations yet</div>';
+    `<span class="nm" title="${esc(x.domain)}">${esc(x.domain)}</span><div class="track"><div class="fill" style="width:${(100 * x.evidence / dmax).toFixed(1)}%"></div></div>` +
+    `<span class="n">${esc(x.evidence)}</span><span class="ms">${esc(x.links)} links</span>`).join('') : '<div class="empty">no evidence with a URL yet</div>';
   $('snote').textContent = `${d.sources.length}${d.sources.length >= 300 ? '+' : ''}`;
-  const th = '<tr><th>source</th><th>domain</th><th>collections</th><th class="n">observations</th><th class="n">evidence</th><th class="n">claims touched</th><th class="n">about it</th><th>last used</th><th>added by</th></tr>';
+  const th = '<tr><th>source</th><th>domain</th><th>collections</th><th class="n">evidence</th><th class="n">links</th><th class="n">claims touched</th><th class="n">contributors</th><th>last used</th></tr>';
   $('stable').innerHTML = th + (d.sources.length ? d.sources.map(x =>
-    `<tr class="rec" data-kind="source" data-id="${esc(x.id)}"><td class="k" style="max-width:280px;overflow:hidden;text-overflow:ellipsis;font-family:var(--sans);font-size:11.5px" title="${esc(x.name)}${x.uri ? ' · ' + esc(x.uri) : ''}">${esc(x.name)}</td>` +
-    `<td class="k">${esc(x.domain || '')}</td><td class="a">${esc(x.collections || '')}</td><td class="n">${esc(x.observations)}</td><td class="n">${esc(x.evidence)}</td>` +
-    `<td class="n">${esc(x.claims)}</td><td class="n" style="color:var(--ink3)">${esc(x.evidence_about)}</td><td class="t" title="${esc(x.last_observation_at || '')}">${x.last_observation_at ? ago(x.last_observation_at) + ' ago' : '—'}</td><td class="a">${esc(x.author_id)}</td></tr>`).join('')
-    : '<tr><td class="empty" colspan="9">nothing matches</td></tr>');
+    `<tr class="rec" data-source="${esc(x.source ?? '')}"><td class="k" style="max-width:280px;overflow:hidden;text-overflow:ellipsis;font-family:var(--sans);font-size:11.5px" title="${esc(x.source ?? 'no source field')}">${esc(x.source ?? '—')}</td>` +
+    `<td class="k">${esc(x.domain || '')}</td><td class="a">${esc(x.collections || '')}</td><td class="n">${esc(x.evidence)}</td><td class="n">${esc(x.links)}</td>` +
+    `<td class="n">${esc(x.claims)}</td><td class="n" style="color:var(--ink3)">${esc(x.contributors)}</td><td class="t" title="${esc(x.last_at || '')}">${x.last_at ? ago(x.last_at) + ' ago' : '—'}</td></tr>`).join('')
+    : '<tr><td class="empty" colspan="8">nothing matches</td></tr>');
 }
 $('sq').oninput = e => { S.q = e.target.value; clearTimeout(stimer); stimer = setTimeout(loadSources, 250); };
 $('ssort').onchange = e => { S.sort = e.target.value; loadSources(); };
@@ -319,49 +329,47 @@ setInterval(() => { if (activeTab === 'collections') loadCollections(); if (acti
 const hist = [];
 const kv = (k, v) => v == null || v === '' ? '' : `<div class="kv"><span class="kk">${esc(k)}</span><span class="kv2">${v}</span></div>`;
 const list = (title, items, fn) => items && items.length ? `<h3>${esc(title)} <span class="muted">${items.length}</span></h3>${items.map(fn).join('')}` : '';
-const evLine = e => `<div class="li">${link(e.id)} <b>${esc(e.relation)}</b> ${esc(e.target_kind)} ${link(e.target_id)} <span class="muted">from</span> ${link(e.from_observation_id)}` +
-  `<div class="q">“${esc(e.quote)}”</div><div class="r">${esc(e.reason)} <span class="muted">· ${esc(e.author_id)} · ${ago(e.asserted_at)} ago</span></div></div>`;
-function renderRecord(kind, r) {
-  let h = '';
-  if (kind === 'claim') { const s = r.evidence.filter(e => e.relation === 'SUPPORTS').length, q = r.evidence.filter(e => e.relation === 'QUALIFIES').length, b = r.evidence.filter(e => e.relation === 'REBUTS').length;
-    h += `<p class="big">${esc(r.text)}</p>${segBar(s, q, b, s + q + b, 'lg')}${kv('evidence', counts(s, q, b) + ' <span class="muted">supports · qualifies · rebuts</span>')}`; }
-  if (kind === 'contradiction') h += `<p class="big">${esc(r.reason)}</p>`;
-  if (kind === 'evidence') h += `<p class="big q">“${esc(r.quote)}”</p>${kv('reason', esc(r.reason))}${kv('relation', `<b>${esc(r.relation)}</b> ${esc(r.target_kind)} ${link(r.target_id)}`)}${kv('grounded in', link(r.from_observation_id))}`;
-  if (kind === 'observation') h += `<p class="big">${esc(r.title || '(untitled)')}</p>${kv('uri', `<a class="ext" href="${esc(r.uri)}" target="_blank" rel="noopener">${esc(r.uri)}</a>`)}${kv('source', link(r.source_id))}${kv('chars', r.content_unavailable ? 'content not stored' : esc(r.chars))}${kv('hash', `<span class="muted">${esc(r.content_hash)}</span>`)}`;
-  if (kind === 'source') h += `<p class="big">${esc(r.name)}</p>${kv('uri', r.uri ? `<a class="ext" href="${esc(r.uri)}" target="_blank" rel="noopener">${esc(r.uri)}</a>` : '')}`;
-  if (kind === 'author') {
-    h += `<p class="big">${esc(r.name)} <span class="kindtag ${r.kind === 'human' ? 'human' : ''}">${esc(r.kind)}</span></p>`;
-    if (r.tools && r.tools.length) { const tmax = Math.max(1, ...r.tools.map(t => t.n));
-      h += `<h3>Calls by tool</h3><div class="bars" style="padding:4px 0">` + r.tools.map(t => `<span class="nm">${esc(t.name)}</span><div class="track"><div class="fill" style="width:${(100 * t.n / tmax).toFixed(1)}%"></div></div><span class="n">${esc(t.n)}${t.errors ? ` <span style="color:var(--bad)">·${esc(t.errors)}</span>` : ''}</span><span class="ms">${esc(t.avg_ms)}ms</span>`).join('') + `</div>`; }
-    h += list('Recent failures', r.failures, f => `<div class="li"><span class="tag">${esc(f.tool || '')}</span> <span style="color:var(--bad)">${esc(f.error)}</span> <span class="muted">· ${ago(f.at)} ago</span></div>`); }
-  if (kind === 'collection') h += `<p class="big">${esc(r.name)}</p>`;
-  h += kv('author', esc(r.author_id)) + kv('collection', esc(r.collection_id)) + kv('asserted', `${esc(r.asserted_at)} <span class="muted">· ${ago(r.asserted_at)} ago</span>`);
-  if (kind === 'evidence' && r.target) h += `<h3>Target</h3><div class="li">${link(r.target.id)} ${esc(r.target.text || r.target.reason || r.target.title || r.target.name || r.target.uri || r.target.quote || '')}</div>`;
-  if (kind === 'evidence' && r.observation) h += `<h3>Observation</h3><div class="li">${link(r.observation.id)} ${esc(r.observation.title || r.observation.uri)}</div>`;
-  h += list('Member claims', r.claims, c => `<div class="li">${link(c.id)} ${esc(c.text)} <span class="muted">· ${esc(c.author_id)}</span></div>`);
-  h += list('Evidence', r.evidence, evLine);
-  h += list('Contradiction findings', r.contradictions, k => `<div class="li">${link(k.id)} ${esc(k.reason)}<div class="r">${(k.claim_ids || []).map(link).join(' ')}${k.evidence && k.evidence.length ? ` · ${k.evidence.length} evidence on the finding` : ''}</div></div>`);
-  h += list('Evidence grounded here', r.evidence_from, evLine);
-  h += list('Observations', r.observations, o => `<div class="li">${link(o.id)} ${esc(o.title || o.uri)} <span class="muted">· ${esc(o.collection_id)} · ${ago(o.asserted_at)} ago</span></div>`);
-  h += list('Recent records by this author', r.recent, x => `<div class="li"><span class="tag">${esc(x.kind)}</span> ${linkify(x.id)} ${esc(x.summary)} <span class="muted">· ${ago(x.asserted_at)} ago</span></div>`);
-  if (kind === 'observation' && r.content) h += `<h3>Content <span class="muted">first ${r.content.length} of ${esc(r.chars)} chars</span></h3><pre class="content">${esc(r.content)}</pre>`;
-  h += `<details><summary>raw record</summary><pre>${esc(JSON.stringify(r, null, 2))}</pre></details>`;
+const lnLine = e => `<div class="li">${link(e.id)} <b>${esc(e.relation)}</b> ${esc(e.to_kind || '')} ${link(e.to_id)} <span class="muted">from</span> ${link(e.from_id)}` +
+  `<div class="q">“${esc(e.quote)}”</div><div class="r">${esc(e.reason)} <span class="muted">· ${who(e.author, e.pubkey)} · ${ago(e.received_at)} ago</span></div></div>`;
+const unix = s => `${esc(s)} <span class="muted">· ${esc(new Date(s * 1000).toISOString())}</span>`;
+function renderRecord(r) {
+  const c = r.content || {}, kind = r.kind; let h = '';
+  if (kind === 'claim') { const s = r.links.filter(e => e.relation === 'SUPPORTS').length, q = r.links.filter(e => e.relation === 'QUALIFIES').length, b = r.links.filter(e => e.relation === 'REBUTS').length;
+    h += `<p class="big">${esc(c.text)}</p>${segBar(s, q, b, s + q + b, 'lg')}${kv('links', counts(s, q, b) + ' <span class="muted">supports · qualifies · rebuts</span>')}`; }
+  if (kind === 'contradiction') h += `<p class="big">${esc(c.reason)}</p>`;
+  if (kind === 'link') h += `<p class="big q">“${esc(c.quote)}”</p>${kv('reason', esc(c.reason))}${kv('relation', `<b>${esc(c.relation)}</b> ${esc(r.target ? r.target.kind : '')} ${link(c.to)}`)}${kv('grounded in', link(c.from))}`;
+  if (kind === 'evidence') h += `<p class="big">${esc(c.title || '(untitled)')}</p>${kv('url', c.url ? `<a class="ext" href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.url)}</a>` : '')}${kv('source', esc(c.source))}${kv('chars', esc(r.chars))}`;
+  if (kind === 'members') h += `<p class="big">${esc((c.members || []).length)} members</p>` + (c.members || []).map(m => `<div class="li muted">${esc(m)}</div>`).join('');
+  h += kv('id', `<span class="muted">${esc(r.id)}</span>`) + kv('author', `${esc(r.author)} <span class="muted">${esc(r.pubkey)}</span>`) + kv('collection', esc(r.collection))
+    + kv('created', unix(r.created_at) + ' <span class="muted">(signer-claimed)</span>') + kv('received', `${esc(r.received_at)} <span class="muted">· ${ago(r.received_at)} ago</span>`);
+  if (kind === 'link' && r.target) h += `<h3>Target</h3><div class="li">${link(r.target.id)} <span class="tag">${esc(r.target.kind)}</span> ${esc(r.target.summary || '')}</div>`;
+  if (kind === 'link' && r.evidence) h += `<h3>Evidence</h3><div class="li">${link(r.evidence.id)} ${esc(r.evidence.title || r.evidence.url || r.evidence.source || '')} <span class="muted">· ${esc(r.evidence.chars)} chars</span></div>`;
+  h += list('Member claims', r.claims, x => `<div class="li">${link(x.id)} ${esc(x.text)} <span class="muted">· ${who(x.author, x.pubkey)}</span></div>`);
+  h += list(kind === 'claim' ? 'Links' : 'Links targeting this', r.links, lnLine);
+  h += list('Contradictions', r.contradictions, k => `<div class="li">${link(k.id)} ${esc(k.reason)}<div class="r">${(k.claim_ids || []).map(link).join(' ')}${k.link_count ? ` · ${k.link_count} links on it` : ''}</div></div>`);
+  h += list('Links grounded here', r.links_from, lnLine);
+  if (kind === 'evidence' && c.text) h += `<h3>Text <span class="muted">first ${c.text.length} of ${esc(r.chars)} chars</span></h3><pre class="content">${esc(c.text)}</pre>`;
+  h += `<details><summary>signed event${r.raw_truncated ? ' (content truncated here; the export has it whole)' : ''}</summary><pre>${esc(JSON.stringify(r.raw, null, 2))}</pre></details>`;
   return h;
 }
-async function showDetail(kind, id, push = true) {
+async function showDetail(id, push = true) {
   if (push && selected && selected !== id) hist.push(selected);
   selected = id; document.querySelectorAll('tr.rec').forEach(tr => tr.classList.toggle('sel', tr.dataset.id === id));
-  $('drawer').classList.add('open'); $('drawerTitle').textContent = `${kind} ${id}`; $('dback').style.visibility = hist.length ? 'visible' : 'hidden';
+  $('drawer').classList.add('open'); $('drawerTitle').textContent = id.slice(0, 16); $('dback').style.visibility = hist.length ? 'visible' : 'hidden';
   $('dbody').innerHTML = '<div class="empty">loading…</div>';
-  try { const r = await fetch(`/api/record/${encodeURIComponent(kind)}/${encodeURIComponent(id)}`); const d = await r.json();
-    $('dbody').innerHTML = d.error ? `<div class="empty">${esc(d.error)}</div>` : renderRecord(kind, d); }
+  try { const d = await api('record/' + encodeURIComponent(id));
+    if (!d.error) $('drawerTitle').textContent = `${d.kind} ${id.slice(0, 16)}`;
+    $('dbody').innerHTML = d.error ? `<div class="empty">${esc(d.error)}</div>` : renderRecord(d); }
   catch (e) { $('dbody').innerHTML = `<div class="empty">${esc(e)}</div>`; }
 }
 function hideDetail() { selected = null; hist.length = 0; $('drawer').classList.remove('open'); document.querySelectorAll('tr.sel').forEach(tr => tr.classList.remove('sel')); }
-$('dback').onclick = () => { const prev = hist.pop(); if (prev) showDetail(kindOf(prev) || 'author', prev, false); };
+$('dback').onclick = () => { const prev = hist.pop(); if (prev) showDetail(prev, false); };
 document.addEventListener('click', e => {
-  const a = e.target.closest('a.idl'); if (a) { e.preventDefault(); const id = a.dataset.id; showDetail(kindOf(id), id); return; }
-  const tr = e.target.closest('tr.rec'); if (tr) { showDetail(tr.dataset.kind, tr.dataset.id); return; }
+  const a = e.target.closest('a.idl'); if (a) { e.preventDefault(); showDetail(a.dataset.id); return; }
+  const tr = e.target.closest('tr.rec');
+  if (tr && tr.dataset.id) { showDetail(tr.dataset.id); return; }
+  if (tr && 'source' in tr.dataset) {  // a source row: browse its evidence
+    B.kind = 'evidence'; $('bkind').value = 'evidence'; B.q = tr.dataset.source; $('bq').value = B.q; bshown = true; showTab('browse'); rebrowse(); return; }
   const card = e.target.closest('.card'); if (card) { B.col = card.dataset.col; $('bcol').value = B.col; bshown = true; showTab('browse'); rebrowse(); }
 });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') hideDetail(); });
