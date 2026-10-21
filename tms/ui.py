@@ -235,7 +235,7 @@ def sources(conn, cols: list[str], q: str = "", sort: str = "evidence", limit: i
 def collections(conn, cols: list[str]) -> dict:
     """The landing page: each of the viewer's collections with what it holds, who wrote it and what it weighs."""
     # ponytail: bytes are row data as stored (compressed, no indexes), summed per collection; no global DB figures
-    rows = _rows(conn, f"""
+    rows = _rows(conn, """
         SELECT c.slug, c.owner, coalesce((SELECT p.name FROM profiles p WHERE p.pubkey = c.owner), left(c.owner, 12)) AS owner_name,
                c.created_at, (SELECT count(*) FROM members m WHERE m.collection = c.slug) AS members,
                s.evidence, s.claims, s.links, s.contradictions, s.contributors, s.last_at, s.bytes,
