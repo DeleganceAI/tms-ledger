@@ -23,8 +23,7 @@
   #tmsc .empty{color:var(--ink3);font-size:12px}
   #tmsc .msg{white-space:pre-wrap;word-break:break-word}#tmsc .msg.user{align-self:flex-end;background:var(--accent2);padding:6px 10px;border-radius:10px;max-width:85%}
   #tmsc .msg.err{color:var(--bad);font:11px var(--mono)}
-  #tmsc details{border:1px solid var(--line);border-radius:6px;font-size:11px}#tmsc summary{padding:4px 8px;font-family:var(--mono);color:var(--ink2);cursor:pointer;word-break:break-all}
-  #tmsc pre{margin:0;padding:6px 8px;max-height:220px;overflow:auto;border-top:1px solid var(--line);white-space:pre-wrap;word-break:break-word;font:10.5px/1.4 var(--mono);color:var(--ink2)}
+  #tmsc .tool{align-self:flex-start;border:1px solid var(--line);border-radius:6px;padding:2px 8px;font:11px var(--mono);color:var(--ink2)}
   #tmsc a.id{font-family:var(--mono);font-size:11px;color:var(--accent);background:var(--accent2);padding:0 3px;border-radius:3px;text-decoration:none}
   #tmsc form{display:flex;gap:6px;padding:8px;border-top:1px solid var(--line)}
   #tmsc textarea{flex:1;min-height:44px;max-height:140px;resize:vertical;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 8px}
@@ -89,8 +88,7 @@
         e.type === 'user' ? `<div class="msg user">${esc(e.content)}</div>`
         : e.type === 'answer' ? `<div class="msg">${ids(e.content)}</div>`
         : e.type === 'error' ? `<div class="msg err">${esc(e.error)}</div>`
-        : `<details><summary>${esc(e.name)}(${esc(JSON.stringify(e.args)).slice(0, 120)})${e.result == null ? ' …' : ` · ${esc(e.ms)}ms`}</summary>` +
-          `<pre>${esc(JSON.stringify(e.args, null, 2))}</pre>${e.result != null ? `<pre>${ids(e.result)}</pre>` : ''}</details>`).join('')
+        : `<div class="tool">${esc(e.name)}${e.result == null ? ' …' : ` · ${esc(e.ms)}ms`}</div>`).join('')  // arguments and results go in the exports
         : '<div class="empty">Ask a question about this collection. The agent can only read it, and every tool call it makes shows here.</div>';
       $('tmsc-log').scrollTop = $('tmsc-log').scrollHeight;
       $('tmsc-send').disabled = busy || !C.col;
