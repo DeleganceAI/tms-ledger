@@ -39,17 +39,50 @@ DOCS_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 :root{{--bg:#f4f4f2;--panel:#fff;--line:#e2e2de;--ink:#171716;--ink3:#8c8c86;--accent:#2f6fde;--code:#ecece8}}
 @media(prefers-color-scheme:dark){{:root{{--bg:#121211;--panel:#1a1a19;--line:#2b2b29;--ink:#ececea;--ink3:#74746d;--accent:#7aa6f5;--code:#232321}}}}
 body{{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 system-ui,sans-serif}}
-header{{padding:10px 16px;border-bottom:1px solid var(--line);display:flex;gap:14px}}header a{{color:var(--ink3);text-decoration:none}}
-main{{max-width:860px;margin:0 auto;padding:8px 16px 40px}}a{{color:var(--accent)}}
-pre,code{{font:13px/1.5 ui-monospace,Menlo,monospace;background:var(--code);border-radius:4px}}code{{padding:1px 4px}}
+header{{padding:10px 16px;border-bottom:1px solid var(--line);display:flex;flex-wrap:wrap;gap:4px 14px}}header a{{color:var(--ink3);text-decoration:none}}
+main{{max-width:860px;margin:0 auto;padding:8px 16px 40px;min-width:0}}a{{color:var(--accent)}}
+.wrap{{display:flex;justify-content:center;gap:28px}}
+#toc{{font-size:13px;line-height:1.4;padding:14px 0 0 16px}}#toc summary{{cursor:pointer;color:var(--ink3);font-weight:600}}
+#toc ol{{list-style:none;margin:6px 0 0;padding:0}}#toc li{{margin:3px 0}}#toc li.h3{{padding-left:12px}}#toc li.h2{{margin-top:10px}}#toc li.h2:first-child{{margin-top:0}}#toc li.h2>a{{color:var(--ink);font-weight:600}}#toc a{{color:var(--ink3);text-decoration:none}}
+#toc a:hover,#toc a.on{{color:var(--ink)}}#toc a.on{{font-weight:600}}
+@media(min-width:1100px){{#toc{{position:sticky;top:0;align-self:flex-start;width:230px;max-height:100vh;overflow:auto;flex:none}}#toc summary{{display:none}}}}
+@media(max-width:1099px){{.wrap{{display:block}}#toc{{display:block;padding:10px 16px 0;max-width:860px;margin:0 auto;box-sizing:border-box}}}}
+h2,h3{{scroll-margin-top:12px}}
+pre,code{{font:13px/1.5 ui-monospace,Menlo,monospace;background:var(--code);border-radius:4px}}code{{padding:1px 4px}}:not(pre)>code{{overflow-wrap:anywhere}}
 pre{{padding:10px 12px;overflow-x:auto;white-space:pre}}pre code{{padding:0;background:none}}#md{{white-space:pre-wrap}}
 table{{border-collapse:collapse;display:block;overflow-x:auto}}td,th{{border:1px solid var(--line);padding:5px 8px;text-align:left;vertical-align:top}}
 blockquote{{margin:0;padding:2px 14px;border-left:3px solid var(--line);color:var(--ink3)}}
 </style></head><body><header><b>TMS ledger</b><a href="/">Home</a><a href="/submit">Submit</a><a href="/dashboard">Dashboard</a>
-<a href="/office">Office</a><a href="/docs.md">Markdown</a></header><main><pre id="md">{md}</pre></main>
+<a href="/office">Office</a><a href="/docs.md">Markdown</a></header>
+<div class="wrap"><details id="toc" hidden><summary>Contents</summary><ol></ol></details><main><pre id="md">{md}</pre></main></div>
 <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"></script>
 <script>const el = document.getElementById('md'); if (window.marked) el.outerHTML = marked.parse(el.textContent)</script>
+<script>{toc_js}</script>
 <script src="/chat.js" defer></script></body></html>"""
+
+
+# The docs sidebar: a contents list from the rendered h2/h3, with the section in view highlighted.
+TOC_JS = r"""(() => {
+  const heads = [...document.querySelectorAll('main h2, main h3')];
+  if (!heads.length) return;
+  const slug = t => t.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const toc = document.getElementById('toc'), list = toc.querySelector('ol'), links = new Map();
+  for (const h of heads) {
+    h.id ||= slug(h.textContent);
+    const li = document.createElement('li'), a = document.createElement('a');
+    li.className = h.tagName.toLowerCase(); a.href = '#' + h.id; a.textContent = h.textContent;
+    li.append(a); list.append(li); links.set(h, a);
+  }
+  toc.hidden = false; toc.open = matchMedia('(min-width: 1100px)').matches;
+  toc.addEventListener('click', e => { if (e.target.closest('a') && !matchMedia('(min-width: 1100px)').matches) toc.open = false; });
+  const seen = new Set();
+  const obs = new IntersectionObserver(es => {
+    for (const e of es) e.isIntersecting ? seen.add(e.target) : seen.delete(e.target);
+    const top = heads.find(h => seen.has(h));
+    if (top) links.forEach((a, h) => a.classList.toggle('on', h === top));
+  }, {rootMargin: '0px 0px -70% 0px'});
+  heads.forEach(h => obs.observe(h));
+})();"""
 
 
 def _mac(payload: str) -> str:
@@ -180,7 +213,7 @@ def _docs_text(request: Request) -> str:
 async def docs(request: Request) -> HTMLResponse:
     """DOCS.md, rendered in the browser by a pinned marked; readable as plain text without JS."""
     from html import escape
-    return HTMLResponse(DOCS_PAGE.format(md=escape(_docs_text(request))))
+    return HTMLResponse(DOCS_PAGE.format(md=escape(_docs_text(request)), toc_js=TOC_JS))
 
 
 async def docs_md(request: Request) -> PlainTextResponse:

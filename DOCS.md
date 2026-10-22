@@ -8,6 +8,67 @@ Every collection is private. Only its members can read, write or export it.
 
 > Base URL: `{{BASE}}`. Current terms: version `{{TERMS_VERSION}}`, sha256 `{{TERMS_SHA256}}`. (Read in the repo, these are placeholders; the server's `/docs` and `/docs.md` fill them in.)
 
+## Philosophy
+
+TMS stands for truth maintenance system, but it doesn't maintain truth. It keeps a careful, signed record of what people and agents asserted, what documents they grounded it in, and where they think the assertions collide. What to believe is left to whoever reads that record.
+
+### What this is
+
+- **A ledger of assertions.** Evidence, claims, links and contradictions, each signed by the key that made it and timestamped by the server when it arrived.
+- **A record of reasons.** Every link quotes its evidence verbatim and says why the quote bears on its target. Every contradiction names its claims and says why they can't all hold. A reader can always ask "says who, and on what grounds?" and get an answer from the record.
+- **A shared workspace for people and agents.** Humans and bots use the same records, the same rules and the same signatures. A bot's contribution is attributed to the bot, and a person's to the person.
+- **A history that only grows.** Corrections are new records that dispute old ones. Nothing is edited, retired or quietly replaced, so you can always see what was believed to be grounded at any point and what changed it.
+
+### What this is not
+
+- **Not a fact-checker or an oracle.** The server never decides whether a claim is true, whether evidence applies, or which side of a contradiction is right. It checks structure, signatures, membership, and that quotes really appear in the evidence they cite. That's all.
+- **Not a confidence or scoring system.** There are no probabilities, weights, ratings or "confidence: high" labels, and nothing is aggregated into a score. Numbers inside a claim are just part of the claim's text. Search distances help you find things; they say nothing about truth.
+- **Not a status tracker.** There is no "verified", "debunked", "contested", "open" or "resolved" field anywhere. Those are conclusions, and conclusions belong to readers. Two readers looking at the same records may reasonably reach different ones.
+- **Not a knowledge graph that merges or infers.** Identical claim text is two claims. Two sources are not assumed independent. Nothing propagates: rebutting a claim doesn't touch the links that support it, and disputing a contradiction doesn't close it.
+- **Not an editable wiki.** You can't fix a typo in a claim; you add a better claim and link the two. That is deliberate: the earlier wording, and who relied on it, stays visible.
+- **Not an identity or credibility check.** A signature proves which key signed a record, not who holds the key or whether they are reliable. Whether a key is a human or an agent is whatever its profile says. How reliable a source is, is itself just a claim someone can make and ground.
+- **Not a workflow engine.** There are no assignments, queues or task states. Agents and people decide what to work on outside the ledger; the ledger only keeps what they produce.
+- **Not a public feed.** Every collection is private to its members. Nothing is published to Nostr relays, and there are no followers and no timeline.
+- **Not a record of anyone's private reasoning.** The trail of links and contradictions shows what was asserted and on what grounds, not why someone went looking or what they thought along the way.
+
+### The discipline
+
+1. **No confidence scales.** Ground a claim or dispute it; don't rate it.
+2. **Keep interpretation with readers.** Believed, contested, open and resolved are a reader's words, never the ledger's.
+3. **Show the reasons.** A link needs a verbatim quote and a specific reason. A contradiction needs at least two distinct claims and an explanation of why they can't all hold.
+4. **Preserve history.** Append; never edit or delete. Correct a record by disputing it with a new one.
+5. **Keep provenance explicit.** Every record says which key signed it and when the server received it.
+
+### Why it is built this way
+
+- **Verbatim quotes.** A paraphrase can quietly drift from what a source says. A quote can be checked mechanically, and the server rejects any quote it can't find in the evidence text, forgiving only case, whitespace, curly quotes, dashes and ligatures. So the record can't claim a document says something it doesn't.
+- **Contradictions are authored, not computed.** Claim text is opaque to the server, and "these can't all be true" is a judgement about meaning, scope and time. Someone has to make it and give a reason. A claim with both supporting and rebutting links is merely contested, and readers can see that with a query.
+- **Contradictions don't name a loser.** A contradiction says the claims can't all hold, not which one is wrong, and any two of its claims may be compatible on their own. Later evidence either gives grounds to reject or qualify a member claim (the disagreement was addressed), or shows the contradiction was mistaken, for example because the claims are about different timeframes (the contradiction was corrected). Both are readings of the record, not states the server sets.
+- **Signed events.** Every record is a Nostr-style event, so authorship doesn't depend on trusting the server. Anyone holding an export can verify every signature, and nobody, the operator included, can alter a record without breaking it.
+- **Append-only.** If records could be edited, a link could end up pointing at words its author never saw. Because references are event IDs, which are hashes of exact content, a link commits to the exact text it was about.
+- **Private collections.** People upload whole papers and articles. Keeping each collection to its members respects the uploads, and lets a group work on a question before it's ready to share.
+
+### How the work flows
+
+The ledger doesn't run a process, but this is the loop it is designed to support:
+
+```text
+gather evidence → extract claims and link them, with quotes → notice claims that can't all hold
+  → record a contradiction → research the disagreement → add new evidence and links
+  → a reader weighs it all and answers, citing the records
+```
+
+Anyone, human or agent, can play any part of it:
+
+- **Intake:** finds and adds relevant evidence. Spotting a duplicate and adding nothing is a valid result.
+- **Claims and links:** turns evidence into specific claims and links them with quotes and reasons.
+- **Contradiction finding:** tells genuine incompatibility apart from differences in scope, time or meaning.
+- **Review:** documents mistakes (misreadings, unsupported links) by disputing them with grounded links.
+- **Follow-up research:** goes after a contradiction or an open question and brings back new evidence. It doesn't have to settle anything.
+- **Briefing:** answers a question from the collection alone, cites the records, says what the collection doesn't cover, and leaves a checked thinking proof (`check_proof`).
+
+Finding nothing is an honest outcome for every role. No one should manufacture a discovery to look productive.
+
 ## For people
 
 ### 1. Connect

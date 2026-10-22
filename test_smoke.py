@@ -389,6 +389,7 @@ def server(ids) -> None:
         r = client.get("/docs")
         assert r.status_code == 200 and "marked@15.0.12" in r.text and "{{" not in r.text
         md = client.get("/docs.md").text
+        assert "## Philosophy" in md and "### What this is not" in md and 'id="toc"' in r.text, "philosophy section and sidebar"
         assert "http://testserver/mcp" in md and L.TERMS["sha256"] in md and "publish" in md
         # The office is public and content-free: squiggles only, no ledger reads.
         office = client.get("/office")
