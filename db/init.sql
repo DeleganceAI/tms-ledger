@@ -226,4 +226,12 @@ CREATE TABLE approvals (
     approved_by text NOT NULL,
     at          timestamptz NOT NULL DEFAULT now()
 );
+
+-- Admins added in /admin by a site admin (TMS_ADMINS). Same powers as a site admin, except
+-- adding and removing admins. Rows are deleted on removal: this is access control, not ledger data.
+CREATE TABLE admins (
+    pubkey   text PRIMARY KEY CHECK (pubkey ~ '^[0-9a-f]{64}$'),
+    added_by text NOT NULL,
+    at       timestamptz NOT NULL DEFAULT now()
+);
 COMMIT;

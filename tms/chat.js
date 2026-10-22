@@ -1,5 +1,5 @@
 // Admin chat widget: a launcher at the bottom right of every page that opens a chat panel.
-// It renders nothing unless /dashboard/api/chat answers, which it only does for TMS_ADMINS.
+// It renders nothing unless /dashboard/api/chat answers, which it only does for admins.
 // One collection per chat, read-only; the conversation lives in this tab's sessionStorage.
 (() => {
   const KEY = 'tms-chat';

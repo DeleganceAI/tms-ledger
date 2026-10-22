@@ -385,6 +385,28 @@ def server(ids) -> None:
         client.cookies.set(W.COOKIE, W.make_cookie(PK[BOB]))
         assert client.get("/admin").status_code == 404
         client.cookies.clear()
+        # Admins from the admins table: a site admin adds one, who can do everything except manage admins
+        # and sees only their own collections; removing them takes effect at once.
+        bob_npub = E.bech32_encode("npub", PK[BOB])
+        client.cookies.set(W.COOKIE, W.make_cookie(PK[OWNER]))
+        assert client.post("/admin/admins", data={"npub": "not-a-key"}).status_code == 400
+        assert client.post("/admin/admins", data={"npub": bob_npub}, follow_redirects=False).status_code == 303
+        assert "Add admin" in client.get("/admin").text
+        client.cookies.set(W.COOKIE, W.make_cookie(PK[BOB]))
+        page = client.get("/admin")
+        assert page.status_code == 200 and "Only site admins" in page.text and "Add admin" not in page.text
+        assert "<td>other</td>" not in page.text and "<td>outside</td>" not in page.text, "an admin sees spend for their own collections only"
+        assert client.post("/admin/admins", data={"npub": bob_npub}).status_code == 404, "only site admins manage admins"
+        n = client.get("/dashboard/api/npubs")
+        assert n.status_code == 200 and not n.json()["admin"] and "outside" not in n.text and "other" not in n.text
+        assert client.get("/dashboard/api/chat").json()["collections"] == ["smoke"]
+        with L.connect() as conn:
+            assert L.is_admin(conn, PK[BOB]) and L.is_approved(conn, PK[BOB])
+        client.cookies.set(W.COOKIE, W.make_cookie(PK[OWNER]))
+        assert client.post(f"/admin/admins/{PK[BOB]}/remove", follow_redirects=False).status_code == 303
+        client.cookies.set(W.COOKIE, W.make_cookie(PK[BOB]))
+        assert client.get("/admin").status_code == 404 and client.get("/dashboard/api/chat").status_code == 404
+        client.cookies.clear()
         # Docs are public, with the live base URL and terms hash filled in.
         r = client.get("/docs")
         assert r.status_code == 200 and "marked@15.0.12" in r.text and "{{" not in r.text

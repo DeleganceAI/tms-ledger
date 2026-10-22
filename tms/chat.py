@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 
 import httpx
+from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
@@ -158,7 +159,10 @@ def turn(pubkey: str, collection: str, messages: list[dict]):
 
 def _admin(request: Request) -> str | None:
     pk = cookie_pubkey(request)
-    return pk if pk in L.ADMINS else None
+    if pk is None:
+        return None
+    with L.connect() as conn:
+        return pk if L.is_admin(conn, pk) else None
 
 
 def config(request: Request) -> JSONResponse:
@@ -171,7 +175,7 @@ def config(request: Request) -> JSONResponse:
 
 
 async def chat(request: Request):
-    pk = _admin(request)
+    pk = await run_in_threadpool(_admin, request)
     if pk is None:
         return JSONResponse({"error": "not found"}, status_code=404)
     body = await request.json()
