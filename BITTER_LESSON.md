@@ -47,8 +47,9 @@ The schema imposes several constraints independently of semantic judgment. Signa
 
 ### What this is not
 
+- **No entities.** The ledger does not define canonical domain entities; claims mention their subjects in plain text.
+- **No probabilities.** There are no probability, weight, or confidence fields. Numbers inside claims are ordinary content; retrieval scores are not belief estimates.
 - **Not a fact-checker or oracle.** Quote matching does not establish entailment; `check_proof` checks references and argument structure, including declared gaps.
-- **Not a confidence or scoring system.** Search ranks, distances, and link counts aid retrieval; they do not measure truth or credibility.
 - **Not a status tracker.** “Verified,” “debunked,” “open,” and “resolved” are reader conclusions, not ledger states.
 - **Not a graph that merges identities or propagates conclusions.** Distinct claims remain distinct records. Rebutting one record does not automatically invalidate another.
 - **Not an editable wiki.** Corrections add evidence-backed assertions while preserving the records earlier contributors relied on.
