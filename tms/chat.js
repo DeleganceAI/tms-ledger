@@ -23,11 +23,52 @@
   #tmsc .empty{color:var(--ink3);font-size:12px}
   #tmsc .msg{white-space:pre-wrap;word-break:break-word}#tmsc .msg.user{align-self:flex-end;background:var(--accent2);padding:6px 10px;border-radius:10px;max-width:85%}
   #tmsc .msg.err{color:var(--bad);font:11px var(--mono)}
+  #tmsc .md{white-space:normal}#tmsc .md p{white-space:pre-wrap}#tmsc .md>:first-child{margin-top:0}#tmsc .md>:last-child{margin-bottom:0}
+  #tmsc .md p,#tmsc .md ul,#tmsc .md ol,#tmsc .md pre,#tmsc .md blockquote,#tmsc .md table{margin:0 0 8px}#tmsc .md ul,#tmsc .md ol{padding-left:20px}
+  #tmsc .md h1,#tmsc .md h2,#tmsc .md h3,#tmsc .md h4{font-size:13.5px;margin:10px 0 4px}
+  #tmsc .md code{font:11.5px var(--mono);background:var(--bg);padding:0 3px;border-radius:3px}#tmsc .md pre code{display:block;padding:6px 8px;overflow:auto}
+  #tmsc .md blockquote{border-left:3px solid var(--line);padding-left:8px;color:var(--ink2)}
+  #tmsc .md table{border-collapse:collapse;font-size:12px}#tmsc .md td,#tmsc .md th{border:1px solid var(--line);padding:2px 6px}
+  #tmsc .md a{color:var(--accent)}
   #tmsc .tool{align-self:flex-start;border:1px solid var(--line);border-radius:6px;padding:2px 8px;font:11px var(--mono);color:var(--ink2)}
   #tmsc a.id{font-family:var(--mono);font-size:11px;color:var(--accent);background:var(--accent2);padding:0 3px;border-radius:3px;text-decoration:none}
   #tmsc form{display:flex;gap:6px;padding:8px;border-top:1px solid var(--line)}
   #tmsc textarea{flex:1;min-height:44px;max-height:140px;resize:vertical;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 8px}
   #tmsc .go{background:var(--accent);color:#fff;border:0;border-radius:6px;padding:0 14px;cursor:pointer;font-weight:600}#tmsc .go:disabled{opacity:.5;cursor:default}`;
+  // Answers can echo uploaded text, so rendered markdown keeps only these tags and safe links.
+  const MD_TAGS = new Set(['P', 'BR', 'HR', 'STRONG', 'B', 'EM', 'I', 'DEL', 'CODE', 'PRE', 'BLOCKQUOTE', 'UL', 'OL', 'LI',
+    'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'TABLE', 'THEAD', 'TBODY', 'TR', 'TH', 'TD', 'A']);
+  let markedReady = null;
+  const loadMarked = () => markedReady ??= new Promise(ok => {
+    if (window.marked) return ok();
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js'; s.onload = s.onerror = () => ok();
+    document.head.appendChild(s);
+  });
+  function idLinks(root) {  // 64-hex event ids in text become links to the record
+    const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT), nodes = [];
+    while (walk.nextNode()) if (/\b[0-9a-f]{64}\b/.test(walk.currentNode.data) && !walk.currentNode.parentElement.closest('a')) nodes.push(walk.currentNode);
+    for (const n of nodes) {
+      const span = document.createElement('span');
+      span.innerHTML = esc(n.data).replace(/\b[0-9a-f]{64}\b/g, id => `<a class="id" href="/dashboard#record=${id}" data-id="${id}" title="${id}">${id.slice(0, 10)}</a>`);
+      n.replaceWith(...span.childNodes);
+    }
+  }
+  function md(text) {
+    // a <template> is inert: nothing in it loads or runs (no <img onerror>) while it is cleaned
+    const tpl = document.createElement('template'), box = tpl.content;
+    if (!window.marked) { const p = document.createElement('p'); p.textContent = text; box.append(p); }
+    else tpl.innerHTML = marked.parse(text);
+    for (const el of [...box.querySelectorAll('*')].reverse()) {
+      if (!MD_TAGS.has(el.tagName)) { el.replaceWith(...el.childNodes); continue; }
+      const href = el.tagName === 'A' ? el.getAttribute('href') || '' : '';
+      for (const a of [...el.attributes]) el.removeAttribute(a.name);
+      if (/^(https?:\/\/|\/(?!\/)|#)/i.test(href)) { el.setAttribute('href', href); if (!href.startsWith('/') && !href.startsWith('#')) { el.target = '_blank'; el.rel = 'noopener noreferrer'; } }
+    }
+    idLinks(box);
+    const out = document.createElement('div'); out.append(box);
+    return out.innerHTML;
+  }
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
   let C = {open: false, col: '', messages: [], log: []}, model = '', cols = [], busy = false;
   try { Object.assign(C, JSON.parse(sessionStorage.getItem(KEY) || '{}')); } catch {}
@@ -81,12 +122,13 @@
     $('tmsc-json').onclick = () => download('json', JSON.stringify({collection: C.col, model, exported_at: new Date().toISOString(),
       messages: C.messages, log: C.log}, null, 2), 'application/json');
     if (C.open) show(true);
+    loadMarked().then(render);
 
     function render() {
       const ids = t => esc(t).replace(/\b[0-9a-f]{64}\b/g, id => `<a class="id" href="/dashboard#record=${id}" data-id="${id}" title="${id}">${id.slice(0, 10)}</a>`);
       $('tmsc-log').innerHTML = C.log.length ? C.log.map(e =>
         e.type === 'user' ? `<div class="msg user">${esc(e.content)}</div>`
-        : e.type === 'answer' ? `<div class="msg">${ids(e.content)}</div>`
+        : e.type === 'answer' ? `<div class="msg md">${md(e.content)}</div>`
         : e.type === 'error' ? `<div class="msg err">${esc(e.error)}</div>`
         : `<div class="tool">${esc(e.name)}${e.result == null ? ' …' : ` · ${esc(e.ms)}ms`}</div>`).join('')  // arguments and results go in the exports
         : '<div class="empty">Ask a question about this collection. The agent can only read it, and every tool call it makes shows here.</div>';
