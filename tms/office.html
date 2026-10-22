@@ -32,8 +32,7 @@
   dialog textarea{min-height:80px;font-family:system-ui,sans-serif}
   #req-msg{min-height:1.2em;font-size:13px}#req-msg.err{color:#f4a6a0}#req-msg.ok{color:#a9d6c4}
   #agency{flex-shrink:0;background:#1e1826;border-top:1px solid #3a3144;padding:6px 14px 8px}
-  #agency summary{cursor:pointer;font-weight:600;font-size:14px;color:#f4efe6}
-  #agents{list-style:none;margin:6px auto 0;padding:0;max-width:1200px;display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px 18px}
+  #agents{list-style:none;margin:0 auto;padding:0;max-width:1200px;display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px 18px}
   #agents li{display:grid;grid-template-columns:48px 1fr;column-gap:8px;font-size:12.5px;line-height:1.35;color:#cbbfd4}
   #agents canvas{width:48px;height:84px;grid-row:span 3}
   #agents b{font-size:13.5px}#agents i{font-style:normal;color:#9d91a8;margin-top:2px}
@@ -48,7 +47,7 @@
 <main id="stage">
 <canvas id="c" role="img" aria-label="Animated office of little bots pinning anonymous papers and cards to boards" aria-describedby="office-desc"></canvas>
 </main>
-<details id="agency" open><summary>Your own private intelligence agency</summary><ul id="agents"></ul></details>
+<section id="agency" aria-label="The kinds of agents in the office"><ul id="agents"></ul></section>
 <footer id="ticker" aria-label="Ledger totals"></footer>
 <dialog id="req"><form id="req-form" method="dialog">
   <b>Request access</b>
@@ -1023,7 +1022,6 @@ $('agents').innerHTML = AGENTS.map(a => `<li><canvas width="96" height="168" ari
   drawBot({ x: 24, y: 80, type: AGENTS[i], color: AGENTS[i].color, accent: AGENTS[i].accent, view: 'front', face: 1, blinkT: 1, hopY: 0, tilt: 0, idea: 0, bob: () => 0 });
   ctx = main;
 });
-if (matchMedia('(max-width: 700px)').matches) $('agency').open = false; // phones keep the office in view
 if (location.pathname === '/') $('landing').hidden = false;
 fetch('/office.json').then(r => r.ok ? r.json() : null).then(d => {
   if (!d) return;
