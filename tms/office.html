@@ -1048,8 +1048,10 @@ const RECORDS = [
     why: 'A label on the paper.', draw: () => {
       drawPaper(PAPER('ev'), 22, 25, 26, 32);
       ctx.fillStyle = '#6d8fd0'; rrect(26, 33, 18, 9, 2); ctx.fill(); ctx.fillStyle = '#fff'; ctx.fillRect(29, 36.5, 12, 1.6); } },
-  { name: 'Claim', does: 'One statement about the world, in its own words. A claim with no evidence yet is a hypothesis.',
-    why: 'The index cards; yellow ones are hypotheses.', draw: () => { drawPaper(CARD(), 24, 26, 34, 24); drawPin({ x: 24, y: 16 }, '#d8443b', .7); } },
+  { name: 'Claim', does: 'One statement about the world, in its own words.',
+    why: 'The index cards.', draw: () => { drawPaper(CARD(), 24, 26, 34, 24); drawPin({ x: 24, y: 16 }, '#d8443b', .7); } },
+  { name: 'Hypothesis', does: 'A claim nothing links to yet: an idea waiting for evidence.',
+    why: 'The yellow cards with no string.', draw: () => { drawPaper(PAPER('claim'), 24, 26, 34, 24); drawPin({ x: 24, y: 16 }, '#3f7fd8', .7); } },
   { name: 'Link', does: `Evidence that <span style="color:${REL_COL.S}">supports</span>, <span style="color:${REL_COL.R}">rebuts</span> or <span style="color:${REL_COL.Q}">qualifies</span> a claim, with a quote.`,
     why: 'The strings.', draw: () => {
       drawPaper(PAPER('ev'), 11, 30, 16, 20); drawPaper(CARD(), 37, 18, 20, 14);
@@ -1057,6 +1059,10 @@ const RECORDS = [
   { name: 'Contradiction', does: 'A special claim about two or more other claims, with the reason they cannot all hold.',
     why: 'The red zigzag.', draw: () => {
       drawPaper(CARD(), 14, 15, 22, 15); drawPaper(CARD(), 34, 35, 22, 15); zigzag([{ x: 15, y: 18 }, { x: 33, y: 32 }], 1); } },
+  { name: 'Collection', does: 'A private set of records with one owner; only members can see it.',
+    why: 'Each board shows a slice.', draw: () => {
+      ctx.fillStyle = '#a5714b'; rrect(4, 8, 40, 32, 4); ctx.fill(); ctx.fillStyle = '#d9aa70'; ctx.fillRect(8, 12, 32, 24);
+      drawPaper(CARD(), 17, 20, 11, 8, 0, 1, false); drawPaper(PAPER('ev'), 31, 27, 9, 11, 0, 1, false); drawString({ x: 31, y: 22 }, { x: 19, y: 18 }, REL_COL.S, 1, 1); } },
 ];
 $('records').innerHTML = RECORDS.map(r => `<li><canvas width="96" height="96" aria-hidden="true"></canvas><b>${r.name}</b><span>${r.does}</span><i>${r.why}</i></li>`).join('');
 [...$('records').querySelectorAll('canvas')].forEach((c, i) => {
