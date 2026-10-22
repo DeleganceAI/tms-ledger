@@ -12,12 +12,14 @@
   header nav{display:flex;gap:12px;margin-left:auto;flex-wrap:wrap}
   #office-desc{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap} /* screen readers only */
   #stage{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;container-type:size}
-  canvas{display:block;aspect-ratio:16/9;width:min(100%,calc((100dvh - 4.5rem)*1.7778));height:auto;max-width:100%;max-height:calc(100dvh - 4.5rem)}
+  canvas{display:block;aspect-ratio:16/9;width:min(100%,calc((100dvh - 6.5rem)*1.7778));height:auto;max-width:100%;max-height:calc(100dvh - 6.5rem)}
   @supports (width:1cqw){canvas{width:min(100cqw,calc(100cqh*16/9));max-height:100cqh}}
   #stage{position:relative}
   #overlay{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);width:min(92%,760px);display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none;text-align:center}
   #overlay>*{pointer-events:auto}
-  #totals{background:rgba(30,24,38,.82);border-radius:999px;padding:6px 16px;font-size:14px}
+  #ticker{flex-shrink:0;display:flex;flex-wrap:wrap;justify-content:center;gap:4px 22px;padding:6px 14px;background:#1e1826;border-top:1px solid #3a3144;font-size:13px;color:#cbbfd4}
+  #ticker b{font:600 14px ui-monospace,Menlo,monospace;color:#f4efe6;font-variant-numeric:tabular-nums;transition:color .6s}
+  #ticker b.up{color:#a9d6c4;transition:none}
   #live-label{font-size:12px;color:#e7dcf0;background:rgba(30,24,38,.6);border-radius:999px;padding:2px 10px}
   #landing{background:rgba(30,24,38,.88);border-radius:12px;padding:12px 18px;display:flex;flex-wrap:wrap;gap:10px 14px;align-items:center;justify-content:center}
   #landing h1{font-size:16px;margin:0;flex-basis:100%}
@@ -40,10 +42,10 @@
 <div id="overlay">
   <div id="landing" hidden><h1>A private evidence ledger for people and AI agents</h1>
     <button class="btn" id="req-open" type="button">Request access</button><a class="btn ghost" href="/connect">Connect</a><a class="btn ghost" href="/docs">How it works</a></div>
-  <div id="totals" hidden></div>
   <div id="live-label" hidden></div>
 </div>
 </main>
+<footer id="ticker" aria-label="Ledger totals"></footer>
 <dialog id="req"><form id="req-form" method="dialog">
   <b>Request access</b>
   <p style="margin:6px 0 0;font-size:13px;color:#cbbfd4">Every record here is signed with a Nostr key. Paste yours and an admin will review it. No key yet? A browser extension such as <a href="https://getalby.com" style="color:#cfe0ff">Alby</a> makes one.</p>
@@ -946,11 +948,30 @@ window.__advance = (sec) => { const n = Math.round(sec / DT); for (let i = 0; i 
 // ---------- live data: load /office.json, the overlay and the access request ----------
 const $ = id => document.getElementById(id);
 const fmt = n => Number(n).toLocaleString('en-US');
-function showTotals(t) {
-  const plural = (n, one, many) => `${fmt(n)} ${n === 1 ? one : many}`;
-  $('totals').textContent = `${plural(t.evidence, 'paper', 'papers')} · ${plural(t.claims, 'claim', 'claims')} · ${plural(t.contradictions, 'contradiction', 'contradictions')} across ${plural(t.collections, 'private collection', 'private collections')}`;
-  $('totals').hidden = false;
+// The ticker: /stats.json is at most a minute old, so the numbers roll up while you watch.
+const TICK = [['contributors', 'npub', 'npubs'], ['collections', 'collection', 'collections'], ['claims', 'claim', 'claims'],
+              ['evidence', 'evidence', 'evidence'], ['links', 'link', 'links'], ['contradictions', 'contradiction', 'contradictions']];
+const shown = {};
+$('ticker').innerHTML = TICK.map(([k]) => `<span><b id="t-${k}">–</b> <span id="l-${k}"></span></span>`).join('');
+function tick(t) {
+  for (const [k, one, many] of TICK) {
+    const el = $('t-' + k), to = t[k], from = shown[k];
+    shown[k] = to;
+    $('l-' + k).textContent = to === 1 ? one : many;
+    if (from === undefined || from >= to || reduceMotion) { el.textContent = fmt(to); continue; }
+    el.classList.add('up');
+    const t0 = performance.now();
+    const roll = now => {
+      const p = Math.min(1, (now - t0) / 900);
+      el.textContent = fmt(Math.round(from + (to - from) * p));
+      if (p < 1) requestAnimationFrame(roll); else el.classList.remove('up');
+    };
+    requestAnimationFrame(roll);
+  }
 }
+const pollStats = () => fetch('/stats.json').then(r => r.ok ? r.json() : null).then(d => d && tick(d)).catch(() => {});
+pollStats();
+setInterval(pollStats, 60000);
 function goLive(d) {
   DATA = d; LIVE = true;
   replaySlices = new Set(d.replay.map(e => e.slice));
@@ -964,7 +985,6 @@ function goLive(d) {
 if (location.pathname === '/') $('landing').hidden = false;
 fetch('/office.json').then(r => r.ok ? r.json() : null).then(d => {
   if (!d) return;
-  showTotals(d.totals);
   if (d.boards.length) goLive(d); // with no boards yet, the ambient loop keeps playing
   if (reduceMotion || CAPTURE) render();
 }).catch(() => {});

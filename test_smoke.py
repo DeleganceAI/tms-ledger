@@ -367,6 +367,11 @@ def server(ids) -> None:
         assert 'id="landing"' in landing.text and "Request access" in landing.text and client.get("/connect").status_code == 200
         r = client.get("/office.json", headers={"Accept-Encoding": "gzip"})
         assert r.status_code == 200 and r.headers["cache-control"].startswith("public") and "totals" in r.json()
+        # The ticker: six global counts and nothing else, at most a minute old.
+        st = client.get("/stats.json")
+        assert st.status_code == 200 and st.headers["cache-control"] == "public, max-age=60" and 'id="ticker"' in office.text
+        assert set(st.json()) == {"contributors", "collections", "claims", "evidence", "links", "contradictions"}
+        assert all(type(v) is int for v in st.json().values()) and st.json() == r.json()["totals"]
         access(client, W)
 
     office_data()

@@ -1,4 +1,5 @@
 """/office.json: anonymous, hourly data for the office animation (OFFICE.md sections 2 and 4).
+/stats.json: the six global counts for the ticker, at most a minute old.
 
 Anonymous by construction. The output holds only counts, buckets, node kinds, local indices,
 relation letters, and seconds-into-the-hour. No slugs, pubkeys, record ids, text or timestamps.
@@ -16,7 +17,7 @@ from collections import deque
 from datetime import UTC, datetime, timedelta
 
 from starlette.concurrency import run_in_threadpool
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from . import ledger as L
@@ -28,6 +29,14 @@ IDLE_SLICES = 3        # per board, rooted at its most recently active claims
 MAX_REPLAY = 200       # events from the previous hour
 MAX_OFF_EDGE = 6       # strings drawn running off the board from one node
 REL = {"SUPPORTS": "S", "REBUTS": "R", "QUALIFIES": "Q"}
+# contributors: pubkeys that have published at least one record, human or agent
+TOTALS_SQL = """SELECT
+  (SELECT count(*) FROM events WHERE kind = 4701) AS evidence,
+  (SELECT count(*) FROM events WHERE kind = 4702) AS claims,
+  (SELECT count(*) FROM events WHERE kind = 4703) AS links,
+  (SELECT count(*) FROM events WHERE kind = 4704) AS contradictions,
+  (SELECT count(*) FROM collections) AS collections,
+  (SELECT count(DISTINCT pubkey) FROM events WHERE kind IN (4701, 4702, 4703, 4704)) AS contributors"""
 
 
 def confusion(claims: int, contradictions: int) -> int:
@@ -105,13 +114,7 @@ def compute(conn, now: datetime | None = None) -> dict:
     hour = now.replace(minute=0, second=0, microsecond=0)
     start = hour - timedelta(hours=1)
     rng = random.Random(secrets.randbits(64))
-    totals = conn.execute("""SELECT
-          (SELECT count(*) FROM events WHERE kind = 4701) AS evidence,
-          (SELECT count(*) FROM events WHERE kind = 4702) AS claims,
-          (SELECT count(*) FROM events WHERE kind = 4703) AS links,
-          (SELECT count(*) FROM events WHERE kind = 4704) AS contradictions,
-          (SELECT count(*) FROM collections) AS collections,
-          (SELECT count(DISTINCT pubkey) FROM events WHERE kind IN (4701, 4702, 4703, 4704)) AS contributors""").fetchone()
+    totals = conn.execute(TOTALS_SQL).fetchone()
     sizes = conn.execute("""SELECT collection, count(*) AS n FROM events
                             WHERE kind IN (4701, 4702, 4703, 4704) GROUP BY collection""").fetchall()
     boards, replay = [], []
@@ -199,4 +202,24 @@ async def office_json(request) -> Response:
     return Response(body, media_type="application/json", headers=headers)
 
 
-routes = [Route("/office.json", office_json)]
+_stats: dict = {}
+_stats_lock = threading.Lock()
+
+
+def stats() -> dict:
+    """The six global counts for the ticker, at most a minute old."""
+    # ponytail: six count(*) scans once a minute; keep a counters table updated by publish
+    # when events reach the millions.
+    minute = int(time.time() // 60)
+    with _stats_lock:
+        if _stats.get("minute") != minute:
+            with L.connect() as conn:
+                _stats.update(minute=minute, body=dict(conn.execute(TOTALS_SQL).fetchone()))
+        return _stats["body"]
+
+
+async def stats_json(request) -> JSONResponse:
+    return JSONResponse(await run_in_threadpool(stats), headers={"Cache-Control": "public, max-age=60"})
+
+
+routes = [Route("/office.json", office_json), Route("/stats.json", stats_json)]
