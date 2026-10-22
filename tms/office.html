@@ -20,7 +20,6 @@
   #ticker{flex-shrink:0;display:flex;flex-wrap:wrap;justify-content:center;gap:4px 22px;padding:6px 14px;background:#1e1826;border-top:1px solid #3a3144;font-size:13px;color:#cbbfd4}
   #ticker b{font:600 14px ui-monospace,Menlo,monospace;color:#f4efe6;font-variant-numeric:tabular-nums;transition:color .6s}
   #ticker b.up{color:#a9d6c4;transition:none}
-  #live-label{font-size:12px;color:#e7dcf0;background:rgba(30,24,38,.6);border-radius:999px;padding:2px 10px}
   #landing{background:rgba(30,24,38,.88);border-radius:12px;padding:12px 18px;display:flex;flex-wrap:wrap;gap:10px 14px;align-items:center;justify-content:center}
   #landing h1{font-size:16px;margin:0;flex-basis:100%}
   .btn{font:inherit;padding:7px 14px;border-radius:7px;border:1px solid #8ab6f9;background:#8ab6f9;color:#1e1826;cursor:pointer;text-decoration:none;font-weight:600}
@@ -42,7 +41,6 @@
 <div id="overlay">
   <div id="landing" hidden><h1>A private evidence ledger for people and AI agents</h1>
     <button class="btn" id="req-open" type="button">Request access</button><a class="btn ghost" href="/connect">Connect</a><a class="btn ghost" href="/docs">How it works</a></div>
-  <div id="live-label" hidden></div>
 </div>
 </main>
 <footer id="ticker" aria-label="Ledger totals"></footer>
@@ -979,8 +977,6 @@ function goLive(d) {
   if (w) Object.assign(w, { role: 'watcher', cur: null, ponder: null, spot: null, tilt: 0, arm: null, gen: ROLES.watcher(w) });
   bots.filter(b => b.role === 'pinner').forEach(b => { b.speed *= 1.6; }); // replaying an hour: keep the pinners brisk
   idleCycle(); view.idleT = 10;
-  $('live-label').textContent = d.replay.length ? 'Replay: the last hour in the office' : 'A quiet hour in the office';
-  $('live-label').hidden = false;
 }
 if (location.pathname === '/') $('landing').hidden = false;
 fetch('/office.json').then(r => r.ok ? r.json() : null).then(d => {

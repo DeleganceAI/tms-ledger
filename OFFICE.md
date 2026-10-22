@@ -61,7 +61,7 @@ When a bot adds something, it shows a speech bubble:
 - **Anonymous by construction.** Board and slice IDs are random each hour, and boards are shuffled. There are no slugs, owners, pubkeys, text, record IDs or timestamps, only `t`, a seconds offset within the hour.
 - **Small collections:** under 10 records, a collection counts toward `totals` but gets no board.
 - **Size:** a few idle slices per board plus one slice per replay event, capped at about 200 replay events per hour. The JSON stays small however big the ledger gets.
-- **Replay:** the previous hour's events, played back at real pace or sped up, through the `botOffice` hooks. The page labels it as a replay ("the last hour in the office").
+- **Replay:** the previous hour's events, played back at real pace or sped up, through the `botOffice` hooks.
 
 ## 5. Landing page
 
