@@ -200,14 +200,15 @@ def npubs(conn, pk: str, cols: list[str]):
     """Every key known to the system with its cached profile, for admins and collection owners.
     Admins see every collection a key belongs to; an owner sees memberships in their own
     collections only, so other private collections' names never reach them."""
-    admin = pk in L.ADMINS
-    if not admin and conn.execute("SELECT 1 FROM collections WHERE owner = %s", (pk,)).fetchone() is None:
+    if not L.is_admin(conn, pk) and conn.execute("SELECT 1 FROM collections WHERE owner = %s", (pk,)).fetchone() is None:
         return JSONResponse({"error": "admins and collection owners only"}, status_code=403)
+    # Only site admins see every collection; added admins, like owners, see their own.
+    admin = pk in L.ADMINS
     scope = [r["slug"] for r in conn.execute("SELECT slug FROM collections")] if admin else cols
     env = sorted(L.APPROVED | L.ADMINS)
     rows = _rows(conn, """
         WITH keys AS (SELECT pubkey FROM events UNION SELECT pubkey FROM members
-                      UNION SELECT pubkey FROM approvals UNION SELECT unnest(%(env)s::text[])),
+                      UNION SELECT pubkey FROM approvals UNION SELECT pubkey FROM admins UNION SELECT unnest(%(env)s::text[])),
         mem AS (SELECT m.pubkey,
                        array_agg(m.collection ORDER BY m.collection) FILTER (WHERE c.owner = m.pubkey) AS owns,
                        array_agg(m.collection ORDER BY m.collection) FILTER (WHERE c.owner <> m.pubkey) AS member_of

@@ -39,7 +39,7 @@ EMBED_DIM = 4096
 EMBED_PRICE_PER_MTOK = float(os.environ.get("EMBED_PRICE_PER_MTOK", "0.01"))  # USD; DeepInfra's Qwen3-Embedding-8B rate
 QUERY_PREFIX = "Instruct: Given a question or statement, retrieve claims relevant to it\nQuery: "
 APPROVED = {E.pubkey_hex(p) for p in re.split(r"[\s,]+", os.environ.get("TMS_APPROVED", "")) if p}
-ADMINS = {E.pubkey_hex(p) for p in re.split(r"[\s,]+", os.environ.get("TMS_ADMINS", "")) if p}
+ADMINS = {E.pubkey_hex(p) for p in re.split(r"[\s,]+", os.environ.get("TMS_ADMINS", "")) if p}  # site admins
 SERVER_PUBKEY = E.pubkey_of(os.environ["TMS_SERVER_NSEC"]) if os.environ.get("TMS_SERVER_NSEC") else None
 TERMS_TEXT = (Path(__file__).resolve().parent.parent / "TERMS.md").read_bytes()
 TERMS = {"version": re.search(rb"Version (\S+)", TERMS_TEXT).group(1).decode(),
@@ -246,9 +246,15 @@ def my_collections(conn, pubkey: str) -> list[str]:
         "SELECT collection FROM members WHERE pubkey = %s ORDER BY collection", (pubkey,))]
 
 
+def is_admin(conn, pubkey: str | None) -> bool:
+    """A site admin (TMS_ADMINS) or an admin a site admin added in /admin (the admins table)."""
+    return bool(pubkey) and (pubkey in ADMINS or conn.execute(
+        "SELECT 1 FROM admins WHERE pubkey = %s", (pubkey,)).fetchone() is not None)
+
+
 def is_approved(conn, pubkey: str) -> bool:
-    """Approved by the operator: TMS_ADMINS, TMS_APPROVED (env, for bootstrap), or the approvals table."""
-    return pubkey in APPROVED or pubkey in ADMINS or conn.execute(
+    """Approved by the operator: an admin, TMS_APPROVED (env, for bootstrap), or the approvals table."""
+    return pubkey in APPROVED or is_admin(conn, pubkey) or conn.execute(
         "SELECT 1 FROM approvals WHERE pubkey = %s", (pubkey,)).fetchone() is not None
 
 

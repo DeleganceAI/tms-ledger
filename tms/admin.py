@@ -1,12 +1,14 @@
-"""Operator page at /admin: access requests, DeepInfra spend (embeddings and chat), users, and a few context numbers.
+"""Operator page at /admin: access requests, admins, DeepInfra spend (embeddings and chat), users, and a few context numbers.
 
-Admins are the pubkeys in TMS_ADMINS, logged in with the same cookie as the other pages.
+Site admins are the pubkeys in TMS_ADMINS; they can add and remove admins here (the admins table),
+who can do everything else. Both log in with the same cookie as the other pages.
 Everyone else gets a 404, so the page's existence isn't advertised. Plain tables, server-rendered.
 """
 from __future__ import annotations
 
 from html import escape
 
+from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from starlette.routing import Route
@@ -25,7 +27,7 @@ SPEND_SQL = """SELECT
   FROM embed_calls"""
 
 USERS_SQL = """WITH keys AS (
-    SELECT unnest(%s::text[]) AS pubkey UNION SELECT pubkey FROM approvals
+    SELECT unnest(%s::text[]) AS pubkey UNION SELECT pubkey FROM approvals UNION SELECT pubkey FROM admins
     UNION SELECT pubkey FROM members UNION SELECT pubkey FROM events)
   SELECT k.pubkey, p.name, p.about,
          (SELECT count(*) FROM members m WHERE m.pubkey = k.pubkey) AS collections,
@@ -37,20 +39,27 @@ USERS_SQL = """WITH keys AS (
   ORDER BY last_activity DESC NULLS LAST, k.pubkey"""
 
 
-def report(conn) -> dict:
+def report(conn, viewer: str) -> dict:
+    # Site admins see spend for every collection; added admins only for the collections they're in.
+    cols = None if viewer in L.ADMINS else L.my_collections(conn, viewer)
     users = conn.execute(USERS_SQL, (sorted(L.APPROVED | L.ADMINS),)).fetchall()
     return {
         "requests": conn.execute("""SELECT id, npub, note, at FROM access_requests
             WHERE status = 'pending' ORDER BY at""").fetchall(),
         "approvals": conn.execute("""SELECT a.pubkey, a.at, p.name, (SELECT name FROM profiles q WHERE q.pubkey = a.approved_by) AS by_name,
               a.approved_by FROM approvals a LEFT JOIN profiles p ON p.pubkey = a.pubkey ORDER BY a.at DESC""").fetchall(),
+        "admins": conn.execute("""SELECT a.pubkey, a.at, p.name, (SELECT name FROM profiles q WHERE q.pubkey = a.added_by) AS by_name,
+              a.added_by FROM admins a LEFT JOIN profiles p ON p.pubkey = a.pubkey ORDER BY a.at""").fetchall(),
+        "site_admins": [{"pubkey": k, "name": (conn.execute("SELECT name FROM profiles WHERE pubkey = %s", (k,)).fetchone() or {}).get("name")}
+                        for k in sorted(L.ADMINS)],
         "spend": conn.execute(SPEND_SQL).fetchone(),
         "by_pubkey": conn.execute("""SELECT e.pubkey, p.name, count(*) AS calls, sum(e.tokens) AS tokens, sum(e.cost_usd) AS cost
             FROM embed_calls e LEFT JOIN profiles p ON p.pubkey = e.pubkey GROUP BY 1, 2 ORDER BY cost DESC, calls DESC""").fetchall(),
         "by_model": conn.execute("""SELECT model, count(*) AS calls, sum(tokens) AS tokens, sum(cost_usd) AS cost
             FROM embed_calls GROUP BY 1 ORDER BY cost DESC, calls DESC""").fetchall(),
         "by_collection": conn.execute("""SELECT collection, count(*) AS calls, sum(tokens) AS tokens, sum(cost_usd) AS cost
-            FROM embed_calls GROUP BY 1 ORDER BY cost DESC, calls DESC""").fetchall(),
+            FROM embed_calls WHERE %(cols)s::text[] IS NULL OR collection = ANY(%(cols)s)
+            GROUP BY 1 ORDER BY cost DESC, calls DESC""", {"cols": cols}).fetchall(),
         "users": users,
         "db_bytes": conn.execute("SELECT pg_database_size(current_database()) AS b").fetchone()["b"],
         "per_day": conn.execute("""SELECT d::date AS day, (SELECT count(*) FROM events e
@@ -79,7 +88,7 @@ def _who(pubkey, name) -> str:
     return f'<span title="{escape(E.bech32_encode("npub", pubkey))}">{label}</span>'
 
 
-def render(r: dict) -> str:
+def render(r: dict, viewer: str) -> str:
     s = r["spend"]
     when = lambda v: v.strftime("%Y-%m-%d %H:%M") if v else "—"  # noqa: E731
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -91,7 +100,7 @@ a{{color:var(--accent)}}h1{{font-size:18px}}h2{{font-size:13px;letter-spacing:.0
 table{{border-collapse:collapse;background:var(--panel);width:100%;margin-bottom:6px}}td,th{{text-align:left;padding:5px 8px;border:1px solid var(--line);vertical-align:top}}
 th{{font-size:12px;color:var(--ink3)}}td{{font-variant-numeric:tabular-nums}}.mono{{font-family:var(--mono);font-size:12px}}
 form{{display:inline}}button{{font:inherit;padding:3px 10px;border-radius:5px;border:1px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer}}
-button.ghost{{background:none;color:var(--accent)}}td.note{{white-space:pre-wrap;max-width:420px}}
+button.ghost{{background:none;color:var(--accent)}}form.add{{display:block;margin:6px 0}}form.add input{{font:13px var(--mono);padding:4px 6px;border:1px solid var(--line);border-radius:5px;background:var(--panel);color:var(--ink);max-width:100%}}td.note{{white-space:pre-wrap;max-width:420px}}
 </style></head><body><main>
 <h1>TMS admin</h1><p><a href="/">Home</a> · <a href="/dashboard">Dashboard</a> · <a href="/office">Office</a> · <a href="/docs">Docs</a></p>
 <h2>Access requests ({len(r["requests"])} pending)</h2>
@@ -105,6 +114,16 @@ button.ghost{{background:none;color:var(--accent)}}td.note{{white-space:pre-wrap
         [[escape(a["name"] or "—"), f'<span class="mono">{escape(E.bech32_encode("npub", a["pubkey"]))}</span>',
           _who(a["approved_by"], a["by_name"]), when(a["at"])] for a in r["approvals"]])}
 <p class="mono">Access = TMS_ADMINS + TMS_APPROVED ({len(L.APPROVED | L.ADMINS)} from the environment) + the keys approved here.</p>
+<h2>Admins</h2>
+{_table(["Who", "npub", "Role", "Added by", "When", ""],
+        [[escape(a["name"] or "—"), f'<span class="mono">{escape(E.bech32_encode("npub", a["pubkey"]))}</span>', "site admin (TMS_ADMINS)", "—", "—", ""]
+         for a in r["site_admins"]] +
+        [[escape(a["name"] or "—"), f'<span class="mono">{escape(E.bech32_encode("npub", a["pubkey"]))}</span>', "admin",
+          _who(a["added_by"], a["by_name"]), when(a["at"]),
+          f'<form method="post" action="/admin/admins/{a["pubkey"]}/remove"><button class="ghost">Remove</button></form>' if viewer in L.ADMINS else ""]
+         for a in r["admins"]])}
+{'<form method="post" action="/admin/admins" class="add"><input name="npub" placeholder="npub1… to make an admin" required size="66"> <button>Add admin</button></form>'
+ if viewer in L.ADMINS else '<p class="mono">Only site admins (TMS_ADMINS) can add or remove admins.</p>'}
 <h2>DeepInfra spend (embeddings and chat)</h2>
 {_table(["Today (UTC)", "7 days", "30 days", "All time", "Tokens", "Calls"],
         [[_usd(s["today"]), _usd(s["last_7_days"]), _usd(s["last_30_days"]), _usd(s["all_time"]), f"{s['tokens']:,}", s["calls"]]])}
@@ -128,20 +147,51 @@ button.ghost{{background:none;color:var(--accent)}}td.note{{white-space:pre-wrap
 
 def admin(request: Request):
     pubkey = cookie_pubkey(request)
+    with L.connect() as conn:
+        if not L.is_admin(conn, pubkey):
+            return PlainTextResponse("Not Found", status_code=404)
+        return HTMLResponse(render(report(conn, pubkey), pubkey))
+
+
+def _same_origin(request: Request) -> bool:
+    origin = request.headers.get("origin")
+    return not origin or origin == str(request.base_url).rstrip("/")  # the cookie is SameSite=Lax too
+
+
+async def admins(request: Request):
+    """Site admins only: add an admin (POST /admin/admins, form field npub) or remove one."""
+    pubkey = cookie_pubkey(request)
     if pubkey is None or pubkey not in L.ADMINS:
         return PlainTextResponse("Not Found", status_code=404)
-    with L.connect() as conn:
-        return HTMLResponse(render(report(conn)))
+    if not _same_origin(request):
+        return PlainTextResponse("cross-site request refused", status_code=403)
+    target = request.path_params.get("pubkey")
+    if target is None:
+        try:
+            target = E.pubkey_hex(str((await request.form()).get("npub", "")).strip())
+        except ValueError as err:
+            return PlainTextResponse(f"not a valid npub or hex key: {err}", status_code=400)
+
+    def write():
+        with L.connect() as conn:
+            if request.path_params.get("pubkey"):
+                conn.execute("DELETE FROM admins WHERE pubkey = %s", (target,))
+            else:
+                conn.execute("INSERT INTO admins (pubkey, added_by) VALUES (%s, %s) ON CONFLICT DO NOTHING", (target, pubkey))
+    await run_in_threadpool(write)
+    return RedirectResponse("/admin", status_code=303)
 
 
 def decide(request: Request):
     """Approve or dismiss a pending request. Approval writes the approvals table, so it takes
     effect on the key's next call, with no redeploy."""
     pubkey = cookie_pubkey(request)
-    if pubkey is None or pubkey not in L.ADMINS or request.path_params["action"] not in ("approve", "dismiss"):
+    if request.path_params["action"] not in ("approve", "dismiss"):
         return PlainTextResponse("Not Found", status_code=404)
-    origin = request.headers.get("origin")
-    if origin and origin != str(request.base_url).rstrip("/"):  # the cookie is SameSite=Lax too
+    with L.connect() as conn:
+        if not L.is_admin(conn, pubkey):
+            return PlainTextResponse("Not Found", status_code=404)
+    if not _same_origin(request):
         return PlainTextResponse("cross-site request refused", status_code=403)
     rid, action = int(request.path_params["id"]), request.path_params["action"]
     status = {"approve": "approved", "dismiss": "dismissed"}[action]
@@ -157,4 +207,6 @@ def decide(request: Request):
 routes = [  # sync handlers: Starlette runs them in its threadpool
     Route("/admin", admin),
     Route("/admin/requests/{id:int}/{action:str}", decide, methods=["POST"]),
+    Route("/admin/admins", admins, methods=["POST"]),
+    Route("/admin/admins/{pubkey:str}/remove", admins, methods=["POST"]),
 ]
