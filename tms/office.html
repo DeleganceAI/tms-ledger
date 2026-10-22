@@ -12,8 +12,8 @@
   header nav{display:flex;gap:12px;margin-left:auto;flex-wrap:wrap}
   #office-desc{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap} /* screen readers only */
   #stage{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;container-type:size}
-  canvas{display:block;aspect-ratio:16/9;width:min(100%,calc((100dvh - 6.5rem)*1.7778));height:auto;max-width:100%;max-height:calc(100dvh - 6.5rem)}
-  @supports (width:1cqw){canvas{width:min(100cqw,calc(100cqh*16/9));max-height:100cqh}}
+  #c{display:block;aspect-ratio:16/9;width:min(100%,calc((100dvh - 6.5rem)*1.7778));height:auto;max-width:100%;max-height:calc(100dvh - 6.5rem)}
+  @supports (width:1cqw){#c{width:min(100cqw,calc(100cqh*16/9));max-height:100cqh}}
   #stage{position:relative}
   #overlay{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);width:min(92%,760px);display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none;text-align:center}
   #overlay>*{pointer-events:auto}
@@ -21,7 +21,8 @@
   #ticker b{font:600 14px ui-monospace,Menlo,monospace;color:#f4efe6;font-variant-numeric:tabular-nums;transition:color .6s}
   #ticker b.up{color:#a9d6c4;transition:none}
   #landing{background:rgba(30,24,38,.88);border-radius:12px;padding:12px 18px;display:flex;flex-wrap:wrap;gap:10px 14px;align-items:center;justify-content:center}
-  #landing h1{font-size:16px;margin:0;flex-basis:100%}
+  #landing h1{font-size:18px;margin:0;flex-basis:100%}
+  #landing p{margin:-8px 0 0;flex-basis:100%;font-size:13px;color:#cbbfd4}
   .btn{font:inherit;padding:7px 14px;border-radius:7px;border:1px solid #8ab6f9;background:#8ab6f9;color:#1e1826;cursor:pointer;text-decoration:none;font-weight:600}
   .btn.ghost{background:none;color:#cfe0ff}
   dialog{background:#2b2433;color:#f4efe6;border:1px solid #4a3f57;border-radius:12px;width:min(92vw,440px)}
@@ -30,19 +31,26 @@
   dialog input,dialog textarea{font:13px/1.4 ui-monospace,Menlo,monospace;color:#f4efe6;background:#1e1826;border:1px solid #4a3f57;border-radius:6px;padding:7px}
   dialog textarea{min-height:80px;font-family:system-ui,sans-serif}
   #req-msg{min-height:1.2em;font-size:13px}#req-msg.err{color:#f4a6a0}#req-msg.ok{color:#a9d6c4}
+  #agency{flex-shrink:0;background:#1e1826;border-top:1px solid #3a3144;padding:6px 14px 8px}
+  #agency summary{cursor:pointer;font-weight:600;font-size:14px;color:#f4efe6}
+  #agents{list-style:none;margin:6px auto 0;padding:0;max-width:1200px;display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px 18px}
+  #agents li{display:grid;grid-template-columns:48px 1fr;column-gap:8px;font-size:12.5px;line-height:1.35;color:#cbbfd4}
+  #agents canvas{width:48px;height:84px;grid-row:span 3}
+  #agents b{font-size:13.5px}#agents i{font-style:normal;color:#9d91a8;margin-top:2px}
   [hidden]{display:none!important}
 </style>
 </head>
 <body>
 <header><b>TMS ledger</b><nav><a href="/">Home</a><a href="/submit">Submit</a><a href="/dashboard">Dashboard</a><a href="/docs">Docs</a><a href="/office" aria-current="page">Office</a><a href="/connect">Connect</a></nav>
-<p id="office-desc">Little bots file papers, pin them to boards and string them together. Each board is a slice of a private collection, shown by its shape only: index cards are claims, papers are evidence, green string supports, red rebuts, amber qualifies, and a red zigzag marks a contradiction. A yellow card with no string is a hypothesis. Every mark is a squiggle; no text, names or records are shown.</p></header>
+<p id="office-desc">Little bots file papers, pin them to boards and string them together. Each board is a slice of a private collection, shown by its shape only: index cards are claims, papers are evidence, green string supports, red rebuts, amber qualifies, and a red zigzag marks a contradiction. A yellow card with no string is a hypothesis. The bots are five kinds of agent, listed below the office. Every mark is a squiggle; no text, names or records are shown.</p></header>
 <main id="stage">
 <canvas id="c" role="img" aria-label="Animated office of little bots pinning anonymous papers and cards to boards" aria-describedby="office-desc"></canvas>
 <div id="overlay">
-  <div id="landing" hidden><h1>A private evidence ledger for people and AI agents</h1>
+  <div id="landing" hidden><h1>Deploy your own intelligence agency</h1><p>A private evidence ledger for people and AI agents</p>
     <button class="btn" id="req-open" type="button">Request access</button><a class="btn ghost" href="/connect">Connect</a><a class="btn ghost" href="/docs">How it works</a></div>
 </div>
 </main>
+<details id="agency" open><summary>Your own private intelligence agency</summary><ul id="agents"></ul></details>
 <footer id="ticker" aria-label="Ledger totals"></footer>
 <dialog id="req"><form id="req-form" method="dialog">
   <b>Request access</b>
@@ -76,7 +84,8 @@
 */
 (() => {
 const W = 960, H = 540;
-const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const cv = document.getElementById('c');
+let ctx = cv.getContext('2d'); // swapped briefly to draw the agency legend
 const params = new URLSearchParams(location.search);
 const CAPTURE = params.has('capture');
 const AUTO = params.get('auto') !== '0';
@@ -346,8 +355,8 @@ const call = fn => ({ type: 'call', fn });
 
 let botId = 0;
 class Bot {
-  constructor(role, x, y, color, accent) {
-    Object.assign(this, { id: botId++, role, x, y, color, accent, face: 1, view: 'front', moving: false, walk: rr(0, 6), speed: rr(62, 78),
+  constructor(role, x, y, type) {
+    Object.assign(this, { id: botId++, role, x, y, type, color: type.color, accent: type.accent, face: 1, view: 'front', moving: false, walk: rr(0, 6), speed: rr(62, 78),
       carry: null, carryScale: 1, arm: null, mood: null, ponder: null, idea: 0, hopY: 0, tilt: 0, blinkT: rr(1, 4), cur: null });
     this.gen = ROLES[role](this);
   }
@@ -522,15 +531,25 @@ const ROLES = {
   },
 };
 
-const bots = [
-  new Bot('filer', 210, 365, '#f28b82', '#c95d55'),
-  new Bot('filer', 320, 410, '#8fd3b6', '#5aa588'),
-  new Bot('filer', 430, 355, '#f6d776', '#c9a842'),
-  new Bot('pinner', 640, 380, '#8ab6f9', '#5a86c9'),
-  new Bot('pinner', 790, 405, '#f7b68a', '#c98858'),
-  new Bot('ponderer', 700, 430, '#b9a6f2', '#8a78c4'),
-  new Bot('ponderer', 860, 395, '#6cc5c2', '#3f9795'),
+// The five kinds of agent. Each visit deals them out at random: a bot's look doesn't track what it does on screen.
+const AGENTS = [
+  { key: 'miner', name: 'Claim Miner', color: '#f6c25a', accent: '#b98a2a',
+    does: 'Reads evidence documents and pulls out new claims, deduped against what is already there.', why: 'So a collection doesn\u2019t fill up with near-copies.' },
+  { key: 'linker', name: 'Linker', color: '#8fd3a0', accent: '#4f9a63',
+    does: 'Goes one claim at a time, stringing existing evidence to it as support or contradiction.', why: 'So claims stop sitting there unconnected.' },
+  { key: 'gap', name: 'Gap Finder', color: '#f28b82', accent: '#c95d55',
+    does: 'Looks for what is missing, especially counter-evidence and contradictions.', why: 'One-sided collections need someone arguing the other side.' },
+  { key: 'ponder', name: 'Ponder', color: '#b9a6f2', accent: '#7f6cbc',
+    does: 'Read-only. Visits one collection a day, keeps a journal, flags only what strikes it.', why: 'A slow second look, skeptical of its own urge to call things fringe or wrong.' },
+  { key: 'scout', name: 'Scout', color: '#7cc7e8', accent: '#3f8fb5',
+    does: 'Owns a collection and keeps hunting for new evidence and claims to add to the ledger.', why: 'So every collection has someone keeping it fed.' },
 ];
+function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.random() * (i + 1) | 0; [a[i], a[j]] = [a[j], a[i]]; } return a; }
+const dealt = shuffle([...AGENTS, ...[0, 1].map(() => AGENTS[Math.random() * AGENTS.length | 0])]); // all five, plus two repeats
+const bots = [
+  ['filer', 210, 365], ['filer', 320, 410], ['filer', 430, 355], ['pinner', 640, 380],
+  ['pinner', 790, 405], ['ponderer', 700, 430], ['ponderer', 860, 395],
+].map(([role, x, y], i) => new Bot(role, x, y, dealt[i]));
 
 function curvePt(a, b, t) {
   const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2 + 14 + Math.hypot(b.x - a.x, b.y - a.y) * .08;
@@ -827,10 +846,7 @@ function drawBot(b) {
   ctx.save(); ctx.translate(0, -41); ctx.rotate(b.tilt);
   ctx.fillStyle = b.color; rrect(-20, -27, 40, 28, 10); ctx.fill();
   ctx.fillStyle = 'rgba(255,255,255,.25)'; rrect(-16, -25, 12, 4, 2); ctx.fill();
-  // antenna
-  ctx.strokeStyle = '#8b93a7'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, -27); ctx.lineTo(0, -36); ctx.stroke();
-  if (b.idea > 0) { ctx.fillStyle = `rgba(255,230,120,${b.idea * .5})`; ctx.beginPath(); ctx.arc(0, -38, 9, 0, 7); ctx.fill(); }
-  ctx.fillStyle = b.idea > 0 ? '#ffe066' : b.accent; ctx.beginPath(); ctx.arc(0, -38, 3.6, 0, 7); ctx.fill();
+  drawGear(b, front);
   if (front) {
     ctx.fillStyle = '#2e3350'; rrect(-15, -22, 30, 18, 7); ctx.fill();
     const ex = b.face * 2, eyeCol = '#7ff0dc';
@@ -859,6 +875,30 @@ function drawBot(b) {
   if (b.say) drawSay(b);
   if (b.role === 'watcher' && LIVE && view.board && !view.flip) drawConfusion(b, view.board.confusion);
   if (b.mood === 'happy') { ctx.fillStyle = '#ffd35c'; sparkle(x - 22, y - bob - 74, 4); sparkle(x + 24, y - bob - 66, 3); }
+}
+function drawGear(b, front) {
+  // each kind of agent wears its own gear; whatever sits on top still lights up with an idea
+  const k = b.type.key, top = { miner: -31, ponder: -34, linker: -39, gap: -41, scout: -49 }[k], lit = b.idea > 0 ? '#ffe066' : null;
+  ctx.strokeStyle = '#8b93a7'; ctx.lineWidth = 2; ctx.lineCap = 'round';
+  if (k === 'miner') { // hard hat with a headlamp
+    ctx.fillStyle = '#e09a2c'; ctx.beginPath(); ctx.arc(0, -26, 16, Math.PI, 0); ctx.fill(); rrect(-22, -29, 44, 5, 2.5); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,.3)'; rrect(-9, -39, 7, 3, 1.5); ctx.fill();
+  } else if (k === 'ponder') { // beret
+    ctx.fillStyle = '#5b4a86'; ctx.beginPath(); ctx.ellipse(-3, -28, 19, 6, -.12, 0, 7); ctx.fill();
+  } else { ctx.beginPath(); ctx.moveTo(0, -27); ctx.lineTo(0, k === 'scout' ? -49 : top + 4); ctx.stroke(); }
+  if (lit) { ctx.fillStyle = `rgba(255,230,120,${b.idea * .5})`; ctx.beginPath(); ctx.arc(0, top, 9, 0, 7); ctx.fill(); }
+  if (k === 'miner') { if (front || lit) { ctx.fillStyle = lit || '#fff6c8'; ctx.beginPath(); ctx.arc(0, top, 3.6, 0, 7); ctx.fill(); } }
+  else if (k === 'ponder') { ctx.fillStyle = lit || '#5b4a86'; ctx.beginPath(); ctx.arc(0, top, 2.8, 0, 7); ctx.fill(); }
+  else if (k === 'linker') { // two links of chain
+    ctx.strokeStyle = lit || b.accent; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(-2.8, top, 3.6, 0, 7); ctx.stroke(); ctx.beginPath(); ctx.arc(2.8, top, 3.6, 0, 7); ctx.stroke();
+  } else if (k === 'gap') { // a magnifying glass
+    ctx.fillStyle = 'rgba(215,236,255,.85)'; ctx.beginPath(); ctx.arc(0, top, 5.5, 0, 7); ctx.fill();
+    ctx.strokeStyle = lit || '#4d4155'; ctx.lineWidth = 2; ctx.stroke();
+  } else { // a pennant planted on its collection
+    ctx.fillStyle = '#e2574c'; ctx.beginPath(); ctx.moveTo(0, top + 1); ctx.lineTo(13, top + 4.5); ctx.lineTo(0, top + 8); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = lit || b.accent; ctx.beginPath(); ctx.arc(0, top, 2.6, 0, 7); ctx.fill();
+  }
 }
 function drawCarry(b) {
   const h = b.hand(); const [w, hh] = SIZE[b.carry.kind]; const s = b.carryScale;
@@ -978,6 +1018,14 @@ function goLive(d) {
   bots.filter(b => b.role === 'pinner').forEach(b => { b.speed *= 1.6; }); // replaying an hour: keep the pinners brisk
   idleCycle(); view.idleT = 10;
 }
+// the agency legend: each kind of agent, drawn with the same code as the office
+$('agents').innerHTML = AGENTS.map(a => `<li><canvas width="96" height="168" aria-hidden="true"></canvas><b style="color:${a.color}">${a.name}</b><span>${a.does}</span><i>${a.why}</i></li>`).join('');
+[...$('agents').querySelectorAll('canvas')].forEach((c, i) => {
+  const main = ctx; ctx = c.getContext('2d'); ctx.setTransform(2, 0, 0, 2, 0, 0);
+  drawBot({ x: 24, y: 80, type: AGENTS[i], color: AGENTS[i].color, accent: AGENTS[i].accent, view: 'front', face: 1, blinkT: 1, hopY: 0, tilt: 0, idea: 0, bob: () => 0 });
+  ctx = main;
+});
+if (matchMedia('(max-width: 700px)').matches) $('agency').open = false; // phones keep the office in view
 if (location.pathname === '/') $('landing').hidden = false;
 fetch('/office.json').then(r => r.ok ? r.json() : null).then(d => {
   if (!d) return;
