@@ -1,4 +1,4 @@
-"""Admin chat on the dashboard: a read-only agent over one collection, on DeepInfra.
+"""Admin chat, a popup on every page: a read-only agent over one collection, on DeepInfra.
 
 Nothing is stored. The browser sends the whole conversation each turn and gets server-sent
 events back: each tool call, its result, the answer, then the updated conversation to send next
@@ -12,10 +12,11 @@ import json
 import os
 import sys
 import time
+from pathlib import Path
 
 import httpx
 from starlette.requests import Request
-from starlette.responses import JSONResponse, StreamingResponse
+from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
 from . import ledger as L
@@ -191,4 +192,14 @@ async def chat(request: Request):
     return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-store"})
 
 
-routes = [Route("/dashboard/api/chat", config), Route("/dashboard/api/chat", chat, methods=["POST"])]
+WIDGET = Path(__file__).with_name("chat.js")
+
+
+def widget(request: Request) -> Response:
+    """The launcher every page loads; it shows nothing to anyone but admins."""
+    return Response(WIDGET.read_text(encoding="utf-8"), media_type="text/javascript",
+                    headers={"Cache-Control": "public, max-age=300"})
+
+
+routes = [Route("/chat.js", widget), Route("/dashboard/api/chat", config),
+          Route("/dashboard/api/chat", chat, methods=["POST"])]

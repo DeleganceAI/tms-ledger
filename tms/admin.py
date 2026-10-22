@@ -123,7 +123,7 @@ button.ghost{{background:none;color:var(--accent)}}td.note{{white-space:pre-wrap
 {_table(["Database size", "Pubkeys", "Collections"], [[f"{r['db_bytes'] / 1e6:,.1f} MB", r["pubkeys"], r["collections"]]])}
 <h2>Events per day (last 14 days)</h2>
 {_table(["Day", "Events"], [[d["day"].isoformat(), d["events"]] for d in r["per_day"]])}
-</main></body></html>"""
+</main><script src="/chat.js" defer></script></body></html>"""
 
 
 def admin(request: Request):

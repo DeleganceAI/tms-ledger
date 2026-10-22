@@ -507,6 +507,9 @@ def chat_agent() -> None:
     try:
         with TestClient(S.http_app()) as client:
             assert client.get("/dashboard/api/chat").status_code == 404  # logged out
+            js = client.get("/chat.js")  # the launcher every page loads; it stays hidden unless the config answers
+            assert js.status_code == 200 and "javascript" in js.headers["content-type"] and "/dashboard/api/chat" in js.text
+            assert all('src="/chat.js"' in client.get(p).text for p in ("/", "/office", "/docs", "/connect")), "on every page"
             client.cookies.set(W.COOKIE, W.make_cookie(PK[BOB]))  # a member, not an admin
             assert client.get("/dashboard/api/chat").status_code == 404
             assert client.post("/dashboard/api/chat", json={}).status_code == 404
