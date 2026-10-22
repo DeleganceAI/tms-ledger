@@ -47,7 +47,7 @@ main{{max-width:860px;margin:0 auto;padding:8px 16px 40px;min-width:0}}a{{color:
 .wrap{{display:flex;justify-content:center;gap:28px}}
 #toc{{font-size:13px;line-height:1.4;padding:14px 0 0 16px}}#toc summary{{cursor:pointer;color:var(--ink3);font-weight:600}}
 #toc ol{{list-style:none;margin:6px 0 0;padding:0}}#toc li{{margin:3px 0}}#toc li.h3{{padding-left:12px}}#toc li.h2{{margin-top:10px}}#toc li.h2:first-child{{margin-top:0}}#toc li.h2>a{{color:var(--ink);font-weight:600}}#toc a{{color:var(--ink3);text-decoration:none}}
-#toc a:hover,#toc a.on{{color:var(--ink)}}#toc a.on{{font-weight:600}}
+#toc a:hover,#toc a.on{{color:var(--ink)}}#toc a.on{{font-weight:600}}#toc li.pages{{margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--line)}}#toc li.pages b{{color:var(--ink3);font-size:11px;letter-spacing:.06em;text-transform:uppercase}}#toc li.pages ol{{margin-top:4px}}#toc a.here{{color:var(--ink);font-weight:600}}
 @media(min-width:1100px){{#toc{{position:sticky;top:0;align-self:flex-start;width:230px;max-height:100vh;overflow:auto;flex:none}}#toc summary{{display:none}}}}
 @media(max-width:1099px){{.wrap{{display:block}}#toc{{display:block;padding:10px 16px 0;max-width:860px;margin:0 auto;box-sizing:border-box}}}}
 h2,h3{{scroll-margin-top:12px}}
@@ -76,6 +76,12 @@ TOC_JS = r"""(() => {
     li.className = h.tagName.toLowerCase(); a.href = '#' + h.id; a.textContent = h.textContent;
     li.append(a); list.append(li); links.set(h, a);
   }
+  // the docs pages themselves, above this page's sections
+  const pages = [['/docs', 'Using the TMS ledger'], ['/docs/bitter-lesson', 'The Bitter Lesson Applied to Knowledge Graphs']];
+  const group = document.createElement('li'); group.className = 'pages';
+  group.innerHTML = '<b>Pages</b><ol>' + pages.map(([href, title]) =>
+    `<li><a href="${href}"${location.pathname === href ? ' class="here"' : ''}>${title}</a></li>`).join('') + '</ol>';
+  list.prepend(group);
   toc.hidden = false; toc.open = matchMedia('(min-width: 1100px)').matches;
   toc.addEventListener('click', e => { if (e.target.closest('a') && !matchMedia('(min-width: 1100px)').matches) toc.open = false; });
   const seen = new Set();
