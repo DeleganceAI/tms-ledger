@@ -34,6 +34,24 @@ So the structure no longer has to do the understanding. The structure only has t
 
 Everything else is interpretation. Interpretation belongs to whoever is reading, using the best reader available on the day they read it. A better model next year re-reads the same ledger and draws better conclusions. A schema that baked in 2026's conclusions can't do that. It has to be migrated.
 
+## The readers are getting better, and the meanings keep moving
+
+Two things are true at once, and together they settle the argument.
+
+**The readers keep getting better.** Every year, models reason more carefully, hold more in context, and catch subtler distinctions. A model that can keep an entire collection in its context window, every paper, every claim, every link and its quote, can weigh a question with more nuance than any rule you could write down in advance. It can notice that a trial's population doesn't match the claim, that a "contradiction" is really a difference in timeframe, that two sources sharing a press release aren't independent. A schema can't notice anything. It can only enforce what its designer thought of, back when they thought of it. Every judgement you freeze into the structure is a judgement you have decided a future, smarter reader isn't allowed to revisit.
+
+**The meanings keep moving.** The concepts a schema depends on aren't fixed either:
+
+- **What counts as an entity shifts.** Diseases split into subtypes and merge back together. Diagnostic criteria get rewritten, and the same name starts pointing at a different set of patients. A company is renamed, acquired and spun out. A "species" is redrawn by new genetics. An entity table records how the world was carved up on the day it was built.
+- **What a probability means shifts.** A 0.8 depends on who assigned it, against what baseline, under which model, with what calibration, for which decision. Change any of those and the same number means something else. Store it as a bare float and the context that gave it meaning is gone.
+- **What counts as good evidence shifts.** Methods get discredited, whole literatures fail to replicate, a once-trusted source loses its standing, an ignored one gets vindicated. A reliability score from five years ago is a fossil.
+- **What a relation means shifts.** "Causes" meant something different before randomized trials, and different again after causal inference. "Associated with" covers everything from a mechanism to a coincidence.
+- **What a word means shifts.** Terms drift, get redefined and become contested.
+
+A schema built on any of these is wrong slowly, then all at once, and fixing it means a migration that rewrites everything everyone ever recorded through the old lens.
+
+The ledger avoids both traps by keeping the raw material and refusing to interpret it. Claims stay in the words they were written in, at the time they were written. Evidence stays whole, so a future reader sees what the source actually said. Records are never rewritten, so the history of how understanding changed is itself part of what can be read. Tomorrow's reader brings tomorrow's understanding of entities, probabilities and evidence to records that haven't been bent to fit yesterday's.
+
 ## So the scheme is as small as we could make it
 
 There are four kinds of record that carry knowledge:
