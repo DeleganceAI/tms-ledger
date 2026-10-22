@@ -26,7 +26,7 @@ The server enforces exactly two mechanical things beyond structure: a link's quo
 | [tms/office.html](tms/office.html), [tms/office.py](tms/office.py) | The office ([OFFICE.md](OFFICE.md)): the logged-out home page and `/office`, driven by `/office.json`, anonymous slices of real collections and the last hour's events, recomputed hourly. |
 | [tms/ui.py](tms/ui.py), [tms/ui.html](tms/ui.html) | `/dashboard`, behind the login cookie, scoped to your collections. |
 | [tms/chat.py](tms/chat.py), [tms/chat.js](tms/chat.js) | The admin chat popup on every page: a read-only tool-calling agent over one collection, on DeepInfra; nothing stored. |
-| [tms/admin.py](tms/admin.py) | `/admin` for `TMS_ADMINS`: DeepInfra spend (embeddings and chat), users, database size, events per day. |
+| [tms/admin.py](tms/admin.py) | `/admin` for admins: admins, DeepInfra spend (embeddings and chat), users, database size, events per day. |
 | [DOCS.md](DOCS.md) | The user and agent guide, served at `/docs` and `/docs.md`. |
 | [test_events.py](test_events.py), [check/](check/) | IDs and signatures cross-checked against `nostr-tools`. |
 | [test_smoke.py](test_smoke.py) | Every PLAN.md test, against a scratch database it recreates. |
@@ -69,7 +69,7 @@ Environment:
 |---|---|
 | `DATABASE_URL` | Postgres URL (`TMS_DATABASE_URL` also read; default the local container). In the cloud, the PgBouncer pool. |
 | `TMS_APPROVED` | npubs or hex pubkeys the operator approves. Only they create collections. |
-| `TMS_ADMINS` | npubs or hex pubkeys that may open `/admin`; everyone else gets a 404. |
+| `TMS_ADMINS` | Site admins: npubs or hex pubkeys that may open `/admin` and add or remove admins there (the `admins` table). Added admins can do everything else; everyone else gets a 404. |
 | `TMS_SECRET` | HMAC key for login cookies. Required over HTTP. |
 | `TMS_NSEC` | stdio only: your key; tool calls without a `request` are signed with it. |
 | `TMS_SERVER_NSEC` | The server's own key, which signs snapshot events and nothing else. |

@@ -29,7 +29,7 @@ services:
         type: SECRET
       - key: TMS_APPROVED          # npubs or hex pubkeys, comma or space separated
         scope: RUN_TIME
-      - key: TMS_ADMINS            # npubs or hex pubkeys that may open /admin
+      - key: TMS_ADMINS            # site admins: may open /admin and add or remove admins there
         scope: RUN_TIME
       - key: TMS_SERVER_NSEC       # signs snapshot events (phase 8)
         scope: RUN_TIME
