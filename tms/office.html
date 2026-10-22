@@ -1060,7 +1060,7 @@ const RECORDS = [
     why: 'The red zigzag.', draw: () => {
       drawPaper(CARD(), 14, 15, 22, 15); drawPaper(CARD(), 34, 35, 22, 15); zigzag([{ x: 15, y: 18 }, { x: 33, y: 32 }], 1); } },
   { name: 'Collection', does: 'A private set of records with one owner; only members can see it.',
-    why: 'Each board shows a slice.', draw: () => {
+    why: '*only partial views shown here for space', draw: () => {
       ctx.fillStyle = '#a5714b'; rrect(4, 8, 40, 32, 4); ctx.fill(); ctx.fillStyle = '#d9aa70'; ctx.fillRect(8, 12, 32, 24);
       drawPaper(CARD(), 17, 20, 11, 8, 0, 1, false); drawPaper(PAPER('ev'), 31, 27, 9, 11, 0, 1, false); drawString({ x: 31, y: 22 }, { x: 19, y: 18 }, REL_COL.S, 1, 1); } },
 ];
