@@ -39,7 +39,8 @@ Writes: publish(events) with events you signed (kinds 4701 evidence, 4702 claim,
 4704 contradiction; 0 profile; 4706 terms, once, before your first write). IDs are known
 before signing, so one batch can hold evidence, claims and the links between them.
 Every other tool takes `request`: a kind-4707 event signed now, content {"tool": <this tool>,
-"args": {<the tool's arguments>}}. Requests are single-use and expire after 60 seconds.
+"args": {<the tool's arguments>}, "nonce": <random string>}. Requests are single-use and expire after
+60 seconds; the nonce keeps two identical calls in the same second apart.
 Discipline: search -> inspect -> publish -> read. Search for existing claims before adding one
 and reuse IDs deliberately. A link's quote must appear in its evidence text; the server rejects
 quotes it cannot find. Nothing is edited or deleted: dispute a link or contradiction by linking to it.
@@ -205,24 +206,27 @@ def search_claims(request: dict | None = None, collection: str = "", text: str =
 
 @signed(L.list_claims)
 def list_claims(request: dict | None = None, collection: str = "", sort: str = "unsupported",
-                limit: int = 50) -> list[dict]:
+                limit: int = 50, offset: int = 0) -> list[dict]:
     """Claims in a collection with their link counts (supports, qualifies, rebuts) and how many
     contradictions they belong to. sort: 'unsupported' (fewest links first), 'unchallenged'
-    (supported, never rebutted or qualified), 'contested', 'links' (most), 'recent'. A worklist for
-    follow-up research; counts are retrieval aids, not judgements."""
+    (supported, never rebutted or qualified), 'contested', 'links' (most), 'recent', 'oldest'. A
+    worklist for follow-up research; counts are retrieval aids, not judgements. Page with offset;
+    to walk every claim use sort='oldest' and stop when fewer than limit come back."""
 
 
 @signed(L.get_links)
 def get_links(request: dict | None = None, collection: str = "", to_id: str = "", from_id: str = "",
-              relation: str = "", limit: int = 100) -> list[dict]:
-    """Links in a collection, filtered by target (to_id), grounding evidence (from_id) and/or relation."""
+              relation: str = "", limit: int = 100, offset: int = 0) -> list[dict]:
+    """Links in a collection, oldest first, filtered by target (to_id), grounding evidence (from_id)
+    and/or relation. Page with offset; stop when fewer than limit come back."""
 
 
 @signed(L.list_evidence)
 def list_evidence(request: dict | None = None, collection: str = "", ungrounded_only: bool = False,
-                  source: str = "", limit: int = 50) -> list[dict]:
+                  source: str = "", limit: int = 50, offset: int = 0) -> list[dict]:
     """Evidence documents in a collection, oldest first, without their text. ungrounded_only=true
-    returns documents no link cites yet, the worklist for a claims pass. source filters by substring."""
+    returns documents no link cites yet, the worklist for a claims pass. source filters by substring.
+    Page with offset; stop when fewer than limit come back."""
 
 
 @signed(L.search_contradictions)

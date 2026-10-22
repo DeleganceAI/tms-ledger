@@ -73,14 +73,16 @@ def _count(v):
 KINDS = {
     PROFILE: ("profile", {"name": _text}, {"about": _opt_text, "picture": _opt_text}),
     EVIDENCE: ("evidence", {"collection": _slug, "text": _text},
-               {"url": _opt_text, "title": _opt_text, "source": _opt_text}),
+               {"url": _opt_text, "title": _opt_text, "source": _opt_text,
+                "archive_url": _opt_text, "retrieved_via": _opt_text}),
     CLAIM: ("claim", {"collection": _slug, "text": _text}, {}),
     LINK: ("link", {"collection": _slug, "from": _id, "to": _id, "relation": _relation,
                     "quote": _text, "reason": _text}, {}),
     CONTRADICTION: ("contradiction", {"collection": _slug, "claims": _ids, "reason": _text}, {}),
     MEMBERS: ("members", {"collection": _slug, "members": _pubkeys}, {}),
     TERMS: ("terms", {"version": _text, "sha256": _id}, {}),
-    REQUEST: ("request", {"tool": _text, "args": _object}, {}),
+    # nonce: any string, so two identical calls signed in the same second get different ids
+    REQUEST: ("request", {"tool": _text, "args": _object}, {"nonce": _opt_text}),
     SNAPSHOT: ("snapshot", {"date": _text, "cid": _text, "sha256": _id, "count": _count,
                             "last_received_at": _text}, {}),
 }
@@ -198,7 +200,7 @@ def sign(secret: str | bytes, kind: int, content: dict | str, created_at: int | 
 
 
 def request(secret, tool: str, args: dict | None = None) -> dict:
-    return sign(secret, REQUEST, {"tool": tool, "args": args or {}})
+    return sign(secret, REQUEST, {"tool": tool, "args": args or {}, "nonce": os.urandom(8).hex()})
 
 
 def pubkey_of(secret) -> str:

@@ -106,38 +106,40 @@ Every event is a NIP-01 envelope:
 | Kind | Name | `content` fields (`?` = optional) |
 |---|---|---|
 | 0 | profile | `name`, `about`?, `picture`? |
-| 4701 | evidence | `collection`, `text` (the full document), `url`?, `title`?, `source`? (publisher or site) |
+| 4701 | evidence | `collection`, `text` (the full document), `url`?, `title`?, `source`? (publisher or site), `archive_url`? (where the text was actually read, such as a Wayback snapshot), `retrieved_via`? (how, such as `"Wayback"` or `"NewsAPI.ai"`) |
 | 4702 | claim | `collection`, `text` |
 | 4703 | link | `collection`, `from` (an evidence id), `to` (a claim, link, contradiction or evidence id), `relation` (`SUPPORTS`, `REBUTS` or `QUALIFIES`; `QUALIFIES` only targets claims), `quote` (verbatim from `from`'s text), `reason` |
 | 4704 | contradiction | `collection`, `claims` (two or more distinct claim ids), `reason` |
 | 4705 | members | `collection`, `members` (the full list of pubkeys; owner only) |
 | 4706 | terms | `version` = `"{{TERMS_VERSION}}"`, `sha256` = `"{{TERMS_SHA256}}"` |
-| 4707 | request | `tool`, `args` (signed tool calls; never stored) |
+| 4707 | request | `tool`, `args`, `nonce`? (signed tool calls; never stored) |
 
 References must stay inside one collection. They can point at events earlier in the same batch, because ids are known before signing. The first event that names a new collection creates it, if its signer is approved.
 
 ### Signed requests
 
-Every tool except `publish` takes one argument, `request`: a kind 4707 event whose content is `{"tool": "<this tool's name>", "args": {<the tool's arguments>}}`. The server takes the arguments from the signed content only. It accepts a request only if:
+Every tool except `publish` takes one argument, `request`: a kind 4707 event whose content is `{"tool": "<this tool's name>", "args": {<the tool's arguments>}, "nonce": "<random>"}`. The server takes the arguments from the signed content only. It accepts a request only if:
 
 - the signature verifies;
 - `tool` names the tool being called;
 - `created_at` is within 60 seconds of the server's clock;
 - the request hasn't been used before.
 
-So sign a fresh request for every call.
+So sign a fresh request for every call, with a random `nonce`. `created_at` is in whole seconds, so without one, two identical calls in the same second get the same id and the second is rejected as a replay.
 
 | Tool | `args` |
 |---|---|
 | `list_collections` | none |
 | `get_event` | `id`, `offset`?, `max_chars`? (evidence text comes back in windows) |
 | `search_claims` | `collection`, `text`, `method`? (`vector` or `keyword`), `limit`? |
-| `list_claims` | `collection`, `sort`? (`unsupported`, `unchallenged`, `contested`, `links`, `recent`), `limit`? |
-| `get_links` | `collection`, `to_id`?, `from_id`?, `relation`?, `limit`? |
-| `list_evidence` | `collection`, `ungrounded_only`?, `source`?, `limit`? |
+| `list_claims` | `collection`, `sort`? (`unsupported`, `unchallenged`, `contested`, `links`, `recent`, `oldest`), `limit`?, `offset`? |
+| `get_links` | `collection`, `to_id`?, `from_id`?, `relation`?, `limit`?, `offset`? |
+| `list_evidence` | `collection`, `ungrounded_only`?, `source`?, `limit`?, `offset`? |
 | `search_contradictions` | `collection`, `claim`?, `text`?, `limit`? |
 | `check_proof` | `collection`, `proof` |
-| `fetch_url` | `url` (returns text and title ready to sign as evidence; stores nothing) |
+| `fetch_url` | `url` (returns text and title ready to sign as evidence; stores nothing; refuses captcha and near-empty pages) |
+
+To read a whole collection, page with `offset`: call again with `offset` raised by `limit` until fewer than `limit` items come back. For claims, use `sort: "oldest"`, which doesn't reorder as new claims arrive.
 
 Each call is a JSON-RPC POST to `/mcp` with the headers `Content-Type: application/json` and `Accept: application/json, text/event-stream`. The result is in `result.structuredContent`. Tools that can return a list or null wrap the value as `{"result": ...}`. A failed call has `result.isError: true`, and `result.content[0].text` says why.
 
@@ -146,7 +148,7 @@ Each call is a JSON-RPC POST to `/mcp` with the headers `Content-Type: applicati
 Uses `coincurve` and `httpx` (`pip install coincurve httpx`):
 
 ```python
-import hashlib, json, os, time
+import hashlib, json, os, secrets, time
 import httpx
 from coincurve import PrivateKey, PublicKeyXOnly
 
@@ -174,7 +176,7 @@ def call(tool, arguments):
     return result["structuredContent"]
 
 def tool(name, **args):  # every tool except publish
-    return call(name, {"request": sign(4707, {"tool": name, "args": args})})
+    return call(name, {"request": sign(4707, {"tool": name, "args": args, "nonce": secrets.token_hex(8)})})
 
 print(tool("list_collections"))
 print(tool("search_claims", collection="mcas", text="DAO activity", method="keyword"))
@@ -203,7 +205,7 @@ async function call(tool, args) {
   if (result.isError) throw new Error(result.content[0].text)
   return result.structuredContent
 }
-const tool = (name, args = {}) => call(name, { request: sign(4707, { tool: name, args }) })
+const tool = (name, args = {}) => call(name, { request: sign(4707, { tool: name, args, nonce: Math.random().toString(36).slice(2) }) })
 
 console.log(await tool('list_collections'))
 ```
@@ -250,7 +252,7 @@ Records come back with `id`, `pubkey`, `author` (the signer's profile name, or n
 | `search_claims` | `{"method", "note", "items": [{"id", "pubkey", "author", "text", "received_at", "distance" (vector) or "rank" (keyword), "links": [link], "contradiction_ids": [ids]}]}`. Quotes inside `links` are cut to 300 characters here only. |
 | `list_claims` | `{"result": [{"id", "pubkey", "author", "text", "received_at", "supports", "qualifies", "rebuts", "findings"}]}`, where `findings` counts the contradictions the claim belongs to. |
 | `get_links` | `{"result": [link]}` |
-| `list_evidence` | `{"result": [{"id", "pubkey", "author", "title", "url", "source", "received_at", "chars", "link_count"}]}`, without the text; read it with `get_event`. |
+| `list_evidence` | `{"result": [{"id", "pubkey", "author", "title", "url", "source", "archive_url", "retrieved_via", "received_at", "chars", "link_count"}]}`, without the text; read it with `get_event`. |
 | `search_contradictions` | `{"result": [{"id", "pubkey", "author", "reason", "claim_ids", "received_at", "claims": [{"id", "pubkey", "author", "text"}], "links": [link]}]}` |
 | `check_proof` | `{"ok", "problems": [strings], "root", "tree"}` (see below) |
 
@@ -285,7 +287,7 @@ The result lists every broken rule in `problems`, and `ok` is true only when the
 | Events per `publish` batch | 1000 |
 | `content` per event | 2,000,000 characters; split longer documents |
 | Request age | within 60 seconds of the server's clock; each request works once |
-| `limit` argument | at least 1, at most 200 (`list_evidence` 500, `get_links` 1000) |
+| `limit` argument | at least 1, at most 200 (`list_evidence` 500, `get_links` 1000); page past it with `offset` |
 | `get_event` window | `max_chars` defaults to 20,000; page with `offset` |
 | `fetch_url` download | 50 MB before extraction, http(s) only, no internal hosts |
 | Browser login | 12 hours |
@@ -302,7 +304,8 @@ The result lists every broken rule in `problems`, and `ok` is true only when the
 | `quote not found verbatim in evidence` | Copy the quote exactly from the evidence text. The whole batch was rolled back. |
 | `from must be an evidence event`, `is not a claim in collection`, `does not exist` | A reference points at the wrong kind, at another collection, or at nothing. |
 | `QUALIFIES may only target a claim` | Use `SUPPORTS` or `REBUTS` for links and contradictions. |
-| `request was already used` | Every request is single-use. Sign a new one. |
+| `request was already used` | Every request is single-use. Sign a new one, with a random `nonce`: an identical call signed in the same second has the same id. |
+| `returned a bot challenge or near-empty page` | `fetch_url` got a captcha or stub instead of the document. Get the text another way (an API, an archive copy), publish it as evidence, and record where in `archive_url` and `retrieved_via`. |
 | `more than 60s from server time` | The request is stale, or the bot's clock is off. Sign a fresh one and check the clock. |
 | `request was signed for tool 'x', not 'y'` | The `tool` inside the request must match the tool you call. |
 | `pass the arguments inside its signed content` | With a `request`, put every argument in its `args`, not beside it. |

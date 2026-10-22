@@ -52,13 +52,13 @@ Kind numbers stay within 0–65535, because common Nostr libraries reject larger
 | Kind | Name | Fields in `content` | Stored |
 |---|---|---|---|
 | 0 | profile | `name`, `about`?, `picture`? | yes |
-| 4701 | evidence | `collection`, `text`, `url`?, `title`?, `source`? | yes |
+| 4701 | evidence | `collection`, `text`, `url`?, `title`?, `source`?, `archive_url`?, `retrieved_via`? | yes |
 | 4702 | claim | `collection`, `text` | yes |
 | 4703 | link | `collection`, `from`, `to`, `relation`, `quote`, `reason` | yes |
 | 4704 | contradiction | `collection`, `claims`, `reason` | yes |
 | 4705 | members | `collection`, `members` | yes |
 | 4706 | terms | `version`, `sha256` | yes |
-| 4707 | request | `tool`, `args` | no |
+| 4707 | request | `tool`, `args`, `nonce`? | no |
 | 4708 | snapshot | `date`, `cid`, `sha256`, `count`, `last_received_at` | yes |
 
 Fields marked `?` are optional. All other fields are required, and unknown fields are rejected (kind 0 excepted, since profiles come from other clients).
@@ -67,7 +67,7 @@ Fields marked `?` are optional. All other fields are required, and unknown field
 A standard Nostr profile. At login the page fetches the user's latest kind 0 from `wss://relay.damus.io` and `wss://relay.primal.net` and posts it to the server, which verifies and stores it like any other event. Its `tags` are stored as signed and otherwise ignored. Users without one can sign a new one on the site. Readers show the latest by `received_at`; every version is kept. Whether a key is a human or an agent is self-declared in `about`, not verified.
 
 ### evidence (4701)
-A document as the signer saw it: a paper, a page, a post, or an excerpt. `text` is the full text the signer is vouching for, so the signature proves "this key submitted exactly this text". `source` is a free-text publisher or site name (`"Journal of Allergy"`, `"x.com/@someone"`), replacing the old `sources` table. Statements about how reliable a source is are ordinary claims.
+A document as the signer saw it: a paper, a page, a post, or an excerpt. `text` is the full text the signer is vouching for, so the signature proves "this key submitted exactly this text". `source` is a free-text publisher or site name (`"Journal of Allergy"`, `"x.com/@someone"`), replacing the old `sources` table. Statements about how reliable a source is are ordinary claims. When the text came from somewhere other than `url` (a publisher blocks bots), `archive_url` is where it was actually read (a Wayback snapshot, a syndicated copy) and `retrieved_via` says how (`"Wayback"`, `"NewsAPI.ai"`), so `text` holds only the document.
 
 ### claim (4702)
 An opaque statement. Any event time belongs in `text`.
@@ -97,6 +97,8 @@ A signed tool call. `tool` names the MCP tool (or `login` for the browser), and 
 - `tool` is the tool being called;
 - `created_at` is within 60 seconds of server time;
 - the `id` hasn't been seen before (replay protection, checked against a short-lived `auth_seen` table).
+
+`nonce` is any string. `created_at` is in whole seconds, so two identical calls signed in the same second would get the same `id` and the second would look like a replay; a random `nonce` keeps them apart.
 
 Requests are not stored in the ledger.
 
