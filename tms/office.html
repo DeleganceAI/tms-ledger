@@ -15,14 +15,14 @@
   #c{display:block;aspect-ratio:16/9;width:min(100%,calc((100dvh - 6.5rem)*1.7778));height:auto;max-width:100%;max-height:calc(100dvh - 6.5rem)}
   @supports (width:1cqw){#c{width:min(100cqw,calc(100cqh*16/9));max-height:100cqh}}
   #stage{position:relative}
-  #overlay{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);width:min(92%,760px);display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none;text-align:center}
-  #overlay>*{pointer-events:auto}
   #ticker{flex-shrink:0;display:flex;flex-wrap:wrap;justify-content:center;gap:4px 22px;padding:6px 14px;background:#1e1826;border-top:1px solid #3a3144;font-size:13px;color:#cbbfd4}
   #ticker b{font:600 14px ui-monospace,Menlo,monospace;color:#f4efe6;font-variant-numeric:tabular-nums;transition:color .6s}
   #ticker b.up{color:#a9d6c4;transition:none}
-  #landing{background:rgba(30,24,38,.88);border-radius:12px;padding:12px 18px;display:flex;flex-wrap:wrap;gap:10px 14px;align-items:center;justify-content:center}
-  #landing h1{font-size:18px;margin:0;flex-basis:100%}
-  #landing p{margin:-8px 0 0;flex-basis:100%;font-size:13px;color:#cbbfd4}
+  #landing{flex-shrink:0;display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:4px 12px;padding:5px 14px;background:#251e2e;border-bottom:1px solid #3a3144}
+  #landing h1{font-size:14px;margin:0}
+  #landing p{margin:0;font-size:13px;color:#cbbfd4}
+  #landing .btn{padding:2px 10px;font-size:13px;border-radius:6px}
+  @media(max-width:960px){#landing p{display:none}}  /* stay one line: the subtitle goes first */
   .btn{font:inherit;padding:7px 14px;border-radius:7px;border:1px solid #8ab6f9;background:#8ab6f9;color:#1e1826;cursor:pointer;text-decoration:none;font-weight:600}
   .btn.ghost{background:none;color:#cfe0ff}
   dialog{background:#2b2433;color:#f4efe6;border:1px solid #4a3f57;border-radius:12px;width:min(92vw,440px)}
@@ -43,12 +43,10 @@
 <body>
 <header><b>TMS ledger</b><nav><a href="/">Home</a><a href="/submit">Submit</a><a href="/dashboard">Dashboard</a><a href="/docs">Docs</a><a href="/office" aria-current="page">Office</a><a href="/connect">Connect</a></nav>
 <p id="office-desc">Little bots file papers, pin them to boards and string them together. Each board is a slice of a private collection, shown by its shape only: index cards are claims, papers are evidence, green string supports, red rebuts, amber qualifies, and a red zigzag marks a contradiction. A yellow card with no string is a hypothesis. The bots are five kinds of agent, listed below the office. Every mark is a squiggle; no text, names or records are shown.</p></header>
+<div id="landing" hidden><h1>Deploy your own intelligence agency</h1><p>A private evidence ledger for people and AI agents</p>
+  <button class="btn" id="req-open" type="button">Request access</button><a class="btn ghost" href="/connect">Connect</a><a class="btn ghost" href="/docs">How it works</a></div>
 <main id="stage">
 <canvas id="c" role="img" aria-label="Animated office of little bots pinning anonymous papers and cards to boards" aria-describedby="office-desc"></canvas>
-<div id="overlay">
-  <div id="landing" hidden><h1>Deploy your own intelligence agency</h1><p>A private evidence ledger for people and AI agents</p>
-    <button class="btn" id="req-open" type="button">Request access</button><a class="btn ghost" href="/connect">Connect</a><a class="btn ghost" href="/docs">How it works</a></div>
-</div>
 </main>
 <details id="agency" open><summary>Your own private intelligence agency</summary><ul id="agents"></ul></details>
 <footer id="ticker" aria-label="Ledger totals"></footer>
