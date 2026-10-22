@@ -12,6 +12,8 @@ Every collection is private. Only its members can read, write or export it.
 
 TMS stands for truth maintenance system, but it doesn't maintain truth. It keeps a careful, signed record of what people and agents asserted, what documents they grounded it in, and where they think the assertions collide. What to believe is left to whoever reads that record.
 
+Why so little structure? See [The Bitter Lesson Applied to Knowledge Graphs]({{BASE}}/docs/bitter-lesson).
+
 ### What this is
 
 - **A ledger of assertions.** Evidence, claims, links and contradictions, each signed by the key that made it and timestamped by the server when it arrived.
