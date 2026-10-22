@@ -69,7 +69,7 @@ table.wide th.n{text-align:right}.spark{width:120px;height:18px;display:block}td
 <div class="top">
   <div class="bar">
     <div class="brand">TMS <span>ledger</span></div>
-    <nav class="tabs"><button class="tab on" data-tab="collections">Collections</button><button class="tab" data-tab="activity">Activity</button><button class="tab" data-tab="browse">Browse</button><button class="tab" data-tab="agents">Agents</button><button class="tab" data-tab="sources">Sources</button></nav>
+    <nav class="tabs"><button class="tab on" data-tab="collections">Collections</button><button class="tab" data-tab="activity">Activity</button><button class="tab" data-tab="browse">Browse</button><button class="tab" data-tab="agents">Agents</button><button class="tab" data-tab="npubs" hidden>Npubs</button><button class="tab" data-tab="sources">Sources</button></nav>
     <a class="ext2" href="/" style="margin-left:auto;text-decoration:none">Ledger home</a>
     <a class="ext2" href="/office" style="text-decoration:none">Office</a>
     <a class="ext2" href="/docs" style="text-decoration:none">Docs</a>
@@ -113,6 +113,12 @@ table.wide th.n{text-align:right}.spark{width:120px;height:18px;display:block}td
   <section class="panel">
     <div class="ph"><h2>Agents</h2><span class="muted" id="anote"></span></div>
     <div class="scroll tall"><table class="dense wide" id="atable"></table></div>
+  </section>
+</main>
+<main id="npubs" hidden>
+  <section class="panel">
+    <div class="ph"><h2>Npubs</h2><span class="muted" id="nnote"></span></div>
+    <div class="scroll tall"><table class="dense wide" id="ntable"></table></div>
   </section>
 </main>
 <main id="sources" hidden>
@@ -254,10 +260,11 @@ let activeTab = 'collections';
 function showTab(name) {
   activeTab = name;
   document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x.dataset.tab === name));
-  ['collections', 'activity', 'browse', 'agents', 'sources'].forEach(id => $(id).hidden = id !== name);
+  ['collections', 'activity', 'browse', 'agents', 'npubs', 'sources'].forEach(id => $(id).hidden = id !== name);
   if (name === 'collections') loadCollections();
   if (name === 'browse' && !bshown) { bshown = true; browse(); }
   if (name === 'agents') loadAgents();
+  if (name === 'npubs') loadNpubs();
   if (name === 'sources') loadSources();
 }
 document.querySelectorAll('.tab').forEach(t => t.onclick = () => showTab(t.dataset.tab));
@@ -303,6 +310,25 @@ async function loadAgents() {
       `<td class="n">${esc(a.evidence)}</td><td class="n">${esc(a.claims)}</td><td class="n">${esc(a.links)}</td><td class="n">${esc(a.contradictions)}</td><td class="n">${esc(a.members)}</td></tr>`; }).join('')
     : '<tr><td class="empty" colspan="15">no keys yet</td></tr>');
 }
+
+// ---- npubs (admins and collection owners) ---------------------------------
+const slugs = (a, star) => a.map(s => `<span class="tag">${esc(s)}${star ? ' ★' : ''}</span>`).join(' ');
+async function loadNpubs() {
+  const r = await fetch('/dashboard/api/npubs');
+  const d = await r.json();
+  if (!r.ok) { $('ntable').innerHTML = `<tr><td class="empty">${esc(d.error)}</td></tr>`; return d; }
+  $('nnote').textContent = `${d.npubs.length} keys · ${d.admin ? 'every collection' : 'memberships in your collections only'} · ★ owner`;
+  const th = '<tr><th>npub</th><th>name</th><th>about</th><th>approved</th><th>collections</th><th class="n">records</th><th>last active</th></tr>';
+  $('ntable').innerHTML = th + (d.npubs.length ? d.npubs.map(n =>
+    `<tr><td class="k" title="${esc(n.npub)} (click to copy)" style="cursor:copy" onclick="navigator.clipboard.writeText('${esc(n.npub)}')">${esc(n.npub.slice(0, 16))}…</td>` +
+    `<td class="a" style="max-width:200px">${esc(n.name || '')}${n.name == null ? '<span class="kindtag unreg">no profile</span>' : ''}</td>` +
+    `<td class="s" style="max-width:360px" title="${esc(n.about || '')}">${esc((n.about || '').slice(0, 140))}</td>` +
+    `<td>${n.approved ? '✓' : ''}</td><td>${slugs(n.owns, true)} ${slugs(n.member_of)}</td>` +
+    `<td class="n">${esc(n.records)}</td><td class="t" title="${esc(n.last_at || '')}">${n.last_at ? ago(n.last_at) + ' ago' : '—'}</td></tr>`).join('')
+    : '<tr><td class="empty" colspan="7">no keys yet</td></tr>');
+  return d;
+}
+fetch('/dashboard/api/npubs').then(r => { if (r.ok) document.querySelector('[data-tab="npubs"]').hidden = false; }).catch(() => {});
 
 // ---- sources --------------------------------------------------------------
 const S = {q: '', sort: 'evidence'}; let stimer = null;

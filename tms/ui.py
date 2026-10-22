@@ -196,6 +196,36 @@ def agents(conn, pk: str, cols: list[str]) -> dict:
     return {"agents": rows, "per_min": per_min}
 
 
+def npubs(conn, pk: str, cols: list[str]):
+    """Every key known to the system with its cached profile, for admins and collection owners.
+    Admins see every collection a key belongs to; an owner sees memberships in their own
+    collections only, so other private collections' names never reach them."""
+    admin = pk in L.ADMINS
+    if not admin and conn.execute("SELECT 1 FROM collections WHERE owner = %s", (pk,)).fetchone() is None:
+        return JSONResponse({"error": "admins and collection owners only"}, status_code=403)
+    scope = [r["slug"] for r in conn.execute("SELECT slug FROM collections")] if admin else cols
+    env = sorted(L.APPROVED | L.ADMINS)
+    rows = _rows(conn, """
+        WITH keys AS (SELECT pubkey FROM events UNION SELECT pubkey FROM members
+                      UNION SELECT pubkey FROM approvals UNION SELECT unnest(%(env)s::text[])),
+        mem AS (SELECT m.pubkey,
+                       array_agg(m.collection ORDER BY m.collection) FILTER (WHERE c.owner = m.pubkey) AS owns,
+                       array_agg(m.collection ORDER BY m.collection) FILTER (WHERE c.owner <> m.pubkey) AS member_of
+                FROM members m JOIN collections c ON c.slug = m.collection
+                WHERE m.collection = ANY(%(scope)s) GROUP BY 1),
+        rec AS (SELECT pubkey, count(*) AS records, max(received_at) AS last_at FROM events
+                WHERE collection = ANY(%(scope)s) AND kind BETWEEN 4701 AND 4704 GROUP BY 1)
+        SELECT k.pubkey, p.name, p.about, p.picture, p.received_at AS profile_at,
+               (k.pubkey = ANY(%(env)s::text[]) OR EXISTS (SELECT 1 FROM approvals a WHERE a.pubkey = k.pubkey)) AS approved,
+               coalesce(mem.owns, '{}') AS owns, coalesce(mem.member_of, '{}') AS member_of,
+               coalesce(rec.records, 0) AS records, rec.last_at
+        FROM keys k LEFT JOIN profiles p USING (pubkey) LEFT JOIN mem USING (pubkey) LEFT JOIN rec USING (pubkey)
+        ORDER BY rec.last_at DESC NULLS LAST, lower(p.name) NULLS LAST, k.pubkey""", {"env": env, "scope": scope})
+    for r in rows:
+        r["npub"] = E.bech32_encode("npub", r["pubkey"])
+    return {"admin": admin, "npubs": rows}
+
+
 SOURCE_SORTS = {
     "evidence": "evidence DESC, links DESC, source",
     "links": "links DESC, evidence DESC, source",
@@ -294,6 +324,7 @@ routes = [
     Route("/dashboard/api/snapshot", _api(lambda conn, pk, cols, r: snapshot(conn, pk, cols))),
     Route("/dashboard/api/browse", _api(_browse)),
     Route("/dashboard/api/agents", _api(lambda conn, pk, cols, r: agents(conn, pk, cols))),
+    Route("/dashboard/api/npubs", _api(lambda conn, pk, cols, r: npubs(conn, pk, cols))),
     Route("/dashboard/api/sources", _api(lambda conn, pk, cols, r: sources(
         conn, cols, r.query_params.get("q", "").strip(), r.query_params.get("sort", "evidence")))),
     Route("/dashboard/api/collections", _api(lambda conn, pk, cols, r: collections(conn, cols))),
