@@ -1,138 +1,152 @@
 # Using the TMS ledger
 
-TMS is a private, append-only evidence ledger for people and AI agents. You record **evidence** (the full text of a paper, page or post), **claims** (statements about the world), **links** (a verbatim quote from evidence that supports, rebuts or qualifies something) and **contradictions** (claims that cannot all hold). The server never decides what is true. It checks that records are well formed, that quotes really appear in the evidence they cite, and who signed what.
+Imagine you and an AI assistant are investigating whether a new pump uses less electricity than the old one. You find a test report, draw a conclusion from it, and later discover another report that seems to disagree. When you return to the question next week, you need more than the last answer. You need the documents, the exact passages you relied on, and an explanation of what the disagreement is about.
 
-Every record is a Nostr-style event signed with its author's key. Nobody, including the operator, can alter a record without breaking its signature, and nothing is ever edited or deleted. To correct something, add a link that disputes it.
+TMS keeps that material together in a private collection shared by people and AI agents. It records what someone claimed, the evidence they cited, and the reasons someone else supported or challenged it. Earlier contributions stay in place when new information arrives, so you can revisit a conclusion without losing the work that led to it.
 
-Every collection is private. Only its members can read, write or export it.
-
-> Base URL: `{{BASE}}`. Current terms: version `{{TERMS_VERSION}}`, sha256 `{{TERMS_SHA256}}`. (Read in the repo, these are placeholders; the server's `/docs` and `/docs.md` fill them in.)
+This guide explains how those records fit together, how to contribute through the browser, and how to connect an agent. Start with the example below, or go straight to [For people](#for-people) or [For bots and agents](#for-bots-and-agents).
 
 ## Philosophy
 
-TMS stands for truth maintenance system, but it doesn't maintain truth. It keeps a careful, signed record of what people and agents asserted, what documents they grounded it in, and where they think the assertions collide. What to believe is left to whoever reads that record.
+TMS stands for *truth maintenance system*. In this system, people and agents decide what to believe. The software's job is to preserve the material they used and make the reasons for their conclusions inspectable. It checks signatures, access permissions, record structure, and whether a quoted passage appears in the document cited. Judging what that passage establishes remains the reader's responsibility.
 
-Why so little structure? See [The Bitter Lesson Applied to Knowledge Graphs]({{BASE}}/docs/bitter-lesson).
+### Evidence: the document you read
 
-### What this is
+In our pump example, you start by adding the full text of the test report. TMS calls that an **evidence** record. It can hold a paper, article, post, or another document, along with its title, URL, and where you obtained it. Saving the full text gives later readers the surrounding explanation, rather than leaving them with a quotation whose context they cannot check. The word “evidence” identifies the record's role; putting a document here does not establish that its contents are correct.
 
-- **A ledger of assertions.** Evidence, claims, links and contradictions, each signed by the key that made it and timestamped by the server when it arrived.
-- **A record of reasons.** Every link quotes its evidence verbatim and says why the quote bears on its target. Every contradiction names its claims and says why they can't all hold. A reader can always ask "says who, and on what grounds?" and get an answer from the record.
-- **A shared workspace for people and agents.** Humans and bots use the same records, the same rules and the same signatures. A bot's contribution is attributed to the bot, and a person's to the person.
-- **A history that only grows.** Corrections are new records that dispute old ones. Nothing is edited, retired or quietly replaced, so you can always see what was believed to be grounded at any point and what changed it.
+### Claims: statements someone can examine
 
-### What this is not
+Next, you record a specific statement: “In the two-hour test, the new pump used less electricity than the old pump.” This is a **claim**. It has its own record, so people can support it, challenge it, or point out a limit without changing the document it came from. Keep the conditions that matter in the wording. “The new pump always uses less electricity” would make a much broader claim than this one test supports. A claim can also begin as a hypothesis with no evidence attached yet.
 
-- **Not a fact-checker or an oracle.** The server never decides whether a claim is true, whether evidence applies, or which side of a contradiction is right. It checks structure, signatures, membership, and that quotes really appear in the evidence they cite. That's all.
-- **Not a confidence or scoring system.** There are no probabilities, weights, ratings or "confidence: high" labels, and nothing is aggregated into a score. Numbers inside a claim are just part of the claim's text. Search distances help you find things; they say nothing about truth.
-- **Not a status tracker.** There is no "verified", "debunked", "contested", "open" or "resolved" field anywhere. Those are conclusions, and conclusions belong to readers. Two readers looking at the same records may reasonably reach different ones.
-- **Not a knowledge graph that merges or infers.** Identical claim text is two claims. Two sources are not assumed independent. Nothing propagates: rebutting a claim doesn't touch the links that support it, and disputing a contradiction doesn't close it.
-- **Not an editable wiki.** You can't fix a typo in a claim; you add a better claim and link the two. That is deliberate: the earlier wording, and who relied on it, stays visible.
-- **Not an identity or credibility check.** A signature proves which key signed a record, not who holds the key or whether they are reliable. Whether a key is a human or an agent is whatever its profile says. How reliable a source is, is itself just a claim someone can make and ground.
-- **Not a workflow engine.** There are no assignments, queues or task states. Agents and people decide what to work on outside the ledger; the ledger only keeps what they produce.
-- **Not a public feed.** Every collection is private to its members. Nothing is published to Nostr relays, and there are no followers and no timeline.
-- **Not a record of anyone's private reasoning.** The trail of links and contradictions shows what was asserted and on what grounds, not why someone went looking or what they thought along the way.
+### Links: a quote and a reason
 
-### The discipline
+A **link** connects evidence to the record you want a reader to examine. It includes an exact quote from the evidence and your explanation of how that quote bears on the target. Suppose our fictional report says, “During the two-hour test, the new pump used 18 Wh and the old pump used 24 Wh.” You could link that passage to the claim above and explain that the report records lower electricity use by the new pump during the same test period. The quote lets a reader check what the document says; the reason makes your interpretation explicit.
 
-1. **No confidence scales.** Ground a claim or dispute it; don't rate it.
-2. **Keep interpretation with readers.** Believed, contested, open and resolved are a reader's words, never the ledger's.
-3. **Show the reasons.** A link needs a verbatim quote and a specific reason. A contradiction needs at least two distinct claims and an explanation of why they can't all hold.
-4. **Preserve history.** Append; never edit or delete. Correct a record by disputing it with a new one.
-5. **Keep provenance explicit.** Every record says which key signed it and when the server received it.
+A link has one of three relations:
 
-### Why it is built this way
+| Relation | What the author is saying |
+|---|---|
+| `SUPPORTS` | This passage gives a reason to accept the target. |
+| `REBUTS` | This passage gives a reason to reject the target. |
+| `QUALIFIES` | This passage limits or adds conditions to a claim. |
 
-- **Verbatim quotes.** A paraphrase can quietly drift from what a source says. A quote can be checked mechanically, and the server rejects any quote it can't find in the evidence text, forgiving only case, whitespace, curly quotes, dashes and ligatures. So the record can't claim a document says something it doesn't.
-- **Contradictions are authored, not computed.** Claim text is opaque to the server, and "these can't all be true" is a judgement about meaning, scope and time. Someone has to make it and give a reason. A claim with both supporting and rebutting links is merely contested, and readers can see that with a query.
-- **Contradictions don't name a loser.** A contradiction says the claims can't all hold, not which one is wrong, and any two of its claims may be compatible on their own. Later evidence either gives grounds to reject or qualify a member claim (the disagreement was addressed), or shows the contradiction was mistaken, for example because the claims are about different timeframes (the contradiction was corrected). Both are readings of the record, not states the server sets.
-- **Signed events.** Every record is a Nostr-style event, so authorship doesn't depend on trusting the server. Anyone holding an export can verify every signature, and nobody, the operator included, can alter a record without breaking it.
-- **Append-only.** If records could be edited, a link could end up pointing at words its author never saw. Because references are event IDs, which are hashes of exact content, a link commits to the exact text it was about.
-- **Private collections.** People upload whole papers and articles. Keeping each collection to its members respects the uploads, and lets a group work on a question before it's ready to share.
+Every link starts from an evidence record. `SUPPORTS` and `REBUTS` can target a claim, another link, a contradiction, or an evidence record. `QUALIFIES` can target only a claim. For example, a second report might give grounds to challenge how someone interpreted the first report. Its link can target that earlier link directly, making the disputed interpretation visible.
+
+Before accepting a link, the server checks that its quote appears in the cited evidence. It allows the small formatting differences listed in [Submit evidence, claims and links](#4-submit-evidence-claims-and-links). It does not check that the quote supports the author's interpretation. A sentence can be quoted accurately and still be taken out of context, or used to support a claim broader than the sentence warrants. A reader must check both the passage and the reason.
+
+### Contradictions: explain what cannot all be true
+
+Suppose someone records another claim: “In that same two-hour test, the new pump used more electricity than the old pump.” These claims conflict if they refer to the same pumps, test, and measurements. A **contradiction** record names the claims and explains why they cannot all hold. Someone has to make that judgment and record the reason. The server does not infer a contradiction from the text or choose which claim is wrong.
+
+Check the scope before recording a contradiction. A report about a different test, speed, or date might be compatible with the first report. A contradiction can involve more than two claims, and the problem may arise only when all of them are considered together. Later evidence may give a reason to reject one claim, narrow it, or reject the contradiction itself. Those are conclusions readers draw from the records; TMS does not mark a contradiction “resolved.”
+
+### Corrections preserve what came before
+
+TMS adds records without editing or deleting earlier ones. This is what **append-only** means here. If you discover a mistake in your pump claim, add a corrected claim and evidence-backed links explaining what the source supports and what was wrong with the earlier record. If the error was in a link's interpretation or a contradiction's reasoning, a new link can rebut that record. There is no direct claim-to-claim link: each link must cite an evidence document and a quote.
+
+This history matters because someone may already have relied on the original wording. Each reference points to a particular signed record, so correcting a claim does not change the text that earlier contributors saw. It also does not automatically invalidate supporting links or settle related disagreements. The next reader can inspect the correction alongside the original record and decide what follows from it.
+
+### What readers decide
+
+TMS stores the assertions and their stated grounds. It has no confidence scores, credibility ratings, or verdict fields such as “verified” or “debunked.” Numbers inside a document or claim remain ordinary content, as the pump measurements illustrate. Search ranks, distances, and link counts help you locate material; they do not measure whether a claim is true. A list sorted as `contested`, for example, uses counts of rebuttals and contradiction findings to help direct attention. It does not decide the disagreement.
+
+Readers also judge whether two records repeat the same claim, whether sources are independent, and whether a source is reliable. TMS does not merge separately signed claims just because their text matches. Ten supporting links might all rely on the same report. A signature identifies the key that signed a contribution, but it cannot tell you whether the person or agent using that key is knowledgeable or honest. The record gives you material to examine, including disagreements and gaps, while leaving the judgment with you.
+
+### Authorship and privacy
+
+People and agents sign their contributions with their own cryptographic keys. A public key identifies the signer; the corresponding private key is used to sign. TMS uses the signed event format from Nostr, so an exported record can be checked with a compatible library. Changing the signed content makes its signature fail verification, including if the server operator makes the change. This lets you check the records you hold. It does not by itself prove that a server or export has included every record. The server also records when each contribution arrived, separately from the timestamp supplied by its signer.
+
+A **collection** groups records and controls access to them. Through the service, only its owner and members can read, write, or export its contents. Adding a person or agent lets that key participate; removing a member ends that key's access through the service, but cannot retrieve copies they have already downloaded. Profiles and terms records are not private collection documents, and the public office view shows aggregate activity and anonymous shapes of work. Collection access is controlled by the server; signatures do not encrypt the uploaded text. TMS does not publish your collection to Nostr relays.
 
 ### How the work flows
 
-The ledger doesn't run a process, but this is the loop it is designed to support:
+You could keep the pump reports and your conclusions in a shared folder. As people add more documents and change their minds, you would also need to keep track of which passage supports each statement, who made each interpretation, and which version a later comment refers to. TMS gives those contributions separate records and explicit connections, so the group can return to a question and inspect the work already done.
 
-```text
-gather evidence → extract claims and link them, with quotes → notice claims that can't all hold
-  → record a contradiction → research the disagreement → add new evidence and links
-  → a reader weighs it all and answers, citing the records
-```
+A useful research loop starts with gathering evidence, then extracting specific claims and linking the passages that bear on them. Reviewers can look for unsupported interpretations and genuine contradictions. Further research can address the disagreement or reveal that the collection does not yet contain enough information to answer. People and agents can take any of these roles, and finding nothing useful is a valid result. The ledger does not assign tasks or run this process; you organize the work outside it.
 
-Anyone, human or agent, can play any part of it:
+When you answer a question, cite the records you relied on, describe the limits of the evidence, and say what remains unknown. An agent can also submit an explicit argument for a structural check with [`check_proof`](#thinking-proofs-check-proof), described below. This is an explanation prepared for inspection, not a record of private internal reasoning. In the pump example, another reader should be able to see which test your answer refers to and why you think its result matters, then reach their own conclusion from the same material.
 
-- **Intake:** finds and adds relevant evidence. Spotting a duplicate and adding nothing is a valid result.
-- **Claims and links:** turns evidence into specific claims and links them with quotes and reasons.
-- **Contradiction finding:** tells genuine incompatibility apart from differences in scope, time or meaning.
-- **Review:** documents mistakes (misreadings, unsupported links) by disputing them with grounded links.
-- **Follow-up research:** goes after a contradiction or an open question and brings back new evidence. It doesn't have to settle anything.
-- **Briefing:** answers a question from the collection alone, cites the records, says what the collection doesn't cover, and leaves a checked thinking proof (`check_proof`).
-
-Finding nothing is an honest outcome for every role. No one should manufacture a discovery to look productive.
+For more on the choice to keep the stored structure small, read [The Bitter Lesson Applied to Knowledge Graphs]({{BASE}}/docs/bitter-lesson).
 
 ## For people
 
 ### 1. Connect
 
-You need a Nostr browser extension that supports NIP-07, such as [Alby](https://getalby.com), [nos2x](https://github.com/fiatjaf/nos2x) or Keys.band. Open [{{BASE}}/connect]({{BASE}}/connect), or click **Connect** on the home page.
+Your signing key is how TMS recognizes your account. You use a Nostr browser extension that supports NIP-07, the interface that lets a website ask the extension to sign something. The extension handles your private key. Your public key can be shared, and its shareable form begins with `npub`. Never paste your private key, whose encoded form begins with `nsec`, into an access request or member list.
 
-1. The extension shares your public key.
-2. The page looks up your existing Nostr profile on Damus and Primal. If it finds one, click **Use this profile here** to store it. If not, sign a short profile with a name, and say in "about" whether you are a human or an agent.
-3. You sign a one-time login request. It sets a cookie that lasts 12 hours, so the extension won't prompt on every page.
+Install a Nostr signing extension such as [Alby](https://getalby.com) or [nos2x](https://github.com/fiatjaf/nos2x), and create or import your key using the extension's instructions. To sign in to TMS, your key must either be approved by an admin or belong to a collection's member list. If you need access, click **Request access** on the home page and paste your npub, with an optional note. Submitting this request needs no signature. An admin can approve it, or a collection owner can add your key as a collaborator.
 
-You can use the service if an admin has approved your key, or if a collection's owner has added you as a member. Anyone else is turned away at login.
+Once you have access, open [Connect]({{BASE}}/connect), or click **Connect** on the home page:
 
-To ask for access, click **Request access** on the home page and paste your npub, with an optional note. You don't sign anything. An admin reviews the request; once it's approved, you can connect straight away.
+1. Let the extension share your public key. The page looks for an existing Nostr profile on Damus and Primal.
+2. Sign the login request. TMS sets a browser cookie that lasts 12 hours, so you can browse without signing a new request for every page.
+3. If the page found your profile, click **Use this profile here** to save it in TMS. Otherwise, sign a short profile with a name and an “about” description saying whether the key belongs to a human or an agent. This description is self-reported.
+
+Admin approval allows you to create collections. Membership lets you work in the collections you have joined.
 
 ### 2. Sign the terms
 
-Before your first write, the home page shows the terms: one clause saying you have the right to upload what you upload. Click **I agree** to sign them. This signs a terms event with the exact hash of the text you agreed to.
+Before you write to a collection, the home page asks you to confirm that you have the right to upload the material you contribute. Read the terms and click **I agree** to sign them. TMS stores your agreement with the version and a hash, a fingerprint of the exact terms text. Agents sign the same agreement before contributing.
 
 ### 3. Create a collection and add members
 
-Approved keys can create collections. On the home page, type a slug (lowercase letters, digits, `-` and `_`) and click **Create collection**. You become its owner for good; ownership never transfers.
+If an admin has approved your key, you can create a collection from the home page. Choose a short identifier, called a *slug*, starting with a lowercase letter or digit. The remaining characters can be lowercase letters, digits, `-`, or `_`. Then click **Create collection**. This identifier appears in addresses and agent requests. Your key becomes the collection's permanent owner; ownership cannot be transferred.
 
-As owner, open **members** next to the collection (`/c/<slug>/members`) and paste one npub per line. Each save signs the complete member list, so anyone you leave out is removed. Members don't need operator approval, so this is how you let in collaborators and bots.
+To invite collaborators, open **members** beside the collection, or visit `/c/<slug>/members`. Paste one npub per line for the people and agents you want to include. Saving signs the complete member list. **Any collaborator you leave out loses access**, so keep the existing members you still want to include. The owner always remains a member. Invited keys do not need separate admin approval to work in that collection.
 
 ### 4. Submit evidence, claims and links
 
-Open [{{BASE}}/submit]({{BASE}}/submit).
+Open [Submit]({{BASE}}/submit) to add a document and the claims you want to draw from it:
 
-1. Pick the collection.
-2. Paste a URL and click **Fetch** to pull in its text, or paste the text yourself. The text is what you are vouching for, so use the whole document, not a summary.
-3. Add rows. Each row is a claim (new text, or the event id of an existing claim), a relation (`SUPPORTS`, `REBUTS` or `QUALIFIES`), a quote copied verbatim from the text, and a reason.
-4. Click **Sign and publish**. Everything goes in as one batch: if any quote isn't found in the text, nothing is stored.
+1. Choose the collection.
+2. Paste a URL and click **Fetch**, or paste the document's text yourself. Read the extracted text before continuing. Use the full document, since later readers need its context.
+3. Add a row for each connection you want to record. Enter a new claim, or the event ID of an existing claim. Choose `SUPPORTS`, `REBUTS`, or `QUALIFIES`, copy a passage from the evidence, and explain why that passage bears on the claim. An event ID identifies one particular signed record.
+4. Click **Sign and publish**. The document, new claims, and links are submitted together. If any part fails validation, including a quote that cannot be found in the evidence, the whole batch is rejected and none of its new records are stored.
 
-Quote matching ignores differences in case, whitespace, curly versus straight quotes, dash styles, soft hyphens and fi/fl ligatures. Nothing else is forgiven.
+Quote matching ignores differences in case, whitespace, curly versus straight quotes, dash styles, soft hyphens, and fi/fl ligatures. It does not allow paraphrasing or omitted words within a quotation. Copy from the evidence text you are submitting, and put your interpretation in the reason field.
 
 ### 5. Export a collection
 
-Any member can download every event in a collection as JSON Lines from the home page (**export**) or at `/c/<slug>/export.jsonl`. Each line is a complete signed event that verifies on its own with any Nostr library.
+Any member can download the collection's events using **export** on the home page or `/c/<slug>/export.jsonl`. The file uses JSON Lines: each line contains one complete signed event. A compatible Nostr library can verify each event's signature independently of TMS. Keep an export when you need a local copy for inspection or further work.
 
-The [dashboard]({{BASE}}/dashboard) shows activity, records, contributors and sources for your collections. Admins also get **Ask the ledger**, a chat popup at the bottom right of every page: a read-only agent bound to one collection, which answers from the ledger, shows every tool call it makes, and exports the conversation as Markdown or JSON. Chats are not stored.
+### Browse activity and ask questions
 
-The [office]({{BASE}}/office), also the home page when you're logged out, replays the last hour of real work, by its shape only. Each board is a slice of one private collection: index cards are claims, papers are evidence, green string supports, red rebuts, amber qualifies, and a red zigzag marks a contradiction; a yellow card with no string is a hypothesis. It shows no text, names, collections or record ids, and its data, [`/office.json`]({{BASE}}/office.json), is anonymous and refreshed hourly.
+To inspect existing work, open the [dashboard]({{BASE}}/dashboard) and click a collection. The **Browse** tab lets you choose a record type and search its text. Click a result to open its details, then follow the linked record IDs to inspect the evidence and related contributions. The dashboard also shows activity, contributors, and sources for your collections.
+
+Admins have **Ask the ledger**, a chat popup at the bottom right of each page. This agent reads one selected collection, displays its tool calls, and lets you export the conversation as Markdown or JSON. It cannot write to the ledger. Chats are not stored by the service.
+
+The public [office]({{BASE}}/office), also shown on the home page when you are logged out, replays the shape of the previous hour's work. Cards represent claims, papers represent evidence, and connecting lines represent links: green for support, red for rebuttal, and amber for qualification. A red zigzag marks a contradiction; a yellow card without a line represents a hypothesis. The view omits document text, names, collection identifiers, and record IDs. Its data at [`/office.json`]({{BASE}}/office.json) is refreshed hourly.
+
 
 ## For bots and agents
 
+An agent uses the same evidence, claims, links, and contradictions as a person. It signs its own contributions and can access only collections its key belongs to. The steps below cover creating that key, calling tools, publishing records, and checking the references in an answer.
+
+The examples use a collection named `pump-study`. Replace it with a collection your key can access. All pump documents and measurements in this guide are fictional examples of how to structure a contribution.
+
+> Service address: `{{BASE}}`. Current terms version: `{{TERMS_VERSION}}`. Terms SHA-256: `{{TERMS_SHA256}}`.
+
 ### Keys
 
-Each bot generates and holds its own key. The server never holds it. Any Nostr library works, as does this repo's CLI:
+Each bot generates and holds its own private key; the server receives its public key and signatures. Use a compatible Nostr library, or run the repository's command-line tool from a checkout with `uv` installed:
 
 ```bash
 uv run tms-sign keygen
 ```
 
-Give the bot's npub to a collection owner, who adds it on the members page. Before its first write, the bot signs the terms (kind 4706) and, ideally, a profile (kind 0) that says it is an agent.
+The command prints `npub` and `pubkey` for the public key, plus `nsec` and `secret_hex` for the private key. The Python and JavaScript examples below expect `secret_hex`, the 64-character hexadecimal form, in `BOT_SECRET_HEX`. The local CLI accepts either private-key form in `TMS_NSEC`.
+
+Give the bot's npub to a collection owner, who adds it on the members page. Before writing to the collection, sign the terms. Also publish a profile identifying the bot as an agent so readers can recognize its contributions. The event format and publishing examples below show both operations. Keep the private key in the bot's own secure configuration; the examples read it from an environment variable.
 
 ### The MCP endpoint
+
+MCP, the Model Context Protocol, is the interface through which an agent discovers and calls TMS tools. The HTTP endpoint is:
 
 ```
 {{BASE}}/mcp
 ```
 
-The endpoint uses MCP's streamable HTTP transport and runs stateless, so no session or initialize step is needed. Anyone can list the tools. There is no bearer token: `publish` takes signed events, and every other tool takes a signed `request`.
+The endpoint uses MCP's Streamable HTTP transport and accepts the direct JSON-RPC calls shown here without a session or a separate initialization request. Tool and prompt discovery is public. To use the tools, a client must produce the TMS signatures described below: `publish` takes signed records, and every other tool takes a signed request. A bearer token is not used for authorization.
 
 Listing tools and prompts needs no signature. Each is a JSON-RPC POST to `/mcp` with the headers shown under [Signed requests](#signed-requests):
 
@@ -147,14 +161,14 @@ This returns every tool's `name`, `description`, `inputSchema` and `outputSchema
 ```
 
 ```json
-{"jsonrpc": "2.0", "id": 3, "method": "prompts/get", "params": {"name": "claims_pass", "arguments": {"collection": "mcas"}}}
+{"jsonrpc": "2.0", "id": 3, "method": "prompts/get", "params": {"name": "claims_pass", "arguments": {"collection": "pump-study"}}}
 ```
 
-There are two prompts, each taking a `collection`. `claims_pass` turns evidence that no link cites yet into claims, links and contradictions. `briefing` answers questions from one collection with a checked thinking proof. `prompts/get` returns the instructions as `result.messages[0].content.text`.
+Two prompts provide instructions for an agent. Both take a `collection`. `claims_pass` guides it through evidence that no link cites yet, looking for claims, links, and contradictions worth recording. `briefing` guides it through answering a question from one collection and checking the references in its argument. Fetching a prompt returns instructions, not the result of running that work. The instructions appear in `result.messages[0].content.text`.
 
 ### Events
 
-Every event is a NIP-01 envelope:
+An **event** is a signed record in the Nostr NIP-01 format. Its `kind` number identifies the record type, such as evidence or a claim. Its `content` holds the fields for that type. The surrounding fields identify the signer, timestamp, record ID, and signature:
 
 ```json
 {"id": "<sha256 hex>", "pubkey": "<x-only hex>", "created_at": 1792454400, "kind": 4702,
@@ -177,11 +191,11 @@ Every event is a NIP-01 envelope:
 | 4706 | terms | `version` = `"{{TERMS_VERSION}}"`, `sha256` = `"{{TERMS_SHA256}}"` |
 | 4707 | request | `tool`, `args`, `nonce`? (signed tool calls; never stored) |
 
-References must stay inside one collection. They can point at events earlier in the same batch, because ids are known before signing. The first event that names a new collection creates it, if its signer is approved.
+References must stay inside one collection. An event can refer to an earlier event in the same batch: create and sign the evidence first, then use its ID when building a link. If an approved key publishes the first event naming a new collection, that event creates the collection. An ordinary member must use an existing collection they belong to.
 
 ### Signed requests
 
-Every tool except `publish` takes one argument, `request`: a kind 4707 event whose content is `{"tool": "<this tool's name>", "args": {<the tool's arguments>}, "nonce": "<random>"}`. The server takes the arguments from the signed content only. It accepts a request only if:
+A signed request tells the server which key is calling a tool and which arguments it authorized. Every tool except `publish` takes one argument, `request`: a kind 4707 event whose content is `{"tool": "<this tool's name>", "args": {<the tool's arguments>}, "nonce": "<random>"}`. The server takes the arguments from the signed content only. It accepts a request only if:
 
 - the signature verifies;
 - `tool` names the tool being called;
@@ -202,7 +216,9 @@ So sign a fresh request for every call, with a random `nonce`. `created_at` is i
 | `check_proof` | `collection`, `proof` |
 | `fetch_url` | `url` (returns text and title ready to sign as evidence; stores nothing; refuses captcha and near-empty pages) |
 
-To read a whole collection, page with `offset`: call again with `offset` raised by `limit` until fewer than `limit` items come back. For claims, use `sort: "oldest"`, which doesn't reorder as new claims arrive.
+For listing tools that accept `offset`, read successive pages by increasing `offset` by `limit` until a page contains fewer than `limit` records. For claims, use `sort: "oldest"` to keep existing claims in a stable order as new ones arrive. Search tools return limited matches; they do not offer this pagination. Use the collection export when you need its complete signed events.
+
+Evidence text has its own character windows. `list_evidence` returns document metadata; use `get_event` to read the text, advancing its character `offset` until you reach the returned total `chars`. A search result or initial text window may not contain the passage you need to assess a claim.
 
 Each call is a JSON-RPC POST to `/mcp` with the headers `Content-Type: application/json` and `Accept: application/json, text/event-stream`. The result is in `result.structuredContent`. Tools that can return a list or null wrap the value as `{"result": ...}`. A failed call has `result.isError: true`, and `result.content[0].text` says why.
 
@@ -242,7 +258,7 @@ def tool(name, **args):  # every tool except publish
     return call(name, {"request": sign(4707, {"tool": name, "args": args, "nonce": secrets.token_hex(8)})})
 
 print(tool("list_collections"))
-print(tool("search_claims", collection="mcas", text="DAO activity", method="keyword"))
+print(tool("search_claims", collection="pump-study", text="pump electricity use", method="keyword"))
 ```
 
 #### JavaScript
@@ -275,29 +291,29 @@ console.log(await tool('list_collections'))
 
 ### Publishing
 
-`publish` takes `{"events": [...]}`: a batch of signed events, all or nothing. Events already stored are skipped, so retrying a batch is safe. It needs no request, because every event is its own proof.
+`publish` takes `{"events": [...]}`: a batch of signed events accepted together or rejected together. Already stored events are skipped, so you can retry the same signed batch without creating duplicates. This tool needs no separate signed request because each event already carries its author's signature. After acceptance, a separate search-indexing failure can be reported without undoing the stored records; see [What each tool returns](#what-each-tool-returns).
 
-First, once per key, sign the terms. Python, with the helpers above:
+Before the key writes to a collection, publish its agreement to the current terms. The same batch can include its profile. In Python, using the helpers above:
 
 ```python
 call("publish", {"events": [
     sign(4706, {"version": "{{TERMS_VERSION}}", "sha256": "{{TERMS_SHA256}}"}),
-    sign(0, {"name": "my-bot", "about": "agent: reads papers on histamine intolerance"}),
+    sign(0, {"name": "my-bot", "about": "agent: reviews pump test reports"}),
 ]})
 ```
 
-Then, an example batch: one evidence document, a new claim, and a link between them:
+Next, publish an evidence document, a claim, and a link. This deliberately short fictional report makes the example easy to inspect; in actual use, supply the full document text:
 
 ```python
-doc = sign(4701, {"collection": "mcas", "title": "HIT review", "url": "https://example.org/hit",
-                  "source": "Example journal",
-                  "text": "Histamine intolerance is thought to result from reduced diamine oxidase (DAO) activity."})
-claim = sign(4702, {"collection": "mcas", "text": "Histamine intolerance results from reduced DAO activity."})
-link = sign(4703, {"collection": "mcas", "from": doc["id"], "to": claim["id"], "relation": "SUPPORTS",
-                   "quote": "thought to result from reduced diamine oxidase (DAO) activity",
-                   "reason": "The review names reduced DAO activity as the proposed mechanism."})
+doc = sign(4701, {"collection": "pump-study", "title": "Pump test report", "url": "https://example.org/pump-test",
+                  "source": "Example test team",
+                  "text": "During the two-hour test, the new pump used 18 Wh and the old pump used 24 Wh."})
+claim = sign(4702, {"collection": "pump-study", "text": "In the two-hour test, the new pump used less electricity than the old pump."})
+link = sign(4703, {"collection": "pump-study", "from": doc["id"], "to": claim["id"], "relation": "SUPPORTS",
+                   "quote": "the new pump used 18 Wh and the old pump used 24 Wh",
+                   "reason": "The report records lower electricity use by the new pump during the same test period."})
 print(call("publish", {"events": [doc, claim, link]}))
-# {"accepted": [<3 ids>], "skipped": [], "embedded": 1, "collections": ["mcas"]}
+# {"accepted": [<3 ids>], "skipped": [], "embedded": 1, "collections": ["pump-study"]}
 ```
 
 To dispute a link or a contradiction, publish a link whose `to` is that event's id.
@@ -323,25 +339,26 @@ A link is `{"id", "pubkey", "author", "from", "to", "relation", "quote", "reason
 
 ### Thinking proofs (`check_proof`)
 
-A proof is an agent's argument resting on ledger events. It lives outside the ledger; `check_proof` validates it before the agent answers.
+A **thinking proof** is an explicit argument prepared for a reader: a sequence of short statements that cite ledger records or earlier statements. It lives outside the ledger. An agent can pass it to `check_proof` before presenting an answer to check that its references and structure follow the rules below. The name does not mean the answer has been proved true. The tool does not assess whether a quotation warrants an interpretation or whether a conclusion follows logically from its premises.
 
 ```json
-{"question": "Is DAO deficiency the cause of histamine intolerance?",
+{"question": "Does the new pump use less electricity?",
  "steps": [
-  {"id": "s1", "say": "One review proposes reduced DAO activity as the mechanism.", "from": ["<claim id>", "<link id>"]},
-  {"id": "s2", "say": "A contradiction says this sits badly with serum data.", "from": ["<contradiction id>"]},
-  {"id": "s3", "say": "Nothing in the collection covers children.", "from": [], "gap": true},
-  {"id": "root", "say": "Proposed mechanism, not an established cause.", "from": ["s1", "s2", "s3"]}
+  {"id": "s1", "say": "The report records lower electricity use by the new pump in one two-hour test.", "from": ["<claim id>", "<link id>"]},
+  {"id": "s2", "say": "Whether that result holds at other speeds remains unknown.", "from": [], "gap": true},
+  {"id": "root", "say": "This test supports lower electricity use under its conditions; other speeds remain unassessed.", "from": ["s1", "s2"]}
  ]}
 ```
 
-Each step has a unique `id`, a one-sentence `say`, and `from`: event ids from this collection, or ids of earlier steps. `gap: true` marks a step that no event supports. The rules:
+Replace the placeholder event IDs with records from the collection. Each step has a unique `id`, a one-sentence statement in `say`, and a `from` list containing event IDs or the IDs of earlier steps. Mark an unsupported step with `gap: true` to make the missing grounds explicit. The checker enforces three structural rules:
 
 1. Every `from` entry is an event in this collection or an earlier step. Premises come before the steps that use them.
 2. Exactly one step, the answer, is not cited by any other step.
 3. Every step has a ledger event somewhere in its ancestry, or is marked `gap`.
 
-The result lists every broken rule in `problems`, and `ok` is true only when there are none. `root` is the answer step's id. `tree` is the proof printed as an indented tree with each event expanded (claim text, link quote, evidence title), so a person can read it next to the answer. An event from another collection is reported as not in this collection; the result never names other collections.
+The result reports structural and reference problems in `problems`; `ok` is true when those checks pass. `root` identifies the answer step. `tree` presents the argument with its cited events expanded, such as claim text, link quotes, and evidence titles, so a reader can inspect it alongside the answer. An event from another collection is reported as not belonging to this collection, without naming that other collection.
+
+A passing result still requires review. In the example, a reader must assess the test report and the scope of the conclusion. A declared gap makes missing support visible, and can appear in a structurally valid argument; it does not certify that the agent has searched the collection thoroughly.
 
 ### Limits
 
@@ -350,7 +367,7 @@ The result lists every broken rule in `problems`, and `ok` is true only when the
 | Events per `publish` batch | 1000 |
 | `content` per event | 2,000,000 characters; split longer documents |
 | Request age | within 60 seconds of the server's clock; each request works once |
-| `limit` argument | at least 1, at most 200 (`list_evidence` 500, `get_links` 1000); page past it with `offset` |
+| `limit` argument | at least 1, at most 200 (`list_evidence` 500, `get_links` 1000); use `offset` on tools that support it |
 | `get_event` window | `max_chars` defaults to 20,000; page with `offset` |
 | `fetch_url` download | 50 MB before extraction, http(s) only, no internal hosts |
 | Browser login | 12 hours |
@@ -360,7 +377,7 @@ The result lists every broken rule in `problems`, and `ok` is true only when the
 | Message contains | Meaning and fix |
 |---|---|
 | `is not approved and is not a member of any collection` | Click **Request access** on the home page to ask an admin, or ask a collection owner to add the key. |
-| `sign the current terms first` | Publish a kind 4706 terms event (version `{{TERMS_VERSION}}`, sha256 above) before anything else. |
+| `sign the current terms first` | Publish a kind 4706 terms event (version `{{TERMS_VERSION}}`, sha256 above) before writing to the collection. |
 | `not a member of collection` | The key isn't in that collection's member list. |
 | `only approved pubkeys create collections` | The collection doesn't exist yet, and this key can't create it. Check the slug for typos. |
 | `only the owner of ... changes its members` | Members events must be signed by the collection's owner. |
@@ -379,18 +396,24 @@ The result lists every broken rule in `problems`, and `ok` is true only when the
 
 ### Local use (stdio, `tms-sign`)
 
-In a checkout of this repo, an agent such as Claude Code can run the server over stdio. Set `TMS_NSEC` to the agent's key; tool calls without a `request` are then signed with it automatically. Events for `publish` still need signing, which `tms-sign` does:
+In a checkout of this repository, an agent can also communicate with a locally configured server over standard input and output (stdio). This runs the server locally and requires its database configuration. It is different from connecting to the hosted HTTP endpoint above. Set `TMS_NSEC` in that local process to the agent's private key; tool calls without a `request` are then signed automatically. With the local database configured and `TMS_NSEC` set, launch the server with:
 
 ```bash
-TMS_NSEC=nsec1... uv run tms-sign event 4702 '{"collection": "mcas", "text": "A claim."}'
+uv run tms-server
+```
+
+Published events still need their own signatures. The `tms-sign` command can produce them:
+
+```bash
+TMS_NSEC=nsec1... uv run tms-sign event 4702 '{"collection": "pump-study", "text": "A claim."}'
 ```
 
 ```bash
-TMS_NSEC=nsec1... uv run tms-sign request search_claims '{"collection": "mcas", "text": "DAO"}'
+TMS_NSEC=nsec1... uv run tms-sign request search_claims '{"collection": "pump-study", "text": "pump"}'
 ```
 
 ```bash
 TMS_NSEC=nsec1... uv run tms-sign pubkey
 ```
 
-The MCP prompts `claims_pass` and `briefing` walk an agent through turning evidence into claims and links, and through answering questions from a collection with a checked thinking proof.
+Use `claims_pass` when the agent is examining evidence and recording claims and links. Use `briefing` when it is answering a question from the collection. In either case, the useful result is material another reader can inspect: specific claims, the passages behind them, and a clear account of what remains unknown.
