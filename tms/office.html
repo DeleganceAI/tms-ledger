@@ -10,6 +10,14 @@
   header{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;padding:8px 14px;background:#1e1826;border-bottom:1px solid #3a3144;flex-shrink:0}
   header b{font-size:15px}header a{color:#cbbfd4;text-decoration:none}header a:hover,header a[aria-current="page"]{color:#fff}
   header nav{display:flex;gap:12px;margin-left:auto;flex-wrap:wrap}
+  #landing:not([hidden])~nav{margin-left:0}
+  header{position:relative}
+  #menu-btn{display:none;font:inherit;font-size:18px;line-height:1;padding:3px 9px;border-radius:6px;border:1px solid #4a3f57;background:none;color:#f4efe6;cursor:pointer}
+  @media(max-width:900px){  /* narrow: the nav links fold into a menu */
+    #menu-btn{display:block;margin-left:auto}#landing:not([hidden])~#menu-btn{margin-left:0}
+    header nav{display:none;position:absolute;top:100%;right:8px;z-index:30;flex-direction:column;gap:8px;padding:10px 16px;background:#1e1826;border:1px solid #3a3144;border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
+    header.open nav{display:flex}
+  }
   #office-desc{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap} /* screen readers only */
   #stage{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;container-type:size}
   #c{display:block;aspect-ratio:16/9;width:min(100%,calc((100dvh - 6.5rem)*1.7778));height:auto;max-width:100%;max-height:calc(100dvh - 6.5rem)}
@@ -18,11 +26,11 @@
   #ticker{flex-shrink:0;display:flex;flex-wrap:wrap;justify-content:center;gap:4px 22px;padding:6px 14px;background:#1e1826;border-top:1px solid #3a3144;font-size:13px;color:#cbbfd4}
   #ticker b{font:600 14px ui-monospace,Menlo,monospace;color:#f4efe6;font-variant-numeric:tabular-nums;transition:color .6s}
   #ticker b.up{color:#a9d6c4;transition:none}
-  #landing{flex-shrink:0;display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:4px 12px;padding:5px 14px;background:#251e2e;border-bottom:1px solid #3a3144}
+  #landing{flex:1;min-width:0;display:flex;align-items:center;justify-content:center;gap:12px;white-space:nowrap}
   #landing h1{font-size:14px;margin:0}
   #landing p{margin:0;font-size:13px;color:#cbbfd4}
   #landing .btn{padding:2px 10px;font-size:13px;border-radius:6px}
-  @media(max-width:960px){#landing p{display:none}}  /* stay one line: the subtitle goes first */
+  @media(max-width:1180px){#landing p{display:none}}@media(max-width:820px){#landing h1{display:none}}  /* stay one line: text goes first, buttons stay */
   .btn{font:inherit;padding:7px 14px;border-radius:7px;border:1px solid #8ab6f9;background:#8ab6f9;color:#1e1826;cursor:pointer;text-decoration:none;font-weight:600}
   .btn.ghost{background:none;color:#cfe0ff}
   dialog{background:#2b2433;color:#f4efe6;border:1px solid #4a3f57;border-radius:12px;width:min(92vw,440px)}
@@ -32,6 +40,12 @@
   dialog textarea{min-height:80px;font-family:system-ui,sans-serif}
   #req-msg{min-height:1.2em;font-size:13px}#req-msg.err{color:#f4a6a0}#req-msg.ok{color:#a9d6c4}
   #agency{flex-shrink:0;background:#1e1826;border-top:1px solid #3a3144;padding:6px 14px 8px}
+  #legend-tabs{display:flex;justify-content:center;gap:4px;margin:0 0 6px}
+  #legend-tabs button{font:inherit;font-size:12.5px;padding:2px 12px;border-radius:999px;border:1px solid #4a3f57;background:none;color:#cbbfd4;cursor:pointer}
+  #legend-tabs button[aria-selected="true"]{background:#4a3f57;color:#fff}
+  #records{list-style:none;margin:0 auto;padding:0;max-width:1300px;display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px 18px}
+  #records li{display:grid;grid-template-columns:48px 1fr;align-content:start;column-gap:8px;font-size:12.5px;line-height:1.35;color:#cbbfd4}
+  #records canvas{width:48px;height:48px;grid-row:span 3}#records b{font-size:13.5px;color:#f4efe6}#records i{font-style:normal;color:#9d91a8;margin-top:2px}
   #agents{list-style:none;margin:0 auto;padding:0;max-width:1200px;display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px 18px}
   #agents li{display:grid;grid-template-columns:48px 1fr;column-gap:8px;font-size:12.5px;line-height:1.35;color:#cbbfd4}
   #agents canvas{width:48px;height:84px;grid-row:span 3}
@@ -40,14 +54,16 @@
 </style>
 </head>
 <body>
-<header><b>TMS ledger</b><nav><a href="/">Home</a><a href="/submit">Submit</a><a href="/dashboard">Dashboard</a><a href="/docs">Docs</a><a href="/office" aria-current="page">Office</a><a href="/connect">Connect</a></nav>
+<header><b>TMS ledger</b><div id="landing" hidden><h1>Deploy your own intelligence agency</h1><p>A private evidence ledger for people and AI agents</p>
+  <button class="btn" id="req-open" type="button">Request access</button><a class="btn ghost" href="/docs">How it works</a></div><button id="menu-btn" type="button" aria-label="Menu" aria-expanded="false" aria-controls="site-nav">☰</button><nav id="site-nav"><a href="/">Home</a><a href="/submit">Submit</a><a href="/dashboard">Dashboard</a><a href="/docs">Docs</a><a href="/office" aria-current="page">Office</a><a href="/connect">Connect</a></nav>
 <p id="office-desc">Little bots file papers, pin them to boards and string them together. Each board is a slice of a private collection, shown by its shape only: index cards are claims, papers are evidence, green string supports, red rebuts, amber qualifies, and a red zigzag marks a contradiction. A yellow card with no string is a hypothesis. The bots are five kinds of agent, listed below the office. Every mark is a squiggle; no text, names or records are shown.</p></header>
-<div id="landing" hidden><h1>Deploy your own intelligence agency</h1><p>A private evidence ledger for people and AI agents</p>
-  <button class="btn" id="req-open" type="button">Request access</button><a class="btn ghost" href="/connect">Connect</a><a class="btn ghost" href="/docs">How it works</a></div>
 <main id="stage">
 <canvas id="c" role="img" aria-label="Animated office of little bots pinning anonymous papers and cards to boards" aria-describedby="office-desc"></canvas>
 </main>
-<section id="agency" aria-label="The kinds of agents in the office"><ul id="agents"></ul></section>
+<section id="agency" aria-label="Legend">
+  <div id="legend-tabs" role="tablist"><button role="tab" id="tab-agents" aria-controls="agents" aria-selected="true">Agents</button><button role="tab" id="tab-records" aria-controls="records" aria-selected="false">Records</button></div>
+  <ul id="agents" role="tabpanel" aria-labelledby="tab-agents"></ul><ul id="records" role="tabpanel" aria-labelledby="tab-records" hidden></ul>
+</section>
 <footer id="ticker" aria-label="Ledger totals"></footer>
 <dialog id="req"><form id="req-form" method="dialog">
   <b>Request access</b>
@@ -1022,6 +1038,46 @@ $('agents').innerHTML = AGENTS.map(a => `<li><canvas width="96" height="168" ari
   drawBot({ x: 24, y: 80, type: AGENTS[i], color: AGENTS[i].color, accent: AGENTS[i].accent, view: 'front', face: 1, blinkT: 1, hopY: 0, tilt: 0, idea: 0, bob: () => 0 });
   ctx = main;
 });
+// the records legend: what each mark on a board stands for, drawn with the board's own code
+const PAPER = k => newPaper(k, Math.random);  // the legend never touches the animation's seeded random
+const CARD = () => ({ ...PAPER('claim'), kind: 'card' });
+const RECORDS = [
+  { name: 'Evidence', does: 'A paper, page or post, stored whole and signed by whoever added it.',
+    why: 'The papers.', draw: () => drawPaper(PAPER('ev'), 24, 25, 26, 32) },
+  { name: 'Source', does: 'Where evidence came from: a journal, site or account, plus its URL.',
+    why: 'A label on the paper.', draw: () => {
+      drawPaper(PAPER('ev'), 22, 25, 26, 32);
+      ctx.fillStyle = '#6d8fd0'; rrect(26, 33, 18, 9, 2); ctx.fill(); ctx.fillStyle = '#fff'; ctx.fillRect(29, 36.5, 12, 1.6); } },
+  { name: 'Claim', does: 'One statement about the world, in its own words.',
+    why: 'The index cards.', draw: () => { drawPaper(CARD(), 24, 26, 34, 24); drawPin({ x: 24, y: 16 }, '#d8443b', .7); } },
+  { name: 'Hypothesis', does: 'A claim nothing links to yet: an idea waiting for evidence.',
+    why: 'The yellow cards with no string.', draw: () => { drawPaper(PAPER('claim'), 24, 26, 34, 24); drawPin({ x: 24, y: 16 }, '#3f7fd8', .7); } },
+  { name: 'Link', does: `Evidence that <span style="color:${REL_COL.S}">supports</span>, <span style="color:${REL_COL.R}">rebuts</span> or <span style="color:${REL_COL.Q}">qualifies</span> a claim, with a quote.`,
+    why: 'The strings.', draw: () => {
+      drawPaper(PAPER('ev'), 11, 30, 16, 20); drawPaper(CARD(), 37, 18, 20, 14);
+      [['S', -6], ['R', 0], ['Q', 6]].forEach(([k, d]) => drawString({ x: 14, y: 26 + d }, { x: 33, y: 18 + d / 2 }, REL_COL[k], 1, 1.4)); } },
+  { name: 'Contradiction', does: 'Claims that cannot all be true, and why. It does not say which is wrong.',
+    why: 'The red zigzag.', draw: () => {
+      drawPaper(CARD(), 14, 15, 22, 15); drawPaper(CARD(), 34, 35, 22, 15); zigzag([{ x: 15, y: 18 }, { x: 33, y: 32 }], 1); } },
+  { name: 'Collection', does: 'A private set of records with one owner; only members can see it.',
+    why: 'Each board shows a slice.', draw: () => {
+      ctx.fillStyle = '#a5714b'; rrect(4, 8, 40, 32, 4); ctx.fill(); ctx.fillStyle = '#d9aa70'; ctx.fillRect(8, 12, 32, 24);
+      drawPaper(CARD(), 17, 20, 11, 8, 0, 1, false); drawPaper(PAPER('ev'), 31, 27, 9, 11, 0, 1, false); drawString({ x: 31, y: 22 }, { x: 19, y: 18 }, REL_COL.S, 1, 1); } },
+];
+$('records').innerHTML = RECORDS.map(r => `<li><canvas width="96" height="96" aria-hidden="true"></canvas><b>${r.name}</b><span>${r.does}</span><i>${r.why}</i></li>`).join('');
+[...$('records').querySelectorAll('canvas')].forEach((c, i) => {
+  const main = ctx; ctx = c.getContext('2d'); ctx.setTransform(2, 0, 0, 2, 0, 0);
+  RECORDS[i].draw();
+  ctx = main;
+});
+const header = document.querySelector('header');
+$('menu-btn').onclick = () => $('menu-btn').setAttribute('aria-expanded', String(header.classList.toggle('open')));
+document.addEventListener('click', e => { if (!header.contains(e.target)) { header.classList.remove('open'); $('menu-btn').setAttribute('aria-expanded', 'false'); } });
+const showLegend = which => ['agents', 'records'].forEach(k => {
+  $(k).hidden = k !== which; $('tab-' + k).setAttribute('aria-selected', String(k === which));
+});
+$('tab-agents').onclick = () => showLegend('agents');
+$('tab-records').onclick = () => showLegend('records');
 if (location.pathname === '/') $('landing').hidden = false;
 fetch('/office.json').then(r => r.ok ? r.json() : null).then(d => {
   if (!d) return;
