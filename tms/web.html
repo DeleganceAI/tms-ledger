@@ -173,7 +173,7 @@ function show(relay) {
   const path = location.pathname
   $('termsBox').hidden = ME.terms_signed
   $('termsText').textContent = ME.terms_text
-  if (path === '/') { renderProfile(relay); renderHome() }
+  if (path === '/' || path === '/connect') { renderProfile(relay); renderHome() }
   else if (path === '/submit') renderSubmit()
   else if (path.startsWith('/c/')) renderMembers(decodeURIComponent(path.split('/')[2]))
 }

@@ -1,4 +1,4 @@
-"""Operator page at /admin: embedding spend, users, and a few context numbers.
+"""Operator page at /admin: access requests, embedding spend, users, and a few context numbers.
 
 Admins are the pubkeys in TMS_ADMINS, logged in with the same cookie as the other pages.
 Everyone else gets a 404, so the page's existence isn't advertised. Plain tables, server-rendered.
@@ -8,7 +8,7 @@ from __future__ import annotations
 from html import escape
 
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, PlainTextResponse
+from starlette.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from starlette.routing import Route
 
 from . import events as E
@@ -24,7 +24,8 @@ SPEND_SQL = """SELECT
   FROM embed_calls"""
 
 USERS_SQL = """WITH keys AS (
-    SELECT unnest(%s::text[]) AS pubkey UNION SELECT pubkey FROM members UNION SELECT pubkey FROM events)
+    SELECT unnest(%s::text[]) AS pubkey UNION SELECT pubkey FROM approvals
+    UNION SELECT pubkey FROM members UNION SELECT pubkey FROM events)
   SELECT k.pubkey, p.name, p.about,
          (SELECT count(*) FROM members m WHERE m.pubkey = k.pubkey) AS collections,
          (SELECT count(*) FROM collections c WHERE c.owner = k.pubkey) AS owned,
@@ -36,8 +37,12 @@ USERS_SQL = """WITH keys AS (
 
 
 def report(conn) -> dict:
-    users = conn.execute(USERS_SQL, (sorted(L.APPROVED),)).fetchall()
+    users = conn.execute(USERS_SQL, (sorted(L.APPROVED | L.ADMINS),)).fetchall()
     return {
+        "requests": conn.execute("""SELECT id, npub, note, at FROM access_requests
+            WHERE status = 'pending' ORDER BY at""").fetchall(),
+        "approvals": conn.execute("""SELECT a.pubkey, a.at, p.name, (SELECT name FROM profiles q WHERE q.pubkey = a.approved_by) AS by_name,
+              a.approved_by FROM approvals a LEFT JOIN profiles p ON p.pubkey = a.pubkey ORDER BY a.at DESC""").fetchall(),
         "spend": conn.execute(SPEND_SQL).fetchone(),
         "by_pubkey": conn.execute("""SELECT e.pubkey, p.name, count(*) AS calls, sum(e.tokens) AS tokens, sum(e.cost_usd) AS cost
             FROM embed_calls e LEFT JOIN profiles p ON p.pubkey = e.pubkey GROUP BY 1, 2 ORDER BY cost DESC, calls DESC""").fetchall(),
@@ -82,8 +87,21 @@ body{{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 system-ui,san
 a{{color:var(--accent)}}h1{{font-size:18px}}h2{{font-size:13px;letter-spacing:.05em;text-transform:uppercase;color:var(--ink3);margin:22px 0 6px}}
 table{{border-collapse:collapse;background:var(--panel);width:100%;margin-bottom:6px}}td,th{{text-align:left;padding:5px 8px;border:1px solid var(--line);vertical-align:top}}
 th{{font-size:12px;color:var(--ink3)}}td{{font-variant-numeric:tabular-nums}}.mono{{font-family:var(--mono);font-size:12px}}
+form{{display:inline}}button{{font:inherit;padding:3px 10px;border-radius:5px;border:1px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer}}
+button.ghost{{background:none;color:var(--accent)}}td.note{{white-space:pre-wrap;max-width:420px}}
 </style></head><body><main>
 <h1>TMS admin</h1><p><a href="/">Home</a> · <a href="/dashboard">Dashboard</a> · <a href="/office">Office</a> · <a href="/docs">Docs</a></p>
+<h2>Access requests ({len(r["requests"])} pending)</h2>
+{_table(["npub", "Note", "Asked", ""],
+        [[f'<span class="mono">{escape(q["npub"])}</span>', f'<span class="note">{escape(q["note"] or "")}</span>', when(q["at"]),
+          f'<form method="post" action="/admin/requests/{q["id"]}/approve"><button>Approve</button></form> '
+          f'<form method="post" action="/admin/requests/{q["id"]}/dismiss"><button class="ghost">Dismiss</button></form>']
+         for q in r["requests"]])}
+<h2>Approved here ({len(r["approvals"])})</h2>
+{_table(["Who", "npub", "Approved by", "When"],
+        [[escape(a["name"] or "—"), f'<span class="mono">{escape(E.bech32_encode("npub", a["pubkey"]))}</span>',
+          _who(a["approved_by"], a["by_name"]), when(a["at"])] for a in r["approvals"]])}
+<p class="mono">Access = TMS_ADMINS + TMS_APPROVED ({len(L.APPROVED | L.ADMINS)} from the environment) + the keys approved here.</p>
 <h2>Embedding spend (DeepInfra)</h2>
 {_table(["Today (UTC)", "7 days", "30 days", "All time", "Tokens", "Calls"],
         [[_usd(s["today"]), _usd(s["last_7_days"]), _usd(s["last_30_days"]), _usd(s["all_time"]), f"{s['tokens']:,}", s["calls"]]])}
@@ -111,4 +129,27 @@ def admin(request: Request):
         return HTMLResponse(render(report(conn)))
 
 
-routes = [Route("/admin", admin)]  # sync handler: Starlette runs it in its threadpool
+def decide(request: Request):
+    """Approve or dismiss a pending request. Approval writes the approvals table, so it takes
+    effect on the key's next call, with no redeploy."""
+    pubkey = cookie_pubkey(request)
+    if pubkey is None or pubkey not in L.ADMINS or request.path_params["action"] not in ("approve", "dismiss"):
+        return PlainTextResponse("Not Found", status_code=404)
+    origin = request.headers.get("origin")
+    if origin and origin != str(request.base_url).rstrip("/"):  # the cookie is SameSite=Lax too
+        return PlainTextResponse("cross-site request refused", status_code=403)
+    rid, action = int(request.path_params["id"]), request.path_params["action"]
+    status = {"approve": "approved", "dismiss": "dismissed"}[action]
+    with L.connect() as conn, conn.transaction():
+        row = conn.execute("""UPDATE access_requests SET status = %s, decided_by = %s, decided_at = now()
+                              WHERE id = %s AND status = 'pending' RETURNING npub""", (status, pubkey, rid)).fetchone()
+        if row and action == "approve":
+            conn.execute("INSERT INTO approvals (pubkey, approved_by) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                         (E.pubkey_hex(row["npub"]), pubkey))
+    return RedirectResponse("/admin", status_code=303)
+
+
+routes = [  # sync handlers: Starlette runs them in its threadpool
+    Route("/admin", admin),
+    Route("/admin/requests/{id:int}/{action:str}", decide, methods=["POST"]),
+]
