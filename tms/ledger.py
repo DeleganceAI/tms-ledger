@@ -87,6 +87,10 @@ def _limit(n, hi: int = 200) -> int:
     return max(1, min(int(n), hi))
 
 
+def _offset(n) -> int:
+    return max(0, int(n))
+
+
 # ---------------------------------------------------------------- embeddings
 
 def embed(texts: list[str], query: bool = False, pubkey: str | None = None,
@@ -157,6 +161,20 @@ def _download(uri: str) -> tuple[bytes, str]:
         return b"".join(chunks), r.headers.get("content-type", "")
 
 
+# Bot walls and captcha pages that publishers serve instead of the article.
+CHALLENGE = re.compile(r"recaptcha|hcaptcha|g-recaptcha|cf-challenge|challenge-platform|cf-turnstile|"
+                       r"just a moment\.\.\.|are you a robot|verify you are (a )?human|captcha", re.IGNORECASE)
+MIN_HTML_TEXT = 200  # chars; ponytail: one fixed floor, tune if real short pages get rejected
+
+
+def _reject_stub(uri: str, doc: str, text: str) -> None:
+    """Refuse an HTML page that is a bot challenge or nearly empty, so it never becomes evidence."""
+    n = len(text.strip())
+    if n < MIN_HTML_TEXT or (n < 2000 and CHALLENGE.search(doc)):
+        raise ValueError(f"{uri} returned a bot challenge or near-empty page ({n} chars of text), not the "
+                         "document; get the text another way (an API, an archive copy) and publish it as evidence")
+
+
 def fetch_text(uri: str) -> tuple[str, str | None]:
     """Fetch an http(s) URL, or read a local path when ALLOW_LOCAL, and return (plain text, title).
     PDF via pdftotext, HTML via trafilatura, JATS XML by stripping tags; the title comes from
@@ -194,6 +212,7 @@ def fetch_text(uri: str) -> tuple[str, str | None]:
         text = trafilatura.extract(doc, include_comments=False, include_tables=True) or ""
         m = re.search(r"<title[^>]*>(.*?)</title>", doc, re.S | re.I)
         title = m.group(1) if m else trafilatura.extract_metadata(doc).title
+        _reject_stub(uri, doc, text)
     elif "xml" in ctype or data.lstrip()[:5] == b"<?xml":
         # JATS full text from the Europe PMC REST API and similar: keep the words, drop the tags.
         doc = data.decode("utf-8", errors="replace")
@@ -439,6 +458,7 @@ CLAIM_COUNTS = """(SELECT count(*) FROM links l WHERE l.to_id = x.id AND l.relat
     (SELECT count(*) FROM contradictions k WHERE k.collection = x.collection AND x.id = ANY(k.claim_ids)) AS findings"""
 CLAIM_SORTS = {
     "recent": "received_at DESC, id",
+    "oldest": "received_at, id",  # stable order for paging through every claim
     "links": "supports + qualifies + rebuts DESC, received_at DESC, id",
     "unsupported": "supports + qualifies + rebuts ASC, received_at DESC, id",
     "unchallenged": "rebuts + qualifies ASC, supports DESC, received_at DESC, id",
@@ -446,7 +466,8 @@ CLAIM_SORTS = {
 }
 
 
-def list_claims(conn, pubkey: str, collection: str, sort: str = "unsupported", limit: int = 50) -> list[dict]:
+def list_claims(conn, pubkey: str, collection: str, sort: str = "unsupported", limit: int = 50,
+                offset: int = 0) -> list[dict]:
     """Claims with their link counts, ordered for follow-up work. Counts are retrieval aids, not verdicts."""
     require_member(conn, pubkey, collection)
     if sort not in CLAIM_SORTS:
@@ -454,11 +475,11 @@ def list_claims(conn, pubkey: str, collection: str, sort: str = "unsupported", l
     return [_clean(r) for r in conn.execute(
         f"""SELECT * FROM (SELECT x.id, x.pubkey, {AUTHOR}, x.text, x.received_at, {CLAIM_COUNTS}
                            FROM claims x WHERE x.collection = %s) b
-            ORDER BY {CLAIM_SORTS[sort]} LIMIT %s""", (collection, _limit(limit)))]
+            ORDER BY {CLAIM_SORTS[sort]} LIMIT %s OFFSET %s""", (collection, _limit(limit), _offset(offset)))]
 
 
 def get_links(conn, pubkey: str, collection: str, to_id: str = "", from_id: str = "", relation: str = "",
-              limit: int = 100) -> list[dict]:
+              limit: int = 100, offset: int = 0) -> list[dict]:
     """Links in a collection, filtered by target, grounding evidence and/or relation."""
     require_member(conn, pubkey, collection)
     where, params = ["x.collection = %s"], [collection]
@@ -467,12 +488,12 @@ def get_links(conn, pubkey: str, collection: str, to_id: str = "", from_id: str 
             where.append(f"{col} = %s")
             params.append(val)
     return [_clean(r) for r in conn.execute(
-        f"SELECT {LINK_COLS} FROM links x WHERE {' AND '.join(where)} ORDER BY x.received_at, x.id LIMIT %s",
-        (*params, _limit(limit, 1000)))]
+        f"SELECT {LINK_COLS} FROM links x WHERE {' AND '.join(where)} ORDER BY x.received_at, x.id LIMIT %s OFFSET %s",
+        (*params, _limit(limit, 1000), _offset(offset)))]
 
 
 def list_evidence(conn, pubkey: str, collection: str, ungrounded_only: bool = False, source: str = "",
-                  limit: int = 50) -> list[dict]:
+                  limit: int = 50, offset: int = 0) -> list[dict]:
     """Evidence documents in a collection, oldest first, without their text. ungrounded_only: no link
     cites them yet. source: substring of the source field."""
     require_member(conn, pubkey, collection)
@@ -483,10 +504,13 @@ def list_evidence(conn, pubkey: str, collection: str, ungrounded_only: bool = Fa
         where.append("x.source ILIKE %s")
         params.append(f"%{source}%")
     return [_clean(r) for r in conn.execute(
-        f"""SELECT x.id, x.pubkey, {AUTHOR}, x.title, x.url, x.source, x.received_at, char_length(x.text) AS chars,
+        f"""SELECT x.id, x.pubkey, {AUTHOR}, x.title, x.url, x.source,
+                   e.content::jsonb ->> 'archive_url' AS archive_url, e.content::jsonb ->> 'retrieved_via' AS retrieved_via,
+                   x.received_at, char_length(x.text) AS chars,
                    (SELECT count(*) FROM links l WHERE l.from_id = x.id) AS link_count
-            FROM evidence x WHERE {' AND '.join(where)} ORDER BY x.received_at, x.id LIMIT %s""",
-        (*params, _limit(limit, 500)))]
+            FROM evidence x JOIN events e ON e.id = x.id
+            WHERE {' AND '.join(where)} ORDER BY x.received_at, x.id LIMIT %s OFFSET %s""",
+        (*params, _limit(limit, 500), _offset(offset)))]
 
 
 def search_contradictions(conn, pubkey: str, collection: str, claim: str = "", text: str = "",

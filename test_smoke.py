@@ -191,6 +191,20 @@ def ledger(conn) -> list[str]:
     assert ks[0]["claim_ids"] == [c1["id"], c2["id"]] and len(ks[0]["claims"]) == 2
     thin = L.list_claims(conn, PK[BOB], "smoke", "unsupported")
     assert thin[-1]["id"] == c1["id"] and thin[-1]["supports"] == 1 and thin[-1]["findings"] == 1, thin
+    # Evidence can say where its text really came from (#7), and every list pages with offset (#11).
+    arch = sign(OWNER, E.EVIDENCE, {"collection": "other", "text": "Archived article text.", "url": "https://example.org/a",
+                                    "archive_url": "https://web.archive.org/web/2026/https://example.org/a",
+                                    "retrieved_via": "Wayback"})
+    more = [sign(OWNER, E.CLAIM, {"collection": "other", "text": f"Paging claim {i}."}, created_at=int(time.time()) + i)
+            for i in range(3)]
+    pub([arch, *more])
+    ev = L.list_evidence(conn, PK[OWNER], "other")
+    assert ev[0]["archive_url"].startswith("https://web.archive.org/") and ev[0]["retrieved_via"] == "Wayback", ev
+    assert L.get_event(conn, PK[OWNER], arch["id"])["content"]["retrieved_via"] == "Wayback"
+    every = [c["id"] for c in L.list_claims(conn, PK[OWNER], "other", "oldest", 200)]
+    paged = [c["id"] for off in range(0, len(every), 2) for c in L.list_claims(conn, PK[OWNER], "other", "oldest", 2, off)]
+    assert paged == every and len(every) == 4, (paged, every)
+    assert L.list_evidence(conn, PK[OWNER], "other", offset=1) == [] and L.get_links(conn, PK[OWNER], "other", offset=5) == []
     acct = L.account(conn, PK[BOB])
     assert acct["allowed"] and acct["terms_signed"] and not acct["approved"] and acct["profile"]["name"] == "Bob"
 
@@ -279,6 +293,10 @@ def server(ids) -> None:
         assert call("search_claims", {"request": ok})["items"], "a signed request works"
         # A replayed request is rejected.
         rejects(lambda: call("search_claims", {"request": ok}), "already used")
+        # Identical requests signed in the same second differ only by nonce, and both work (#6).
+        now = int(time.time())
+        twins = [E.sign(BOB, E.REQUEST, {"tool": "list_collections", "args": {}, "nonce": n}, created_at=now) for n in "ab"]
+        assert twins[0]["id"] != twins[1]["id"] and all(call("list_collections", {"request": t}) for t in twins)
         # A stale request is rejected.
         stale = req(BOB, "list_collections", created_at=int(time.time()) - 120)
         rejects(lambda: call("list_collections", {"request": stale}), "from server time")
@@ -375,6 +393,7 @@ def server(ids) -> None:
         access(client, W)
 
     office_data()
+    fetch_stub()
 
     with L.connect() as conn:
         rows = conn.execute("SELECT tool, pubkey, collection, ok FROM mcp_calls WHERE method = 'tools/call'").fetchall()
@@ -440,6 +459,20 @@ def access(client, W) -> None:
         assert conn.execute("SELECT approved_by FROM approvals WHERE pubkey = %s", (vpk,)).fetchone()["approved_by"] == PK[OWNER]
         assert conn.execute("SELECT count(*) AS n FROM approvals WHERE pubkey = %s", (opk,)).fetchone()["n"] == 0
         assert {r["status"] for r in conn.execute("SELECT status FROM access_requests")} == {"approved", "dismissed", "pending"}
+
+
+def fetch_stub() -> None:
+    """fetch_url refuses captcha and near-empty pages instead of returning them as text (#2)."""
+    import tempfile
+    stub = ("<html><head><title>pmc.ncbi.nlm.nih.gov</title><script src='https://www.google.com/recaptcha/api.js'>"
+            "</script></head><body><p>Please verify you are a human.</p></body></html>")
+    real = "<html><head><title>A paper</title></head><body><article>" + "".join(
+        f"<p>Paragraph {i}: mast cells release histamine and tryptase, and the levels vary.</p>" for i in range(30)) + "</article></body></html>"
+    with tempfile.TemporaryDirectory() as d:
+        for name, page in (("stub.html", stub), ("real.html", real)):
+            Path(d, name).write_text(page)
+        rejects(lambda: L.fetch_text(str(Path(d, "stub.html"))), "bot challenge or near-empty page")
+        assert L.fetch_text(str(Path(d, "real.html")))[1] == "A paper"
 
 
 def office_data() -> None:
