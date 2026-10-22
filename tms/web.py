@@ -49,7 +49,7 @@ blockquote{{margin:0;padding:2px 14px;border-left:3px solid var(--line);color:va
 <a href="/office">Office</a><a href="/docs.md">Markdown</a></header><main><pre id="md">{md}</pre></main>
 <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"></script>
 <script>const el = document.getElementById('md'); if (window.marked) el.outerHTML = marked.parse(el.textContent)</script>
-</body></html>"""
+<script src="/chat.js" defer></script></body></html>"""
 
 
 def _mac(payload: str) -> str:

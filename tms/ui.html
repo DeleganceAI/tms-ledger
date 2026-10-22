@@ -402,4 +402,6 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') hideDetail(); });
 showTab('collections'); poll(); setInterval(poll, 2000);
-</script></body></html>
+// /dashboard#record=<id> opens that record, for links from the chat on other pages.
+const deep = location.hash.match(/^#record=([0-9a-f]{64})$/); if (deep) showDetail(deep[1]);
+</script><script src="/chat.js" defer></script></body></html>

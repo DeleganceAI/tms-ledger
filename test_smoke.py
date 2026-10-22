@@ -350,7 +350,7 @@ def server(ids) -> None:
         # Admin page: TMS_ADMINS only; everyone else, logged out included, gets a 404.
         L.ADMINS = {PK[OWNER]}
         r = client.get("/admin")
-        assert r.status_code == 200 and "Embedding spend" in r.text and E.bech32_encode("npub", PK[BOB]) in r.text, r.text[:300]
+        assert r.status_code == 200 and "DeepInfra spend" in r.text and E.bech32_encode("npub", PK[BOB]) in r.text, r.text[:300]
         assert "Bob" in r.text and "$0.0100" in r.text, "users table and embed spend"
         # Dashboard: scoped to the viewer's collections.
         snap = client.get("/dashboard/api/snapshot").json()
@@ -405,6 +405,7 @@ def server(ids) -> None:
 
     office_data()
     fetch_stub()
+    chat_agent()
 
     with L.connect() as conn:
         rows = conn.execute("SELECT tool, pubkey, collection, ok FROM mcp_calls WHERE method = 'tools/call'").fetchall()
@@ -470,6 +471,66 @@ def access(client, W) -> None:
         assert conn.execute("SELECT approved_by FROM approvals WHERE pubkey = %s", (vpk,)).fetchone()["approved_by"] == PK[OWNER]
         assert conn.execute("SELECT count(*) AS n FROM approvals WHERE pubkey = %s", (opk,)).fetchone()["n"] == 0
         assert {r["status"] for r in conn.execute("SELECT status FROM access_requests")} == {"approved", "dismissed", "pending"}
+
+
+def chat_agent() -> None:
+    """Admin chat: a scripted model calls a read tool, then answers; tools stay in the chat's collection."""
+    from starlette.testclient import TestClient
+
+    from tms import chat as C
+    from tms import server as S
+    from tms import web as W
+    with L.connect() as conn:
+        other = conn.execute("SELECT id FROM events WHERE collection = 'other' ORDER BY received_at LIMIT 1").fetchone()["id"]
+    script = [  # first reply asks for two tools, the second answers
+        {"tool_calls": [
+            {"id": "t1", "type": "function", "function": {"name": "search_claims", "arguments": '{"text": "DAO", "method": "keyword"}'}},
+            {"id": "t2", "type": "function", "function": {"name": "get_event", "arguments": json.dumps({"id": other})}}]},
+        {"content": "Reduced DAO activity is the review's proposal."}]
+    seen = []
+
+    class Reply:
+        status_code = 200
+
+        def __init__(self, msg):
+            self.msg = msg
+
+        def json(self):
+            return {"choices": [{"message": {"role": "assistant", **self.msg}}],
+                    "usage": {"prompt_tokens": 1000, "completion_tokens": 100}}
+
+    def post(url, json=None, **kw):
+        seen.append(json)
+        return Reply(script[len(seen) - 1])
+    real, C.httpx.post = C.httpx.post, post
+    L.ADMINS = {PK[OWNER]}
+    try:
+        with TestClient(S.http_app()) as client:
+            assert client.get("/dashboard/api/chat").status_code == 404  # logged out
+            js = client.get("/chat.js")  # the launcher every page loads; it stays hidden unless the config answers
+            assert js.status_code == 200 and "javascript" in js.headers["content-type"] and "/dashboard/api/chat" in js.text
+            assert all('src="/chat.js"' in client.get(p).text for p in ("/", "/office", "/docs", "/connect")), "on every page"
+            client.cookies.set(W.COOKIE, W.make_cookie(PK[BOB]))  # a member, not an admin
+            assert client.get("/dashboard/api/chat").status_code == 404
+            assert client.post("/dashboard/api/chat", json={}).status_code == 404
+            client.cookies.set(W.COOKIE, W.make_cookie(PK[OWNER]))
+            cfg = client.get("/dashboard/api/chat").json()
+            assert cfg["model"] == C.CHAT_MODEL and "smoke" in cfg["collections"], cfg
+            ask = [{"role": "user", "content": "What causes HIT?"}]
+            assert client.post("/dashboard/api/chat", json={"collection": "outside", "messages": ask}).status_code == 403
+            assert client.post("/dashboard/api/chat", json={"collection": "smoke", "messages": []}).status_code == 400
+            r = client.post("/dashboard/api/chat", json={"collection": "smoke", "messages": ask})
+            evs = [json.loads(x[6:]) for x in r.text.split("\n\n") if x.startswith("data: ")]
+    finally:
+        C.httpx.post = real
+    assert [e["type"] for e in evs] == ["tool_call", "tool_result", "tool_call", "tool_result", "answer", "messages"], evs
+    assert "Histamine intolerance" in evs[1]["result"] and evs[3]["result"] == "null", "pinned to the chat's collection"
+    assert evs[4]["content"].startswith("Reduced DAO") and [m["role"] for m in evs[5]["messages"]] == ["user", "assistant", "tool", "tool", "assistant"]
+    tools = {t["function"]["name"] for t in seen[0]["tools"]}
+    assert seen[0]["model"] == C.CHAT_MODEL and "publish" not in tools and "search_claims" in tools and seen[0]["messages"][0]["role"] == "system"
+    with L.connect() as conn:
+        row = conn.execute("SELECT count(*) AS n, sum(cost_usd) AS c FROM embed_calls WHERE model = %s", (C.CHAT_MODEL,)).fetchone()
+    assert row["n"] == 2 and abs(float(row["c"]) - 2 * (1000 * C.PRICE_IN + 100 * C.PRICE_OUT) / 1e6) < 1e-9, row
 
 
 def fetch_stub() -> None:
