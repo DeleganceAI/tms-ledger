@@ -355,12 +355,23 @@ def server(ids) -> None:
         # Dashboard: scoped to the viewer's collections.
         snap = client.get("/dashboard/api/snapshot").json()
         assert {c["slug"] for c in snap["collections"]} == {"smoke", "other"}, snap["collections"]
+        # Npubs tab: an admin sees every key and every collection it belongs to.
+        n = client.get("/dashboard/api/npubs").json()
+        byk = {x["pubkey"]: x for x in n["npubs"]}
+        assert n["admin"] and byk[PK[BOB]]["member_of"] == ["smoke"] and byk[PK[BOB]]["name"] == "Bob", byk[PK[BOB]]
+        assert byk[PK[OUTSIDER]]["owns"] == ["outside"] and byk[PK[BOB]]["npub"] == E.bech32_encode("npub", PK[BOB])
         client.cookies.set(W.COOKIE, W.make_cookie(PK[OUTSIDER]))
         assert client.get("/dashboard").status_code == 200
         for path in ("snapshot", "browse?kind=claim", "agents", "sources", "collections"):
             r = client.get(f"/dashboard/api/{path}")
             assert r.status_code == 200 and "smoke" not in r.text and ids[0] not in r.text, (path, r.text[:300])
         assert client.get(f"/dashboard/api/record/{ids[0]}").status_code == 404
+        # An owner who isn't an admin sees every key, but memberships in their own collections only.
+        n = client.get("/dashboard/api/npubs")
+        assert n.status_code == 200 and not n.json()["admin"] and "smoke" not in n.text and "other" not in n.text, n.text[:300]
+        assert PK[BOB] in n.text and {x["pubkey"]: x for x in n.json()["npubs"]}[PK[OUTSIDER]]["owns"] == ["outside"]
+        client.cookies.set(W.COOKIE, W.make_cookie(PK[BOB]))  # a member who owns nothing
+        assert client.get("/dashboard/api/npubs").status_code == 403
         good = W.make_cookie(PK[OWNER])
         client.cookies.set(W.COOKIE, good[:-1] + ("1" if good.endswith("0") else "0"))
         assert client.get("/api/me").status_code == 401 and client.get("/c/smoke/export.jsonl").status_code == 401
