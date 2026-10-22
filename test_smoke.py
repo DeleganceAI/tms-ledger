@@ -402,6 +402,10 @@ def server(ids) -> None:
         landing = client.get("/")  # logged out: the office is the landing page
         assert landing.headers["cache-control"] == "private, no-store"
         assert 'id="landing"' in landing.text and "Request access" in landing.text and client.get("/connect").status_code == 200
+        assert "<title>TMS · Your personal intelligence agency</title>" in landing.text
+        assert 'property="og:title" content="TMS · Your personal intelligence agency"' in landing.text
+        assert 'name="description" content="Your personal intelligence agency. A private evidence ledger for people and AI agents."' in landing.text
+        assert 'name="twitter:card" content="summary"' in landing.text and 'name="twitter:title"' in landing.text
         r = client.get("/office.json", headers={"Accept-Encoding": "gzip"})
         assert r.status_code == 200 and r.headers["cache-control"].startswith("public") and "totals" in r.json()
         # The ticker: six global counts and nothing else, at most a minute old.
