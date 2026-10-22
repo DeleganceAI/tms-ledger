@@ -1,96 +1,78 @@
 # The Bitter Lesson Applied to Knowledge Graphs
 
-In 2019 Rich Sutton wrote [The Bitter Lesson](http://www.incompleteideas.net/IncIdeas/BitterLesson.html). Its point, roughly: for seventy years, AI researchers kept building their own understanding of a domain into their systems, and for seventy years, general methods that scale with computation beat them anyway. Chess, Go, speech and vision all went the same way. The hand-built knowledge helped for a while, then plateaued, then got in the way.
+An evidence system makes a consequential architectural choice when it turns a document into a canonical entity, relation, or verdict. The system can preserve that interpretation as an attributed assertion, or make it the interpretation used by default in subsequent queries. For research collections, where definitions, evidence, and analytical tasks change, we favor preserving source material and keeping semantic interpretations revisable.
 
-Knowledge graphs never learned this lesson. This page is about why we did.
+TMS implements this choice with a small vocabulary of signed evidence records, claims, links, and contradictions. A contribution can enter the ledger without agreement on domain-wide entity identities, temporal models, or confidence scales. The ledger preserves submitted text and the reasons contributors give for their interpretations, while readers decide which claims to accept, which expressions refer to the same entity, and which apparent contradictions survive examination. Our hypothesis is that reducing the semantic decisions required at ingestion lowers integration and maintenance costs for heterogeneous research collections. Applications can construct and revise richer interpretations when their tasks require them.
 
-## Every schema is a theory of the world
+Richard Sutton's [*The Bitter Lesson*](https://www.cs.utexas.edu/~eunsol/courses/data/bitter_lesson.pdf) motivates the hypothesis. His 2019 essay argues, through historical examples in chess, Go, speech recognition, and vision, that general methods able to exploit increasing computation have repeatedly overtaken methods organized around human domain knowledge. Search and learning are his central examples. Applying that argument to evidence storage is an architectural extrapolation: we want improvements in retrieval and inference to remain usable without first revising a collection's authoritative semantic model.
 
-The moment you design a knowledge graph, you start making decisions that feel like engineering and are actually claims about reality.
+The Commonplace note [*The bitter lesson selects production methods, not representational forms*](https://zby.github.io/commonplace/notes/the-bitter-lesson-selects-production-methods-not-representational/) sharpens the distinction: how a system acquires and updates knowledge is a separate question from whether it represents that knowledge in weights, text, code, or a graph. Search and learning can produce explicit structure, while a text-based system can still depend on extensive manual curation. For TMS, preserving revisable records leaves room for better inference procedures, but the ledger does not itself supply a scalable method for producing or improving those procedures. A small schema must therefore justify its contribution through the work it enables and the costs it reduces.
 
-- **You define entities.** Is "MCAS" one thing? Is "mast cell activation syndrome as defined by the 2012 consensus" the same thing as "MCAS as defined by the 2019 AAAAI work group"? Half of the MCAS literature is an argument about exactly that. Your entity table has already picked a side.
-- **You merge identities.** Two papers mention "DAO activity". Same concept? Same assay? Same units? Measured in serum or in the gut? The merge button is a judgement, made once, by whoever wrote the merge rule, and from then on every query inherits it silently.
-- **You type your relations.** `causes`, `treats`, `is_a`, `part_of`, `associated_with`. Each one is a little ontology. Each one works beautifully in the domain it was designed for and turns into mush the moment a claim is subtler than the relation: "X causes Y, but only in women over 40, only at high doses, and only according to one cohort".
-- **You add probabilities.** Now every edge carries a 0.83. Where did 0.83 come from? Who calibrated it? Against what? Does 0.83 from a randomized trial mean the same as 0.83 from a blog post? Can you add them? Multiply them? The number looks like rigor and works like a costume.
-- **You add confidence levels, evidence grades, trust scores, source reliability ratings.** Each one is a domain-specific theory of what counts as good evidence, frozen into a column. Medicine has GRADE. Law has standards of proof. Intelligence analysis has its own scales. None of them transfer, and all of them are contested inside their own fields.
-- **You add status.** `verified`, `debunked`, `disputed`, `resolved`. Now the database has opinions, and the opinions are only as good as whoever last wrote to the status column.
-- **You add time.** `valid_from`, `valid_to`, as-of semantics, temporal reasoning. Great, until a claim is about a period, a trend, a prediction, a recollection, or a revision of something that was never quite true in the first place.
+## Which commitments belong in the durable record?
 
-Every one of these is a reasonable idea. Every one of them makes the graph better at one domain and worse at all the others. Stack enough of them and you have an expert system: very impressive inside its walls, brittle at its edges, and expensive to change when the world disagrees with you.
+Consider a hypothetical research collection containing claims that model A outperforms model B. One paper compares single-sample accuracy, another permits a larger inference budget, and a third uses a revised benchmark. Resolving the model names is only part of the problem. A useful comparison also depends on model versions, evaluation protocols, metrics, and the intended meaning of “outperforms.” An edge that discards those conditions can become misleading even when its extraction faithfully follows one sentence in a paper.
 
-That is the bitter lesson, playing out in data modeling instead of in algorithms.
+A sufficiently expressive schema can represent every condition in that example. Explicit fields can also improve validation, querying, and reproducibility when the task is well specified. The difficulty arises when the representation makes one interpretation authoritative while losing the evidence or assumptions needed to reconsider it. A new comparison criterion then requires recovering information that extraction omitted, or reconstructing why earlier records were merged. Preserving the documents and the provenance of each interpretation keeps that recovery possible, subject to the quality of ingestion.
 
-## The general method is reading
+The same issue applies to uncertainty estimates. A probability has a defined role when its event, conditioning information, estimation procedure, and calibration target are specified. An evidence system should preserve that context if it stores or uses the estimate. TMS omits a universal confidence field because the ledger does not define a common proposition, decision problem, or calibration procedure across all contributions. Contributors can still discuss probabilities in claims and cite their supporting analyses. A downstream application can estimate uncertainty for a specified task without presenting its estimates as intrinsic properties of the stored claims.
 
-What changed is that we now have readers that scale with computation. A language model can read a claim written in plain English, with all its hedges and qualifications, and understand it about as well as you would. It can read the passage a claim was grounded in and judge whether the grounding holds. It can notice that two claims are about different populations and don't actually conflict.
+Entity identity, temporal scope, and source reliability also depend on the analysis being performed. TMS leaves domain-level temporal conditions in the claim text while recording signer-supplied creation times and server receipt times for provenance. The ledger stores claims about source reliability in the same attributed form as other claims. The design keeps those judgments available for inspection rather than resolving them into a single collection-wide verdict.
 
-So the structure no longer has to do the understanding. The structure only has to keep what readers need in order to do the understanding themselves, and keep it honestly:
+## Preserve evidence and make interpretations explicit
 
-- what was said, in the words it was said;
-- what document it was grounded in, with the exact passage;
-- who said it, provably;
-- when it arrived;
-- what someone thinks can't all be true at once, and why.
+TMS is an append-only record of contributions. A contributor's claim, supporting link, or contradiction is already an interpretation of evidence, and each remains attributed to its signer. The ledger's contribution is to retain the interpretation alongside its stated grounds without promoting it to an authoritative conclusion. Later contributors can challenge the claim, the relevance of a quoted passage, or the reasoning behind a contradiction while preserving the original record.
 
-Everything else is interpretation. Interpretation belongs to whoever is reading, using the best reader available on the day they read it. A better model next year re-reads the same ledger and draws better conclusions. A schema that baked in 2026's conclusions can't do that. It has to be migrated.
+The distinction between retained records and derived representations has established systems precedents. Pat Helland's [*Immutability Changes Everything*](https://www.cidrdb.org/cidr2015/Papers/CIDR15_Paper16.pdf) discusses immutable data together with indexes and alternative representations that can be constructed from it. The [W3C PROV model](https://www.w3.org/TR/prov-overview/) provides explicit representations of attribution and derivation. TMS makes a particular choice about which assertions to store and which conclusions to leave to readers; preservation and provenance are broader design principles shared with other systems.
 
-## The readers are getting better, and the meanings keep moving
+Kappa Graph's design essay [*Computed Evidence over Asserted Truth*](https://aaronsb.github.io/knowledge-graph-system/explanation/computed-evidence/) develops a related argument: retain conflicting evidence so judgments can be recomputed as methods and data change. The essay describes grounding scores derived from supporting and contradicting evidence, alongside computational reorganization of ontologies. TMS draws the boundary differently. It stores contributors' claims, relations, and incompatibility judgments as attributed assertions, and provides no aggregate grounding score or ontology-reorganization procedure. The shared commitment is to preserve the material needed to revisit a judgment; the two systems assign different responsibilities to the computation over that material. Kappa Graph's account supplies an architectural comparison, rather than comparative evidence for either system's accuracy.
 
-Two things are true at once, and together they settle the argument.
+For the model-comparison example, the durable records would retain the papers, the differently scoped performance claims, and the quotations and reasons supplied for each connection. One analysis could group claims by inference budget, while another could compare model versions or investigate benchmark changes. A derived graph could support either analysis if its entity mappings and extraction choices remained traceable to the source records. Such graphs are possible downstream representations; the current TMS ledger does not generate or adjudicate them.
 
-**The readers keep getting better.** Every year, models reason more carefully, hold more in context, and catch subtler distinctions. A model that can keep an entire collection in its context window, every paper, every claim, every link and its quote, can weigh a question with more nuance than any rule you could write down in advance. It can notice that a trial's population doesn't match the claim, that a "contradiction" is really a difference in timeframe, that two sources sharing a press release aren't independent. A schema can't notice anything. It can only enforce what its designer thought of, back when they thought of it. Every judgement you freeze into the structure is a judgement you have decided a future, smarter reader isn't allowed to revisit.
+Keeping records separate from derived interpretations provides a specific form of revisability. An analyst can change an entity mapping, evidence interpretation, or decision rule without changing the assertions that earlier contributors made. A better reader may recover a distinction that the first reader missed, but improvement depends on retrieval, inference, and the information actually preserved. Extracted text may omit a figure, distort a table, or lose formatting essential to an argument. Signing that text preserves the submitted record; it does not establish that the submission faithfully represents the original document.
 
-**The meanings keep moving.** The concepts a schema depends on aren't fixed either:
+## A small vocabulary for research contributions
 
-- **What counts as an entity shifts.** Diseases split into subtypes and merge back together. Diagnostic criteria get rewritten, and the same name starts pointing at a different set of patients. A company is renamed, acquired and spun out. A "species" is redrawn by new genetics. An entity table records how the world was carved up on the day it was built.
-- **What a probability means shifts.** A 0.8 depends on who assigned it, against what baseline, under which model, with what calibration, for which decision. Change any of those and the same number means something else. Store it as a bare float and the context that gave it meaning is gone.
-- **What counts as good evidence shifts.** Methods get discredited, whole literatures fail to replicate, a once-trusted source loses its standing, an ignored one gets vindicated. A reliability score from five years ago is a fossil.
-- **What a relation means shifts.** "Causes" meant something different before randomized trials, and different again after causal inference. "Associated with" covers everything from a mechanism to a coincidence.
-- **What a word means shifts.** Terms drift, get redefined and become contested.
+The current ledger uses four content types:
 
-A schema built on any of these is wrong slowly, then all at once, and fixing it means a migration that rewrites everything everyone ever recorded through the old lens.
-
-The ledger avoids both traps by keeping the raw material and refusing to interpret it. Claims stay in the words they were written in, at the time they were written. Evidence stays whole, so a future reader sees what the source actually said. Records are never rewritten, so the history of how understanding changed is itself part of what can be read. Tomorrow's reader brings tomorrow's understanding of entities, probabilities and evidence to records that haven't been bent to fit yesterday's.
-
-## So the scheme is as small as we could make it
-
-There are four kinds of record that carry knowledge:
-
-| Record | What it holds | Why it can't be smaller |
+| Record | Stored content | Role in later analysis |
 |---|---|---|
-| **Evidence** | The full text of a document as someone saw it, plus where it came from. | Without the text, nothing can be checked. |
-| **Claim** | One statement, as plain text. | You need a unit to point at. The server never parses it. |
-| **Link** | Evidence that supports, rebuts or qualifies a target, with a verbatim quote and a reason. | The quote is the only mechanical check we keep: it proves the document actually says it. |
-| **Contradiction** | Two or more claims that can't all hold, with a reason. | Incompatibility is a judgement about meaning. A link can't express it, because no single document says it. |
+| **Evidence** | Submitted document text and available source and retrieval metadata. | Gives readers access to the material a contribution cites. |
+| **Claim** | A statement in its author's wording. | Provides a stable target for support, rebuttal, and qualification. |
+| **Link** | An evidence record, a target record, a relation, a quotation, and a reason. | Records why a contributor thinks a passage supports, rebuts, or qualifies a target. |
+| **Contradiction** | At least two distinct claims and a reason they cannot all hold. | Represents an authored incompatibility judgment, including conflicts involving more than two claims. |
 
-Plus the plumbing that makes the records trustworthy rather than knowledgeable: signatures, profiles, membership, terms.
+Every link originates in evidence. `SUPPORTS` and `REBUTS` can target claims, links, contradictions, or evidence; `QUALIFIES` targets claims. A contradiction records the author's judgment about the joint compatibility of its member claims. It does not select a false claim or create an automatically maintained resolution state. The four record types are a practical design choice whose value should be evaluated against simpler and richer alternatives.
 
-Here is what we refused to add, on purpose:
+The schema imposes several constraints independently of semantic judgment. Signatures bind event content to a public key. Access checks restrict collection operations to members. Structural validation checks record fields and references. Quote validation requires a normalized occurrence of the quoted text in the submitted evidence. Append-only storage preserves earlier assertions when a correction is added. An identical signed event is deduplicated by its ID, while distinct events can contain identical claim text.
 
-- **No entities.** A claim mentions whatever it mentions. Two claims that use the same word are two claims.
-- **No merging.** Identical text is still two records. Deciding they are the same is a reader's job.
-- **No typed relations** beyond supports, rebuts and qualifies, and we are not sure even those three are the minimum.
-- **No probabilities, weights, scores or confidence levels.** Numbers inside a claim are just text.
-- **No statuses.** Nothing is ever marked true, false, verified, debunked, open or resolved.
-- **No propagation.** Rebutting a claim doesn't touch anything else. Nothing is inferred.
-- **No source reliability field.** "This journal is unreliable" is a claim, and someone can ground it or dispute it like any other.
-- **No time model.** Any timeframe a claim needs goes in its text, where a reader can see it.
-- **No edits.** A correction is a new record that disputes the old one. The old one stays, so you can see what was relied on.
+### What this is not
 
-Each of those refusals is a place where we would otherwise have smuggled in a theory of some particular domain. The ledger is meant to hold MCAS papers, macroeconomic arguments, AI-industry finance, physics and whatever comes next, with the same four kinds of record. It can only do that by not knowing anything about any of them.
+- **Not a fact-checker or oracle.** Quote matching does not establish entailment; `check_proof` checks references and argument structure, including declared gaps.
+- **Not a confidence or scoring system.** Search ranks, distances, and link counts aid retrieval; they do not measure truth or credibility.
+- **Not a status tracker.** “Verified,” “debunked,” “open,” and “resolved” are reader conclusions, not ledger states.
+- **Not a graph that merges identities or propagates conclusions.** Distinct claims remain distinct records. Rebutting one record does not automatically invalidate another.
+- **Not an editable wiki.** Corrections add evidence-backed assertions while preserving the records earlier contributors relied on.
+- **Not an identity or authenticity check.** Signatures identify signing keys, not verified people or authentic source documents, and do not establish collection completeness.
+- **Not a workflow engine.** People and agents organize assignments and research processes outside the ledger.
+- **Not a public feed.** Collection contents are restricted to members through the service and are not published to Nostr relays.
+- **Not a transcript of private reasoning.** The ledger preserves explicitly contributed assertions and reasons; a thinking proof is an argument prepared for inspection.
 
-## What we do enforce
+## Where graph structure and learned inference help
 
-Three things, and none of them is a judgement about truth:
+Graph construction can itself be a learned procedure that uses substantial computation. Edge et al.'s [*From Local to Global: A Graph RAG Approach to Query-Focused Summarization*](https://arxiv.org/html/2404.16130v1) uses an LLM-derived entity graph and community summaries to answer questions about a corpus. Its evaluation reports improvements in comprehensiveness and diversity over a conventional RAG baseline for the global questions studied. The evaluation's tasks, corpora, and LLM-based judgments bound that result, but the method demonstrates that learned inference and explicit graph structure can be complementary.
 
-1. **Signatures.** Each record was signed, byte for byte, by the key that claims to have written it.
-2. **Structure and membership.** Records are well formed, references point at real records in the same collection, and only members can write.
-3. **Quotes.** A link's quote really appears in the evidence it cites (allowing for case, whitespace, curly quotes, dashes and ligatures).
+For TMS, a graph's usefulness is a question about the task and the cost of maintaining its interpretations. If a collection supports repeated queries over stable entities and relations, a materialized graph can avoid repeated extraction and enable efficient traversal. Formal constraints may be essential when answers must satisfy a specified consistency or safety property. A system can preserve source evidence while exploiting those structures. Our choice is to keep the ledger's own semantic commitments small and leave richer task-specific representations outside its authoritative record format.
 
-That's the whole referee. Everything else is the players.
+Deferring interpretation has costs of its own. Readers may repeatedly perform expensive work, disagree about the same evidence, or miss relevant records. Long context is one possible resource for comparison, but context capacity alone does not establish reliable evidence use. Liu et al.'s [*Lost in the Middle*](https://aclanthology.org/2024.tacl-1.9/) found substantial sensitivity to the position of relevant information in the models and tasks they evaluated. The result motivates direct tests of evidence use rather than assuming that supplying more text is sufficient; it does not establish a permanent limit on later models.
 
-## Think we can go smaller?
+Increasing compute gives an analyst opportunities to improve retrieval, compare interpretations, inspect counterevidence, and check citations. The analyst still needs an inference procedure that allocates the compute effectively and an evaluation that can detect errors. TMS preserves material on which such procedures can operate. The ledger does not guarantee that a larger model, longer context, or more inference steps will produce a better conclusion.
 
-We mean it. If you can see a way to remove a record kind, a field, a relation or a rule and still keep everything a reader needs to check a claim against its sources, we want to hear it. The same goes if you think one of our four is secretly domain-specific and we just haven't noticed.
+## What would establish the value of this design?
 
-Email us at **{{CONTACT_EMAIL}}**. Bring the argument; bring a smaller schema if you have one. The best outcome for this page is that someone proves it wrong.
+The relevant comparison holds source preservation and access to evidence constant. A richer graph with provenance should retain the same documents as the small ledger, and both systems should use comparable reader models and compute budgets. Schema richness and the authority assigned to interpretations should vary independently: include a richer graph with attributed, versioned, revisable interpretations alongside a graph that exposes one canonical interpretation. Otherwise, an apparent benefit could establish the value of revisability without showing any advantage from the smaller schema. A comparison with ordinary document retrieval would also help establish whether explicit claims, links, and contradiction records contribute enough to justify their extraction and maintenance costs.
+
+Evaluation should distinguish at least three questions. First, how accurately does each system answer a fixed set of questions, with correct citations, appropriate qualifications, and recovery of relevant counterevidence? Second, how much work is required when definitions, comparison criteria, or source interpretations change? For the model-comparison example, changing from single-sample accuracy to performance under equal inference budgets tests which conditions are immediately available, which can be recovered from retained sources, and which require new experiments. A missing experiment is an evidence gap, whereas a reported condition lost during extraction is a representation failure. Third, how do ingestion cost, storage, query latency, and inference cost vary as the collection and query workload grow?
+
+The four record types also admit direct ablations. A document-only system tests the value of extracted claims and links. Removing explicit contradictions tests whether storing authored incompatibility judgments helps later readers find and assess disagreements. Adding canonical entities or task-specific fields tests whether stronger structure improves retrieval and consistency enough to offset its maintenance costs. Replacing the reader model while keeping the records fixed tests whether the representation permits better inference when a more capable reader becomes available. None of these comparisons has been established for TMS by the architectural argument alone.
+
+Sutton's essay directs attention toward methods that can exploit additional computation. For an evidence ledger, our application of that lesson is to preserve what later inference will need and make earlier interpretations inspectable. The design is useful to the extent that readers can revisit a conclusion, recover its grounds, and construct a better analysis without erasing the history they are revising. We welcome counterexamples, alternative schemas, and evaluations that clarify when stronger structure is worth its cost. Contact **{{CONTACT_EMAIL}}**.
