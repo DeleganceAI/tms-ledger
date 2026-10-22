@@ -1,96 +1,73 @@
 # The Bitter Lesson Applied to Knowledge Graphs
 
-In 2019 Rich Sutton wrote [The Bitter Lesson](http://www.incompleteideas.net/IncIdeas/BitterLesson.html). Its point, roughly: for seventy years, AI researchers kept building their own understanding of a domain into their systems, and for seventy years, general methods that scale with computation beat them anyway. Chess, Go, speech and vision all went the same way. The hand-built knowledge helped for a while, then plateaued, then got in the way.
+In 2019, Rich Sutton wrote [*The Bitter Lesson*](https://www.cs.utexas.edu/~eunsol/courses/data/bitter_lesson.pdf): general methods that scale with computation have repeatedly overtaken systems built around human knowledge of a domain. Search and learning keep improving after hand-built solutions plateau.
 
-Knowledge graphs never learned this lesson. This page is about why we did.
+For an evidence ledger, we take that as a reason to keep interpretations revisable. Preserve what was said and what it was based on, so better readers can reconsider the conclusions.
+
+The distinction matters. As [*The bitter lesson selects production methods, not representational forms*](https://zby.github.io/commonplace/notes/the-bitter-lesson-selects-production-methods-not-representational/) argues, a graph can be learned, and a text system can be manually curated. Sutton's lesson does not rule out graphs. Our choice concerns which judgments the ledger treats as authoritative.
 
 ## Every schema is a theory of the world
 
-The moment you design a knowledge graph, you start making decisions that feel like engineering and are actually claims about reality.
+Designing a knowledge graph means deciding which distinctions the database will recognize. Some decisions look like bookkeeping until a research question depends on them.
 
-- **You define entities.** Is "MCAS" one thing? Is "mast cell activation syndrome as defined by the 2012 consensus" the same thing as "MCAS as defined by the 2019 AAAAI work group"? Half of the MCAS literature is an argument about exactly that. Your entity table has already picked a side.
-- **You merge identities.** Two papers mention "DAO activity". Same concept? Same assay? Same units? Measured in serum or in the gut? The merge button is a judgement, made once, by whoever wrote the merge rule, and from then on every query inherits it silently.
-- **You type your relations.** `causes`, `treats`, `is_a`, `part_of`, `associated_with`. Each one is a little ontology. Each one works beautifully in the domain it was designed for and turns into mush the moment a claim is subtler than the relation: "X causes Y, but only in women over 40, only at high doses, and only according to one cohort".
-- **You add probabilities.** Now every edge carries a 0.83. Where did 0.83 come from? Who calibrated it? Against what? Does 0.83 from a randomized trial mean the same as 0.83 from a blog post? Can you add them? Multiply them? The number looks like rigor and works like a costume.
-- **You add confidence levels, evidence grades, trust scores, source reliability ratings.** Each one is a domain-specific theory of what counts as good evidence, frozen into a column. Medicine has GRADE. Law has standards of proof. Intelligence analysis has its own scales. None of them transfer, and all of them are contested inside their own fields.
-- **You add status.** `verified`, `debunked`, `disputed`, `resolved`. Now the database has opinions, and the opinions are only as good as whoever last wrote to the status column.
-- **You add time.** `valid_from`, `valid_to`, as-of semantics, temporal reasoning. Great, until a claim is about a period, a trend, a prediction, a recollection, or a revision of something that was never quite true in the first place.
+Suppose two papers report that model A outperforms model B. One compares single-sample accuracy; the other gives A a larger inference budget. A third paper uses a different benchmark version. Resolving the model names does not resolve what “outperforms” means. If an edge drops those conditions, every query using the edge inherits the omission.
 
-Every one of these is a reasonable idea. Every one of them makes the graph better at one domain and worse at all the others. Stack enough of them and you have an expert system: very impressive inside its walls, brittle at its edges, and expensive to change when the world disagrees with you.
+A richer schema can represent all those conditions. For repeated comparisons under a stable protocol, explicit fields may be exactly what you want. The cost appears when the question changes: a new comparison needs a distinction the schema never recorded, or an entity merge concealed a difference that now matters. Keeping the sources and the reasons for each interpretation lets a reader revisit those decisions.
 
-That is the bitter lesson, playing out in data modeling instead of in algorithms.
+Probabilities have the same dependence on context. A confidence of 0.8 needs context: what proposition it concerns, what evidence it conditions on, and how it was estimated. TMS has no universal confidence field because contributions across a research collection need not share any of those. A reader can compute a task-specific estimate; the ledger preserves the material needed to inspect it.
 
 ## The general method is reading
 
-What changed is that we now have readers that scale with computation. A language model can read a claim written in plain English, with all its hedges and qualifications, and understand it about as well as you would. It can read the passage a claim was grounded in and judge whether the grounding holds. It can notice that two claims are about different populations and don't actually conflict.
+Language models give us another way to use the collection: retrieve the relevant records, read their qualifications, compare the cited passages, and examine apparent contradictions. A more capable reader can revisit an earlier interpretation without changing what the original contributor wrote.
 
-So the structure no longer has to do the understanding. The structure only has to keep what readers need in order to do the understanding themselves, and keep it honestly:
+So the ledger keeps what readers need:
 
-- what was said, in the words it was said;
-- what document it was grounded in, with the exact passage;
-- who said it, provably;
-- when it arrived;
-- what someone thinks can't all be true at once, and why.
+- what was claimed, in the contributor's words;
+- the submitted source text, with the quoted passage and reason for citing it;
+- which key signed the contribution, and when the server received it;
+- which claims someone thinks cannot all hold, and why.
 
-Everything else is interpretation. Interpretation belongs to whoever is reading, using the best reader available on the day they read it. A better model next year re-reads the same ledger and draws better conclusions. A schema that baked in 2026's conclusions can't do that. It has to be migrated.
+Claims and links already contain interpretation. We preserve those judgments as attributed contributions, alongside the evidence offered for them. A later reader can disagree without erasing the earlier reasoning.
 
-## The readers are getting better, and the meanings keep moving
+[*Computed Evidence over Asserted Truth*](https://aaronsb.github.io/knowledge-graph-system/explanation/computed-evidence/) makes a related case for retaining conflicting evidence so judgments can be recomputed. Kappa Graph describes computed grounding scores and reorganizable ontologies. TMS leaves those computations to readers and applications; the shared idea is to preserve enough evidence to reconsider a conclusion.
 
-Two things are true at once, and together they settle the argument.
+Definitions change, benchmarks change, and readers change. The same collection can support a comparison by accuracy today and by inference budget tomorrow. Derived graphs can help with either task. Keeping their assumptions traceable to the source records makes those graphs easier to revise.
 
-**The readers keep getting better.** Every year, models reason more carefully, hold more in context, and catch subtler distinctions. A model that can keep an entire collection in its context window, every paper, every claim, every link and its quote, can weigh a question with more nuance than any rule you could write down in advance. It can notice that a trial's population doesn't match the claim, that a "contradiction" is really a difference in timeframe, that two sources sharing a press release aren't independent. A schema can't notice anything. It can only enforce what its designer thought of, back when they thought of it. Every judgement you freeze into the structure is a judgement you have decided a future, smarter reader isn't allowed to revisit.
+## So the schema is as small as we could make it
 
-**The meanings keep moving.** The concepts a schema depends on aren't fixed either:
+Four kinds of record carry the research:
 
-- **What counts as an entity shifts.** Diseases split into subtypes and merge back together. Diagnostic criteria get rewritten, and the same name starts pointing at a different set of patients. A company is renamed, acquired and spun out. A "species" is redrawn by new genetics. An entity table records how the world was carved up on the day it was built.
-- **What a probability means shifts.** A 0.8 depends on who assigned it, against what baseline, under which model, with what calibration, for which decision. Change any of those and the same number means something else. Store it as a bare float and the context that gave it meaning is gone.
-- **What counts as good evidence shifts.** Methods get discredited, whole literatures fail to replicate, a once-trusted source loses its standing, an ignored one gets vindicated. A reliability score from five years ago is a fossil.
-- **What a relation means shifts.** "Causes" meant something different before randomized trials, and different again after causal inference. "Associated with" covers everything from a mechanism to a coincidence.
-- **What a word means shifts.** Terms drift, get redefined and become contested.
+| Record | What it holds |
+|---|---|
+| **Evidence** | Submitted document text and its source metadata. |
+| **Claim** | A statement in its author's words, with a stable ID others can refer to. |
+| **Link** | Evidence offered to support, rebut, or qualify a target, with a quote and a reason. |
+| **Contradiction** | Two or more claims and a contributor's reason they cannot all hold. |
 
-A schema built on any of these is wrong slowly, then all at once, and fixing it means a migration that rewrites everything everyone ever recorded through the old lens.
+Signatures, profiles, membership, and terms provide the surrounding infrastructure. The content schema stays small enough that a contribution can enter without agreement on a domain ontology.
 
-The ledger avoids both traps by keeping the raw material and refusing to interpret it. Claims stay in the words they were written in, at the time they were written. Evidence stays whole, so a future reader sees what the source actually said. Records are never rewritten, so the history of how understanding changed is itself part of what can be read. Tomorrow's reader brings tomorrow's understanding of entities, probabilities and evidence to records that haven't been bent to fit yesterday's.
+### What this is not
 
-## So the scheme is as small as we could make it
-
-There are four kinds of record that carry knowledge:
-
-| Record | What it holds | Why it can't be smaller |
-|---|---|---|
-| **Evidence** | The full text of a document as someone saw it, plus where it came from. | Without the text, nothing can be checked. |
-| **Claim** | One statement, as plain text. | You need a unit to point at. The server never parses it. |
-| **Link** | Evidence that supports, rebuts or qualifies a target, with a verbatim quote and a reason. | The quote is the only mechanical check we keep: it proves the document actually says it. |
-| **Contradiction** | Two or more claims that can't all hold, with a reason. | Incompatibility is a judgement about meaning. A link can't express it, because no single document says it. |
-
-Plus the plumbing that makes the records trustworthy rather than knowledgeable: signatures, profiles, membership, terms.
-
-Here is what we refused to add, on purpose:
-
-- **No entities.** A claim mentions whatever it mentions. Two claims that use the same word are two claims.
-- **No merging.** Identical text is still two records. Deciding they are the same is a reader's job.
-- **No typed relations** beyond supports, rebuts and qualifies, and we are not sure even those three are the minimum.
-- **No probabilities, weights, scores or confidence levels.** Numbers inside a claim are just text.
-- **No statuses.** Nothing is ever marked true, false, verified, debunked, open or resolved.
-- **No propagation.** Rebutting a claim doesn't touch anything else. Nothing is inferred.
-- **No source reliability field.** "This journal is unreliable" is a claim, and someone can ground it or dispute it like any other.
-- **No time model.** Any timeframe a claim needs goes in its text, where a reader can see it.
-- **No edits.** A correction is a new record that disputes the old one. The old one stays, so you can see what was relied on.
-
-Each of those refusals is a place where we would otherwise have smuggled in a theory of some particular domain. The ledger is meant to hold MCAS papers, macroeconomic arguments, AI-industry finance, physics and whatever comes next, with the same four kinds of record. It can only do that by not knowing anything about any of them.
+- **No entities.** Claims mention their subjects in plain text; the ledger defines no canonical domain entities.
+- **No probabilities.** No probability, weight, or confidence fields. Numbers in claims are content; retrieval scores are not belief estimates.
+- **No merging.** Distinct claim records stay distinct, even when their text matches.
+- **No domain relation vocabulary.** Links use supports, rebuts, or qualifies, with a reason in plain text.
+- **No statuses.** Nothing is marked true, false, verified, debunked, open, or resolved.
+- **No propagation.** Rebutting one record does not automatically invalidate another.
+- **No source reliability field.** A judgment about a source is another claim that can be supported or disputed.
+- **No domain time model.** A claim's timeframe belongs in its text; record timestamps track provenance.
+- **No edits.** Corrections add records. The earlier contribution remains available for inspection.
 
 ## What we do enforce
 
-Three things, and none of them is a judgement about truth:
+Three checks keep contributions inspectable:
 
-1. **Signatures.** Each record was signed, byte for byte, by the key that claims to have written it.
-2. **Structure and membership.** Records are well formed, references point at real records in the same collection, and only members can write.
-3. **Quotes.** A link's quote really appears in the evidence it cites (allowing for case, whitespace, curly quotes, dashes and ligatures).
+1. **Signatures.** Event content is bound to the signing key, without establishing the signer's real-world identity.
+2. **Structure and membership.** Records have valid fields and references, and collection operations require membership.
+3. **Quotes.** The quoted passage occurs in the submitted evidence after normalization. Matching a quote does not establish that the passage supports the claim.
 
-That's the whole referee. Everything else is the players.
+Preservation is only the starting point. Readers can miss evidence or reason badly, and submitted text can omit information from the original document. Whether the small schema improves accuracy or reduces total cost remains an empirical question. We are choosing to keep the evidence and earlier judgments available as reading methods improve.
 
 ## Think we can go smaller?
 
-We mean it. If you can see a way to remove a record kind, a field, a relation or a rule and still keep everything a reader needs to check a claim against its sources, we want to hear it. The same goes if you think one of our four is secretly domain-specific and we just haven't noticed.
-
-Email us at **{{CONTACT_EMAIL}}**. Bring the argument; bring a smaller schema if you have one. The best outcome for this page is that someone proves it wrong.
+If you can remove a record kind, field, or rule while keeping what readers need to check a claim against its sources, we want to hear the argument. The same goes for cases where stronger structure earns its cost. Email **{{CONTACT_EMAIL}}**.

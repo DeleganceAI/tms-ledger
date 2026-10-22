@@ -389,7 +389,7 @@ def server(ids) -> None:
         r = client.get("/docs")
         assert r.status_code == 200 and "marked@15.0.12" in r.text and "{{" not in r.text
         md = client.get("/docs.md").text
-        assert "## Philosophy" in md and "### What this is not" in md and 'id="toc"' in r.text, "philosophy section and sidebar"
+        assert "## Philosophy" in md and "### What readers decide" in md and 'id="toc"' in r.text, "philosophy section and sidebar"
         bl = client.get("/docs/bitter-lesson")
         assert bl.status_code == 200 and "Bitter Lesson Applied to Knowledge Graphs" in bl.text and "{{" not in bl.text and "@" in bl.text
         assert "/docs/bitter-lesson" in md and client.get("/docs/nope").status_code == 404
