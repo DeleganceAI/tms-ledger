@@ -25,7 +25,8 @@ The server enforces exactly two mechanical things beyond structure: a link's quo
 | [tms/web.py](tms/web.py), [tms/web.html](tms/web.html) | `/`, `/submit`, `/c/<slug>/members`, `/c/<slug>/export.jsonl`, `/login`. |
 | [tms/office.html](tms/office.html), [tms/office.py](tms/office.py) | The office ([OFFICE.md](OFFICE.md)): the logged-out home page and `/office`, driven by `/office.json`, anonymous slices of real collections and the last hour's events, recomputed hourly. |
 | [tms/ui.py](tms/ui.py), [tms/ui.html](tms/ui.html) | `/dashboard`, behind the login cookie, scoped to your collections. |
-| [tms/admin.py](tms/admin.py) | `/admin` for `TMS_ADMINS`: embedding spend, users, database size, events per day. |
+| [tms/chat.py](tms/chat.py) | The admin Chat tab: a read-only tool-calling agent over one collection, on DeepInfra; nothing stored. |
+| [tms/admin.py](tms/admin.py) | `/admin` for `TMS_ADMINS`: DeepInfra spend (embeddings and chat), users, database size, events per day. |
 | [DOCS.md](DOCS.md) | The user and agent guide, served at `/docs` and `/docs.md`. |
 | [test_events.py](test_events.py), [check/](check/) | IDs and signatures cross-checked against `nostr-tools`. |
 | [test_smoke.py](test_smoke.py) | Every PLAN.md test, against a scratch database it recreates. |
@@ -73,6 +74,7 @@ Environment:
 | `TMS_NSEC` | stdio only: your key; tool calls without a `request` are signed with it. |
 | `TMS_SERVER_NSEC` | The server's own key, which signs snapshot events and nothing else. |
 | `EMBED_URL`, `EMBED_MODEL`, `EMBED_API_KEY` | Default `http://localhost:11434/v1`, `qwen3-embedding:8b`. DeepInfra: `https://api.deepinfra.com/v1/openai`, `Qwen/Qwen3-Embedding-8B`. Must return 4096 dimensions. |
+| `CHAT_MODEL`, `CHAT_URL`, `CHAT_API_KEY` | The admin chat on `/dashboard`. Default `deepseek-ai/DeepSeek-V4.1-Flash` on `https://api.deepinfra.com/v1/openai`; the key defaults to `EMBED_API_KEY`. `CHAT_PRICE_IN_PER_MTOK` / `CHAT_PRICE_OUT_PER_MTOK` (0.20 / 0.60 USD) price it on `/admin`. |
 | `EMBED_PRICE_PER_MTOK` | USD per million embedding tokens for the spend shown on `/admin` (default 0.01). Local endpoints are logged at $0. |
 
 ## Keys and signing

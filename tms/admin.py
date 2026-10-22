@@ -1,4 +1,4 @@
-"""Operator page at /admin: access requests, embedding spend, users, and a few context numbers.
+"""Operator page at /admin: access requests, DeepInfra spend (embeddings and chat), users, and a few context numbers.
 
 Admins are the pubkeys in TMS_ADMINS, logged in with the same cookie as the other pages.
 Everyone else gets a 404, so the page's existence isn't advertised. Plain tables, server-rendered.
@@ -11,6 +11,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from starlette.routing import Route
 
+from . import chat
 from . import events as E
 from . import ledger as L
 from .web import cookie_pubkey
@@ -46,6 +47,8 @@ def report(conn) -> dict:
         "spend": conn.execute(SPEND_SQL).fetchone(),
         "by_pubkey": conn.execute("""SELECT e.pubkey, p.name, count(*) AS calls, sum(e.tokens) AS tokens, sum(e.cost_usd) AS cost
             FROM embed_calls e LEFT JOIN profiles p ON p.pubkey = e.pubkey GROUP BY 1, 2 ORDER BY cost DESC, calls DESC""").fetchall(),
+        "by_model": conn.execute("""SELECT model, count(*) AS calls, sum(tokens) AS tokens, sum(cost_usd) AS cost
+            FROM embed_calls GROUP BY 1 ORDER BY cost DESC, calls DESC""").fetchall(),
         "by_collection": conn.execute("""SELECT collection, count(*) AS calls, sum(tokens) AS tokens, sum(cost_usd) AS cost
             FROM embed_calls GROUP BY 1 ORDER BY cost DESC, calls DESC""").fetchall(),
         "users": users,
@@ -102,10 +105,12 @@ button.ghost{{background:none;color:var(--accent)}}td.note{{white-space:pre-wrap
         [[escape(a["name"] or "—"), f'<span class="mono">{escape(E.bech32_encode("npub", a["pubkey"]))}</span>',
           _who(a["approved_by"], a["by_name"]), when(a["at"])] for a in r["approvals"]])}
 <p class="mono">Access = TMS_ADMINS + TMS_APPROVED ({len(L.APPROVED | L.ADMINS)} from the environment) + the keys approved here.</p>
-<h2>Embedding spend (DeepInfra)</h2>
+<h2>DeepInfra spend (embeddings and chat)</h2>
 {_table(["Today (UTC)", "7 days", "30 days", "All time", "Tokens", "Calls"],
         [[_usd(s["today"]), _usd(s["last_7_days"]), _usd(s["last_30_days"]), _usd(s["all_time"]), f"{s['tokens']:,}", s["calls"]]])}
-<p class="mono">At ${L.EMBED_PRICE_PER_MTOK} per million tokens (EMBED_PRICE_PER_MTOK); local endpoints cost $0.</p>
+<p class="mono">Embeddings at ${L.EMBED_PRICE_PER_MTOK} per million tokens (EMBED_PRICE_PER_MTOK), local endpoints $0; chat at ${chat.PRICE_IN} in / ${chat.PRICE_OUT} out (CHAT_PRICE_IN_PER_MTOK, CHAT_PRICE_OUT_PER_MTOK).</p>
+<h2>Spend by model</h2>
+{_table(["Model", "Calls", "Tokens", "Cost"], [[escape(x["model"] or "—"), x["calls"], f"{x['tokens']:,}", _usd(x["cost"])] for x in r["by_model"]])}
 <h2>Spend by pubkey</h2>
 {_table(["Who", "Calls", "Tokens", "Cost"], [[_who(x["pubkey"], x["name"]), x["calls"], f"{x['tokens']:,}", _usd(x["cost"])] for x in r["by_pubkey"]])}
 <h2>Spend by collection</h2>

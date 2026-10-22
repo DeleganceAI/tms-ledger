@@ -47,7 +47,7 @@ Quote matching ignores differences in case, whitespace, curly versus straight qu
 
 Any member can download every event in a collection as JSON Lines from the home page (**export**) or at `/c/<slug>/export.jsonl`. Each line is a complete signed event that verifies on its own with any Nostr library.
 
-The [dashboard]({{BASE}}/dashboard) shows activity, records, contributors and sources for your collections.
+The [dashboard]({{BASE}}/dashboard) shows activity, records, contributors and sources for your collections. Admins also get a **Chat** tab: a read-only agent bound to one collection, which answers from the ledger, shows every tool call it makes, and exports the conversation as Markdown or JSON. Chats are not stored.
 
 The [office]({{BASE}}/office), also the home page when you're logged out, replays the last hour of real work, by its shape only. Each board is a slice of one private collection: index cards are claims, papers are evidence, green string supports, red rebuts, amber qualifies, and a red zigzag marks a contradiction; a yellow card with no string is a hypothesis. It shows no text, names, collections or record ids, and its data, [`/office.json`]({{BASE}}/office.json), is anonymous and refreshed hourly.
 
