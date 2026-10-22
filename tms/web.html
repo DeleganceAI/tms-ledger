@@ -138,6 +138,7 @@ function renderHome() {
     <td>${c.owner === ME.pubkey ? `<a href="/c/${esc(c.slug)}/members">members</a> · ` : ''}<a href="/c/${esc(c.slug)}/export.jsonl">export</a></td></tr>`).join('')}</table>`
     : '<p class="muted">You are not a member of any collection yet.</p>'
   $('newCol').hidden = !ME.approved
+  if (ME.approved && location.hash === '#new') { $('newCol').scrollIntoView({block: 'center'}); $('newSlug').focus() }  // from the dashboard's + card
 }
 
 $('newBtn').onclick = async () => {  // an empty members list names the collection, so this event creates it

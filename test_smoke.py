@@ -353,6 +353,7 @@ def server(ids) -> None:
         assert r.status_code == 200 and "DeepInfra spend" in r.text and E.bech32_encode("npub", PK[BOB]) in r.text, r.text[:300]
         assert "Bob" in r.text and "$0.0100" in r.text, "users table and embed spend"
         # Dashboard: scoped to the viewer's collections.
+        assert client.get("/dashboard/api/collections").json()["can_create"], "an approved owner gets the + card"
         snap = client.get("/dashboard/api/snapshot").json()
         assert {c["slug"] for c in snap["collections"]} == {"smoke", "other"}, snap["collections"]
         # Npubs tab: an admin sees every key and every collection it belongs to.
@@ -362,6 +363,9 @@ def server(ids) -> None:
         assert byk[PK[OUTSIDER]]["owns"] == ["outside"] and byk[PK[BOB]]["npub"] == E.bech32_encode("npub", PK[BOB])
         client.cookies.set(W.COOKIE, W.make_cookie(PK[OUTSIDER]))
         assert client.get("/dashboard").status_code == 200
+        client.cookies.set(W.COOKIE, W.make_cookie(PK[BOB]))  # a member, not approved: no + card
+        assert not client.get("/dashboard/api/collections").json()["can_create"]
+        client.cookies.set(W.COOKIE, W.make_cookie(PK[OUTSIDER]))
         for path in ("snapshot", "browse?kind=claim", "agents", "sources", "collections"):
             r = client.get(f"/dashboard/api/{path}")
             assert r.status_code == 200 and "smoke" not in r.text and ids[0] not in r.text, (path, r.text[:300])

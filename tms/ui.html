@@ -63,6 +63,8 @@ table.wide th.n{text-align:right}.spark{width:120px;height:18px;display:block}td
 .ext2{color:var(--ink3);font-family:var(--mono);font-size:10.5px}
 .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:10px}
 .card{cursor:pointer}.card:hover{border-color:var(--accent)}.card .ph h2{text-transform:none;letter-spacing:0;font-size:13px;color:var(--ink);font-family:var(--mono)}
+.card.add{display:flex;align-items:center;justify-content:center;min-height:140px;border-style:dashed;text-decoration:none;color:var(--ink3);gap:10px;font-size:13px}
+.card.add b{font-size:32px;font-weight:300;line-height:1;color:var(--accent)}.card.add:hover{color:var(--ink)}
 .card .nm2{padding:8px 10px 0;color:var(--ink2);font-size:12px}.card .grid4{margin:8px 10px 10px}.card .grid4 .v{font-size:16px}
 .storage{max-width:560px}.bars.tbl{max-height:none}
 </style></head><body>
@@ -278,7 +280,8 @@ async function loadCollections() {
     `<div class="panel card" data-col="${esc(c.slug)}" title="browse ${esc(c.slug)}"><div class="ph"><h2>${esc(c.slug)}</h2><span class="muted">${c.last_at ? 'last event ' + ago(c.last_at) + ' ago' : 'empty'}</span></div>` +
     `<div class="nm2" title="${esc(c.owner)}">owner ${esc(c.owner_name)}</div><div class="grid4">${cell('members', c.members)}${cell('evidence', c.evidence)}${cell('contributors', c.contributors, 'distinct signing keys on its events')}${cell('row data', fmtB(c.bytes), 'event bytes as stored: compressed, without indexes')}` +
     `${cell('claims', c.claims)}${cell('links', c.links)}${cell('contradictions', c.contradictions)}${cell('created', ago(c.created_at) + ' ago', `${c.owner} · ${c.created_at}`)}</div></div>`).join('')
-    : '<div class="empty">you are not a member of any collection yet</div>';
+    : (d.can_create ? '' : '<div class="empty">you are not a member of any collection yet</div>');
+  if (d.can_create) $('ccards').insertAdjacentHTML('beforeend', '<a class="panel card add" href="/connect#new" title="Create a collection"><b>+</b>New collection</a>');
   const tot = d.collections.reduce((a, c) => a + c.bytes + c.vector_bytes, 0);
   $('dbsize').textContent = `${fmtB(tot)} events + vectors`;
   const tmax = Math.max(1, ...d.collections.map(c => c.bytes + c.vector_bytes));
@@ -398,7 +401,7 @@ document.addEventListener('click', e => {
   if (tr && tr.dataset.id) { showDetail(tr.dataset.id); return; }
   if (tr && 'source' in tr.dataset) {  // a source row: browse its evidence
     B.kind = 'evidence'; $('bkind').value = 'evidence'; B.q = tr.dataset.source; $('bq').value = B.q; bshown = true; showTab('browse'); rebrowse(); return; }
-  const card = e.target.closest('.card'); if (card) { B.col = card.dataset.col; $('bcol').value = B.col; bshown = true; showTab('browse'); rebrowse(); }
+  const card = e.target.closest('.card[data-col]'); if (card) { B.col = card.dataset.col; $('bcol').value = B.col; bshown = true; showTab('browse'); rebrowse(); }
 });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') hideDetail(); });
 showTab('collections'); poll(); setInterval(poll, 2000);
