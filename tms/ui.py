@@ -262,7 +262,7 @@ def sources(conn, cols: list[str], q: str = "", sort: str = "evidence", limit: i
     return {"sources": rows, "domains": domains, "totals": totals}
 
 
-def collections(conn, cols: list[str]) -> dict:
+def collections(conn, pk: str, cols: list[str]) -> dict:
     """The landing page: each of the viewer's collections with what it holds, who wrote it and what it weighs."""
     # ponytail: bytes are row data as stored (compressed, no indexes), summed per collection; no global DB figures
     rows = _rows(conn, """
@@ -278,7 +278,7 @@ def collections(conn, cols: list[str]) -> dict:
                  coalesce(sum(pg_column_size(e.*)), 0) AS bytes
           FROM events e WHERE e.collection = c.slug) s
         WHERE c.slug = ANY(%s) ORDER BY c.created_at, c.slug""", (cols,))
-    return {"collections": rows}
+    return {"collections": rows, "can_create": L.is_approved(conn, pk)}
 
 
 # ------------------------------------------------------------------ HTTP
@@ -327,6 +327,6 @@ routes = [
     Route("/dashboard/api/npubs", _api(lambda conn, pk, cols, r: npubs(conn, pk, cols))),
     Route("/dashboard/api/sources", _api(lambda conn, pk, cols, r: sources(
         conn, cols, r.query_params.get("q", "").strip(), r.query_params.get("sort", "evidence")))),
-    Route("/dashboard/api/collections", _api(lambda conn, pk, cols, r: collections(conn, cols))),
+    Route("/dashboard/api/collections", _api(lambda conn, pk, cols, r: collections(conn, pk, cols))),
     Route("/dashboard/api/record/{id}", _api(_record)),
 ]
