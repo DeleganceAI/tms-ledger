@@ -34,6 +34,9 @@ COOKIE_TTL = 12 * 3600
 PAGE_FILE = Path(__file__).with_name("web.html")
 OFFICE_FILE = Path(__file__).with_name("office.html")
 DOCS_FILE = Path(__file__).resolve().parent.parent / "DOCS.md"
+# Extra docs pages, served at /docs/<name> with the same template.
+DOCS_PAGES = {"bitter-lesson": Path(__file__).resolve().parent.parent / "BITTER_LESSON.md"}
+CONTACT_EMAIL = os.environ.get("TMS_CONTACT_EMAIL", "dustin@delegance.ai")
 DOCS_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>TMS docs</title><style>
 :root{{--bg:#f4f4f2;--panel:#fff;--line:#e2e2de;--ink:#171716;--ink3:#8c8c86;--accent:#2f6fde;--code:#ecece8}}
@@ -53,7 +56,7 @@ pre{{padding:10px 12px;overflow-x:auto;white-space:pre}}pre code{{padding:0;back
 table{{border-collapse:collapse;display:block;overflow-x:auto}}td,th{{border:1px solid var(--line);padding:5px 8px;text-align:left;vertical-align:top}}
 blockquote{{margin:0;padding:2px 14px;border-left:3px solid var(--line);color:var(--ink3)}}
 </style></head><body><header><b>TMS ledger</b><a href="/">Home</a><a href="/submit">Submit</a><a href="/dashboard">Dashboard</a>
-<a href="/office">Office</a><a href="/docs.md">Markdown</a></header>
+<a href="/office">Office</a><a href="/docs">Docs</a><a href="/docs/bitter-lesson">Bitter lesson</a><a href="/docs.md">Markdown</a></header>
 <div class="wrap"><details id="toc" hidden><summary>Contents</summary><ol></ol></details><main><pre id="md">{md}</pre></main></div>
 <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"></script>
 <script>const el = document.getElementById('md'); if (window.marked) el.outerHTML = marked.parse(el.textContent)</script>
@@ -204,9 +207,9 @@ async def office(request: Request) -> HTMLResponse:
     return HTMLResponse(OFFICE_FILE.read_text(encoding="utf-8"))
 
 
-def _docs_text(request: Request) -> str:
+def _docs_text(request: Request, path: Path = DOCS_FILE) -> str:
     base = str(request.base_url).rstrip("/")  # behind DO's proxy, uvicorn's proxy_headers make this https
-    return (DOCS_FILE.read_text(encoding="utf-8").replace("{{BASE}}", base)
+    return (path.read_text(encoding="utf-8").replace("{{BASE}}", base).replace("{{CONTACT_EMAIL}}", CONTACT_EMAIL)
             .replace("{{TERMS_VERSION}}", L.TERMS["version"]).replace("{{TERMS_SHA256}}", L.TERMS["sha256"]))
 
 
@@ -214,6 +217,15 @@ async def docs(request: Request) -> HTMLResponse:
     """DOCS.md, rendered in the browser by a pinned marked; readable as plain text without JS."""
     from html import escape
     return HTMLResponse(DOCS_PAGE.format(md=escape(_docs_text(request)), toc_js=TOC_JS))
+
+
+async def docs_page(request: Request) -> HTMLResponse:
+    """An extra docs page from DOCS_PAGES, same template as /docs."""
+    from html import escape
+    path = DOCS_PAGES.get(request.path_params["name"])
+    if path is None:
+        return HTMLResponse("not found", status_code=404)
+    return HTMLResponse(DOCS_PAGE.format(md=escape(_docs_text(request, path)), toc_js=TOC_JS))
 
 
 async def docs_md(request: Request) -> PlainTextResponse:
@@ -320,6 +332,7 @@ routes = [
     Route("/healthz", healthz),
     Route("/docs", docs),
     Route("/docs.md", docs_md),
+    Route("/docs/{name}", docs_page),
     Route("/", home),
     Route("/connect", page),
     Route("/api/access-request", access_request, methods=["POST"]),
