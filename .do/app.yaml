@@ -43,6 +43,12 @@ services:
       - key: EMBED_API_KEY
         scope: RUN_TIME
         type: SECRET
+      - key: RESEND_API_KEY        # email sign-in codes
+        scope: RUN_TIME
+        type: SECRET
+      - key: TMS_KEY_SECRET        # encrypts keys held for email accounts; back it up, losing it loses them
+        scope: RUN_TIME
+        type: SECRET
 # Phase 8 adds the daily snapshot as a job on the same image:
 # jobs:
 #   - name: snapshot

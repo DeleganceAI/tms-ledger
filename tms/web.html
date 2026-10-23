@@ -29,7 +29,16 @@ td.n{font-family:var(--mono);text-align:right}.actions{display:flex;gap:8px;flex
 <main>
   <section id="connect" hidden><h2>Connect</h2>
     <p>Every record here is signed by its author's Nostr key. Connect with a NIP-07 browser extension (Alby, nos2x, Keys.band) to read and write the collections you belong to.</p>
-    <button id="connectBtn">Connect</button> <span id="connectMsg" class="muted"></span></section>
+    <button id="connectBtn">Connect</button> <span id="connectMsg" class="muted"></span>
+    <h2 style="margin-top:18px">Or sign in with email</h2>
+    <p class="muted" style="margin-top:0">No extension needed. We email you a code each time; there's no password. On your first sign-in we create a Nostr key for you and hold it, so the site can sign your records. You can export it at any time and switch to signing with it yourself.</p>
+    <div class="actions"><input id="eAddr" type="email" autocomplete="email" placeholder="you@example.com" style="max-width:280px"><button id="eSend" class="ghost">Email me a code</button></div>
+    <div class="actions" id="eCodeRow" hidden><input id="eCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6-digit code" style="max-width:140px"><button id="eVerify">Sign in</button></div>
+    <span id="eMsg" class="muted"></span></section>
+  <section id="keyBox" hidden><h2>Your key</h2>
+    <p class="muted" style="margin-top:0">You signed in with email, so the server holds this account's Nostr key and signs your records with it. Export it to keep a copy, or to sign with your own Nostr extension instead.</p>
+    <div class="actions"><button id="kSend" class="ghost">Email me a code to export my key</button><input id="kCode" inputmode="numeric" maxlength="6" placeholder="6-digit code" style="max-width:140px" hidden><button id="kShow" hidden>Show my key</button></div>
+    <div id="kOut"></div><span id="kMsg" class="muted"></span></section>
   <section id="profileBox" hidden><h2>Profile</h2><div id="profile"></div></section>
   <section id="termsBox" hidden><h2>Terms</h2><pre id="termsText"></pre>
     <button id="termsBtn">I agree: sign the terms</button> <span id="termsMsg"></span></section>
@@ -62,7 +71,10 @@ async function api(path, opts = {}) {
   return d
 }
 const post = (path, body) => api(path, {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(body)})
-const sign = (kind, content) => window.nostr.signEvent({kind, created_at: now(), tags: [], content: typeof content === 'string' ? content : JSON.stringify(content)})
+// Email accounts sign through the server, which holds their key; everyone else signs in their extension.
+const sign = (kind, content) => ME?.custodial
+  ? post('/api/sign', {kind, content})
+  : window.nostr.signEvent({kind, created_at: now(), tags: [], content: typeof content === 'string' ? content : JSON.stringify(content)})
 const publish = events => post('/api/publish', {events})
 const say = (el, text, cls = 'muted') => { $(el).className = cls; $(el).textContent = text }
 
@@ -166,6 +178,40 @@ async function connect() {
 }
 $('connectBtn').onclick = connect
 
+$('eSend').onclick = async () => {
+  try { await post('/api/email/start', {email: $('eAddr').value}); $('eCodeRow').hidden = false; $('eCode').focus()
+        say('eMsg', 'Check your inbox for a 6-digit code. It expires in 10 minutes.') }
+  catch (e) { say('eMsg', e.message, 'err') }
+}
+$('eVerify').onclick = async () => {
+  try { ME = await post('/api/email/verify', {email: $('eAddr').value, code: $('eCode').value}); $('connect').hidden = true; show(null) }
+  catch (e) { say('eMsg', e.message, 'err') }
+}
+$('eCode').onkeydown = e => { if (e.key === 'Enter') $('eVerify').click() }
+
+function renderKey() {
+  $('keyBox').hidden = !ME.custodial
+}
+$('kSend').onclick = async () => {
+  try { await post('/api/key/export-code', {}); $('kCode').hidden = $('kShow').hidden = false; $('kCode').focus()
+        say('kMsg', `We emailed a code to ${ME.email}.`) }
+  catch (e) { say('kMsg', e.message, 'err') }
+}
+$('kShow').onclick = async () => {
+  try {
+    const k = await post('/api/key/export', {code: $('kCode').value})
+    $('kOut').innerHTML = `<p><b>Your secret key</b>: anyone who has it can sign as you. Store it somewhere safe, like a password manager.</p>
+      <pre class="mono" style="white-space:pre-wrap;word-break:break-all">${esc(k.nsec)}</pre><p class="muted mono">${esc(k.npub)}</p>
+      <p>To sign with your own extension from now on, import this key into it, then let us forget our copy. After that, sign in with <b>Connect</b>, not email.</p>
+      <div class="actions"><button id="kForget" class="ghost">Forget my key on the server</button></div>`
+    say('kMsg', '')
+    $('kForget').onclick = async () => {
+      if (!confirm('Delete the server copy of your key? You will only be able to sign in with a Nostr extension holding this key.')) return
+      try { await post('/api/key/forget', {}); await post('/logout', {}); location.href = '/connect' } catch (e) { say('kMsg', e.message, 'err') }
+    }
+  } catch (e) { say('kMsg', e.message, 'err') }
+}
+
 async function refresh() { ME = await api('/api/me'); show(null) }
 
 function show(relay) {
@@ -173,7 +219,7 @@ function show(relay) {
   const path = location.pathname
   $('termsBox').hidden = ME.terms_signed
   $('termsText').textContent = ME.terms_text
-  if (path === '/' || path === '/connect') { renderProfile(relay); renderHome() }
+  if (path === '/' || path === '/connect') { renderProfile(relay); renderKey(); renderHome() }
   else if (path === '/submit') renderSubmit()
   else if (path.startsWith('/c/')) renderMembers(decodeURIComponent(path.split('/')[2]))
 }

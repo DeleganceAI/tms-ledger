@@ -234,4 +234,28 @@ CREATE TABLE admins (
     added_by text NOT NULL,
     at       timestamptz NOT NULL DEFAULT now()
 );
+
+-- Email sign-in (operational, not ledger data). The server generates and holds a Nostr key for
+-- each email account, encrypted with TMS_KEY_SECRET, until the user exports it and asks us to
+-- forget it (nsec_enc becomes NULL; the account then signs with its own key).
+CREATE TABLE email_accounts (
+    email       text PRIMARY KEY CHECK (email = lower(email) AND email LIKE '%_@_%'),
+    pubkey      text NOT NULL UNIQUE CHECK (pubkey ~ '^[0-9a-f]{64}$'),
+    nsec_enc    text,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    exported_at timestamptz
+);
+
+-- One-time codes, stored hashed. purpose: 'login' or 'export'.
+CREATE TABLE email_codes (
+    id         bigserial PRIMARY KEY,
+    email      text NOT NULL,
+    purpose    text NOT NULL CHECK (purpose IN ('login', 'export')),
+    code_hash  text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    expires_at timestamptz NOT NULL,
+    attempts   integer NOT NULL DEFAULT 0,
+    used_at    timestamptz
+);
+CREATE INDEX email_codes_email_idx ON email_codes (email, purpose, created_at DESC);
 COMMIT;
