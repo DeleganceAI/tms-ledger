@@ -47,6 +47,8 @@
   dialog textarea{min-height:80px;font-family:system-ui,sans-serif}
   #req-msg{min-height:1.2em;font-size:13px}#req-msg.err{color:#f4a6a0}#req-msg.ok{color:#a9d6c4}
   #agency{flex-shrink:0;background:#1e1826;border-top:1px solid #3a3144;padding:6px 14px 8px}
+  /* both legends share one grid cell, so the strip is as tall as the taller one whichever is shown */
+  #legend-panels{display:grid;grid-template-columns:minmax(0,1fr);max-width:1300px;margin:0 auto}#legend-panels>ul{grid-area:1/1;min-width:0;max-width:none;margin:0}#agency{min-width:0;box-sizing:border-box}#legend-panels>ul.off{visibility:hidden}
   #legend-tabs{display:flex;justify-content:center;gap:4px;margin:0 0 6px}
   #legend-tabs button{font:inherit;font-size:12.5px;padding:2px 12px;border-radius:999px;border:1px solid #4a3f57;background:none;color:#cbbfd4;cursor:pointer}
   #legend-tabs button[aria-selected="true"]{background:#4a3f57;color:#fff}
@@ -69,7 +71,7 @@
 </main>
 <section id="agency" aria-label="Legend">
   <div id="legend-tabs" role="tablist"><button role="tab" id="tab-agents" aria-controls="agents" aria-selected="true">Agents</button><button role="tab" id="tab-records" aria-controls="records" aria-selected="false">Records</button></div>
-  <ul id="agents" role="tabpanel" aria-labelledby="tab-agents"></ul><ul id="records" role="tabpanel" aria-labelledby="tab-records" hidden></ul>
+  <div id="legend-panels"><ul id="agents" role="tabpanel" aria-labelledby="tab-agents"></ul><ul id="records" role="tabpanel" aria-labelledby="tab-records" class="off" aria-hidden="true"></ul></div>
 </section>
 <footer id="ticker" aria-label="Ledger totals"></footer>
 <dialog id="req"><form id="req-form" method="dialog">
@@ -1081,7 +1083,8 @@ const header = document.querySelector('header');
 $('menu-btn').onclick = () => $('menu-btn').setAttribute('aria-expanded', String(header.classList.toggle('open')));
 document.addEventListener('click', e => { if (!header.contains(e.target)) { header.classList.remove('open'); $('menu-btn').setAttribute('aria-expanded', 'false'); } });
 const showLegend = which => ['agents', 'records'].forEach(k => {
-  $(k).hidden = k !== which; $('tab-' + k).setAttribute('aria-selected', String(k === which));
+  $(k).classList.toggle('off', k !== which); $(k).setAttribute('aria-hidden', String(k !== which));
+  $('tab-' + k).setAttribute('aria-selected', String(k === which));
 });
 $('tab-agents').onclick = () => showLegend('agents');
 $('tab-records').onclick = () => showLegend('records');
