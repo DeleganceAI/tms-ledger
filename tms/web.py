@@ -35,12 +35,12 @@ PAGE_FILE = Path(__file__).with_name("web.html")
 OFFICE_FILE = Path(__file__).with_name("office.html")
 DOCS_FILE = Path(__file__).resolve().parent.parent / "DOCS.md"
 # Extra docs pages, served at /docs/<name> with the same template.
-DOCS_PAGES = {"bitter-lesson": Path(__file__).resolve().parent.parent / "BITTER_LESSON.md"}
+DOCS_PAGES = {"bitter-lesson": Path(__file__).resolve().parent.parent / "BITTER_LESSON.md",
+              "why-nostr": Path(__file__).resolve().parent.parent / "WHY_NOSTR.md"}
 CONTACT_EMAIL = os.environ.get("TMS_CONTACT_EMAIL", "dustin@delegance.ai")
 DOCS_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>TMS docs</title><style>
-:root{{--bg:#f4f4f2;--panel:#fff;--line:#e2e2de;--ink:#171716;--ink3:#8c8c86;--accent:#2f6fde;--code:#ecece8}}
-@media(prefers-color-scheme:dark){{:root{{--bg:#121211;--panel:#1a1a19;--line:#2b2b29;--ink:#ececea;--ink3:#74746d;--accent:#7aa6f5;--code:#232321}}}}
+:root{{color-scheme:dark;--bg:#2b2433;--panel:#342b3e;--line:#4a3f57;--ink:#f4efe6;--ink3:#9d91a8;--accent:#8ab6f9;--code:#241e2c}}
 body{{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 system-ui,sans-serif}}
 header{{padding:10px 16px;border-bottom:1px solid var(--line);display:flex;flex-wrap:wrap;gap:4px 14px}}header a{{color:var(--ink3);text-decoration:none}}
 main{{max-width:860px;margin:0 auto;padding:8px 16px 40px;min-width:0}}a{{color:var(--accent)}}
@@ -77,7 +77,7 @@ TOC_JS = r"""(() => {
     li.append(a); list.append(li); links.set(h, a);
   }
   // the docs pages themselves, above this page's sections
-  const pages = [['/docs', 'Using the TMS ledger'], ['/docs/bitter-lesson', 'The Bitter Lesson Applied to Knowledge Graphs']];
+  const pages = [['/docs', 'Using the TMS ledger'], ['/docs/bitter-lesson', 'The Bitter Lesson Applied to Knowledge Graphs'], ['/docs/why-nostr', 'Why Nostr Keys for Login']];
   const group = document.createElement('li'); group.className = 'pages';
   group.innerHTML = '<b>Pages</b><ol>' + pages.map(([href, title]) =>
     `<li><a href="${href}"${location.pathname === href ? ' class="here"' : ''}>${title}</a></li>`).join('') + '</ol>';

@@ -4,10 +4,9 @@
 (() => {
   const KEY = 'tms-chat';
   const css = `
-  #tmsc-btn,#tmsc{--bg:#f4f4f2;--panel:#fff;--line:#e2e2de;--ink:#171716;--ink2:#5a5a55;--ink3:#8c8c86;--accent:#2f6fde;--accent2:#e3ecfb;--bad:#b4232c;
+  #tmsc-btn,#tmsc{color-scheme:dark;--bg:#2b2433;--panel:#342b3e;--line:#4a3f57;--ink:#f4efe6;--ink2:#cbbfd4;--ink3:#9d91a8;--accent:#8ab6f9;--accent2:#2f3a5c;--bad:#f4a6a0;
     --mono:ui-monospace,"SF Mono",Menlo,monospace;font:13px/1.45 Inter,system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink)}
-  @media(prefers-color-scheme:dark){#tmsc-btn,#tmsc{--bg:#121211;--panel:#1a1a19;--line:#2b2b29;--ink:#ececea;--ink2:#a7a7a1;--ink3:#74746d;--accent:#7aa6f5;--accent2:#1c2d4f;--bad:#f08a8a}}
-  #tmsc-btn{position:fixed;right:18px;bottom:18px;z-index:2147483000;border:0;border-radius:999px;padding:10px 16px;background:var(--accent);color:#fff;font-weight:600;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.25)}
+  #tmsc-btn{position:fixed;right:18px;bottom:18px;z-index:2147483000;border:0;border-radius:999px;padding:10px 16px;background:var(--accent);color:#1e1826;font-weight:600;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.25)}
   #tmsc{position:fixed;right:18px;bottom:18px;z-index:2147483001;width:min(440px,calc(100vw - 24px));height:min(640px,calc(100vh - 36px));
     background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:0 18px 50px rgba(0,0,0,.3);display:flex;flex-direction:column;overflow:hidden;
     transform-origin:bottom right;animation:tmsc-in .16s ease-out}
@@ -34,7 +33,7 @@
   #tmsc a.id{font-family:var(--mono);font-size:11px;color:var(--accent);background:var(--accent2);padding:0 3px;border-radius:3px;text-decoration:none}
   #tmsc form{display:flex;gap:6px;padding:8px;border-top:1px solid var(--line)}
   #tmsc textarea{flex:1;min-height:44px;max-height:140px;resize:vertical;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 8px}
-  #tmsc .go{background:var(--accent);color:#fff;border:0;border-radius:6px;padding:0 14px;cursor:pointer;font-weight:600}#tmsc .go:disabled{opacity:.5;cursor:default}`;
+  #tmsc .go{background:var(--accent);color:#1e1826;border:0;border-radius:6px;padding:0 14px;cursor:pointer;font-weight:600}#tmsc .go:disabled{opacity:.5;cursor:default}`;
   // Answers can echo uploaded text, so rendered markdown keeps only these tags and safe links.
   const MD_TAGS = new Set(['P', 'BR', 'HR', 'STRONG', 'B', 'EM', 'I', 'DEL', 'CODE', 'PRE', 'BLOCKQUOTE', 'UL', 'OL', 'LI',
     'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'TABLE', 'THEAD', 'TBODY', 'TR', 'TH', 'TD', 'A']);

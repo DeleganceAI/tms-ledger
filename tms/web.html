@@ -2,9 +2,8 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TMS ledger</title>
 <style>
-:root{--bg:#f4f4f2;--panel:#fff;--line:#e2e2de;--ink:#171716;--ink2:#5a5a55;--ink3:#8c8c86;--accent:#2f6fde;--accent2:#e3ecfb;--bad:#b4232c;--good:#0a7d0a;
+:root{color-scheme:dark;--bg:#2b2433;--panel:#342b3e;--line:#4a3f57;--ink:#f4efe6;--ink2:#cbbfd4;--ink3:#9d91a8;--accent:#8ab6f9;--accent2:#2f3a5c;--bad:#f4a6a0;--good:#a9d6c4;
   --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;--sans:Inter,system-ui,-apple-system,"Segoe UI",sans-serif}
-@media(prefers-color-scheme:dark){:root{--bg:#121211;--panel:#1a1a19;--line:#2b2b29;--ink:#ececea;--ink2:#a7a7a1;--ink3:#74746d;--accent:#7aa6f5;--accent2:#1c2d4f;--bad:#f08a8a;--good:#6fd36f}}
 a{color:var(--accent)}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 var(--sans)}
 header{display:flex;align-items:center;gap:16px;padding:10px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
 header b{font-size:15px}header nav{display:flex;gap:12px}header a{color:var(--ink2);text-decoration:none}header a:hover{color:var(--accent)}
@@ -12,7 +11,7 @@ header b{font-size:15px}header nav{display:flex;gap:12px}header a{color:var(--in
 main{max-width:860px;margin:0 auto;padding:16px;display:grid;gap:14px}
 section{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px 16px}
 h2{margin:0 0 10px;font-size:13px;letter-spacing:.05em;text-transform:uppercase;color:var(--ink3)}
-button{font:inherit;padding:6px 12px;border-radius:6px;border:1px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer}
+button{font:inherit;padding:6px 12px;border-radius:6px;border:1px solid var(--accent);background:var(--accent);color:#1e1826;cursor:pointer}
 button.ghost{background:none;color:var(--accent)}button:disabled{opacity:.5;cursor:default}
 input,textarea,select{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;width:100%}
 textarea{font:12.5px/1.45 var(--mono);min-height:90px}label{display:grid;gap:4px;color:var(--ink2);font-size:12.5px}
