@@ -46,12 +46,12 @@ header{{padding:10px 16px;border-bottom:1px solid var(--line);display:flex;flex-
 main{{max-width:860px;margin:0 auto;padding:8px 16px 40px;min-width:0}}a{{color:var(--accent)}}
 .wrap{{display:flex;justify-content:center;gap:28px}}
 #toc{{font-size:13px;line-height:1.4;padding:14px 0 0 16px}}#toc summary{{cursor:pointer;color:var(--ink3);font-weight:600}}
-#toc ol{{list-style:none;margin:6px 0 0;padding:0}}#toc li{{margin:3px 0}}#toc li.h3{{padding-left:12px}}#toc li.h2{{margin-top:10px}}#toc li.h2:first-child{{margin-top:0}}#toc li.h2>a{{color:var(--ink);font-weight:600}}#toc a{{color:var(--ink3);text-decoration:none}}
+#toc ol{{list-style:none;margin:6px 0 0;padding:0}}#toc li{{margin:3px 0}}#toc li.h3{{padding-left:12px}}#toc li.h4{{padding-left:24px;font-size:12px}}#toc li.h2{{margin-top:10px}}#toc li.h2:first-child{{margin-top:0}}#toc li.h2>a{{color:var(--ink);font-weight:600}}#toc a{{color:var(--ink3);text-decoration:none}}
 #toc a:hover,#toc a.on{{color:var(--ink)}}#toc a.on{{font-weight:600}}#toc li.pages{{margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--line)}}#toc li.pages b{{color:var(--ink3);font-size:11px;letter-spacing:.06em;text-transform:uppercase}}#toc li.pages ol{{margin-top:4px}}#toc a.here{{color:var(--ink);font-weight:600}}
 @media(min-width:1100px){{#toc{{position:sticky;top:0;align-self:flex-start;width:230px;max-height:100vh;overflow:auto;flex:none}}#toc summary{{display:none}}}}
 @media(max-width:1099px){{.wrap{{display:block}}#toc{{display:block;padding:10px 16px 0;max-width:860px;margin:0 auto;box-sizing:border-box}}}}
 h2,h3{{scroll-margin-top:12px}}
-pre,code{{font:13px/1.5 ui-monospace,Menlo,monospace;background:var(--code);border-radius:4px}}code{{padding:1px 4px}}:not(pre)>code{{overflow-wrap:anywhere}}
+pre,code{{font:13px/1.5 ui-monospace,Menlo,monospace;background:var(--code);border-radius:4px}}code{{padding:1px 4px}}:not(pre)>code{{overflow-wrap:anywhere}}td>code:only-child{{white-space:nowrap;overflow-wrap:normal}}
 pre{{padding:10px 12px;overflow-x:auto;white-space:pre}}pre code{{padding:0;background:none}}#md{{white-space:pre-wrap}}
 table{{border-collapse:collapse;display:block;overflow-x:auto}}td,th{{border:1px solid var(--line);padding:5px 8px;text-align:left;vertical-align:top}}
 blockquote{{margin:0;padding:2px 14px;border-left:3px solid var(--line);color:var(--ink3)}}
@@ -66,7 +66,7 @@ blockquote{{margin:0;padding:2px 14px;border-left:3px solid var(--line);color:va
 
 # The docs sidebar: a contents list from the rendered h2/h3, with the section in view highlighted.
 TOC_JS = r"""(() => {
-  const heads = [...document.querySelectorAll('main h2, main h3')];
+  const heads = [...document.querySelectorAll('main h2, main h3, main h4')];
   if (!heads.length) return;
   const slug = t => t.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   const toc = document.getElementById('toc'), list = toc.querySelector('ol'), links = new Map();

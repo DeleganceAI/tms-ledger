@@ -204,17 +204,7 @@ A signed request tells the server which key is calling a tool and which argument
 
 So sign a fresh request for every call, with a random `nonce`. `created_at` is in whole seconds, so without one, two identical calls in the same second get the same id and the second is rejected as a replay.
 
-| Tool | `args` |
-|---|---|
-| `list_collections` | none |
-| `get_event` | `id`, `offset`?, `max_chars`? (evidence text comes back in windows) |
-| `search_claims` | `collection`, `text`, `method`? (`vector` or `keyword`), `limit`? |
-| `list_claims` | `collection`, `sort`? (`unsupported`, `unchallenged`, `contested`, `links`, `recent`, `oldest`), `limit`?, `offset`? |
-| `get_links` | `collection`, `to_id`?, `from_id`?, `relation`?, `limit`?, `offset`? |
-| `list_evidence` | `collection`, `ungrounded_only`?, `source`?, `limit`?, `offset`? |
-| `search_contradictions` | `collection`, `claim`?, `text`?, `limit`? |
-| `check_proof` | `collection`, `proof` |
-| `fetch_url` | `url` (returns text and title ready to sign as evidence; stores nothing; refuses captcha and near-empty pages) |
+Each tool's arguments, defaults and results are in the [Tool reference](#tool-reference) below.
 
 For listing tools that accept `offset`, read successive pages by increasing `offset` by `limit` until a page contains fewer than `limit` records. For claims, use `sort: "oldest"` to keep existing claims in a stable order as new ones arrive. Search tools return limited matches; they do not offer this pagination. Use the collection export when you need its complete signed events.
 
@@ -291,7 +281,7 @@ console.log(await tool('list_collections'))
 
 ### Publishing
 
-`publish` takes `{"events": [...]}`: a batch of signed events accepted together or rejected together. Already stored events are skipped, so you can retry the same signed batch without creating duplicates. This tool needs no separate signed request because each event already carries its author's signature. After acceptance, a separate search-indexing failure can be reported without undoing the stored records; see [What each tool returns](#what-each-tool-returns).
+`publish` takes `{"events": [...]}`: a batch of signed events accepted together or rejected together. Already stored events are skipped, so you can retry the same signed batch without creating duplicates. This tool needs no separate signed request because each event already carries its author's signature. After acceptance, a separate search-indexing failure can be reported without undoing the stored records; see [What each tool returns](#tool-reference).
 
 Before the key writes to a collection, publish its agreement to the current terms. The same batch can include its profile. In Python, using the helpers above:
 
@@ -318,24 +308,188 @@ print(call("publish", {"events": [doc, claim, link]}))
 
 To dispute a link or a contradiction, publish a link whose `to` is that event's id.
 
-### What each tool returns
+### Tool reference
 
-Records come back with `id`, `pubkey`, `author` (the signer's profile name, or null) and `received_at` (when the server stored them, ISO 8601). Lists are oldest first unless a sort says otherwise. Results that are a list, or that can be null, arrive as `{"result": ...}`.
+Records come back with `id`, `pubkey`, `author` (the signer's profile name, or null) and `received_at` (when the server stored them, ISO 8601). Lists are oldest first unless a sort says otherwise. Results that are a list, or that can be null, arrive as `{"result": ...}`. A link is `{"id", "pubkey", "author", "from", "to", "relation", "quote", "reason", "received_at"}`. Distances, ranks and counts are retrieval aids, not confidence.
 
-| Tool | Result |
-|---|---|
-| `publish` | `{"accepted": [ids], "skipped": [ids already stored], "collections": [slugs], "embedded": n}`. `embedded` becomes `embedding_error` when embedding fails; the events are stored anyway, and their vectors catch up on a later publish. |
-| `fetch_url` | `{"url", "title", "chars", "text"}` |
-| `list_collections` | `{"result": [{"slug", "owner", "created_at", "members": [pubkeys], "evidence", "claims", "links", "contradictions"}]}` |
-| `get_event` | `{"result": {"id", "pubkey", "author", "kind", "kind_name", "collection", "created_at", "received_at", "content": {...}}}`, or `{"result": null}` if the event doesn't exist or isn't in your collections. For evidence, `content.text` is the window from `offset` and the result adds `chars` (the full length) and `offset`. |
-| `search_claims` | `{"method", "note", "items": [{"id", "pubkey", "author", "text", "received_at", "distance" (vector) or "rank" (keyword), "links": [link], "contradiction_ids": [ids]}]}`. Quotes inside `links` are cut to 300 characters here only. |
-| `list_claims` | `{"result": [{"id", "pubkey", "author", "text", "received_at", "supports", "qualifies", "rebuts", "findings"}]}`, where `findings` counts the contradictions the claim belongs to. |
-| `get_links` | `{"result": [link]}` |
-| `list_evidence` | `{"result": [{"id", "pubkey", "author", "title", "url", "source", "archive_url", "retrieved_via", "received_at", "chars", "link_count"}]}`, without the text; read it with `get_event`. |
-| `search_contradictions` | `{"result": [{"id", "pubkey", "author", "reason", "claim_ids", "received_at", "claims": [{"id", "pubkey", "author", "text"}], "links": [link]}]}` |
-| `check_proof` | `{"ok", "problems": [strings], "root", "tree"}` (see below) |
+Every tool below except `publish` takes its arguments inside a signed `request` (see [Signed requests](#signed-requests)). An argument with no default is required. Every read is limited to collections you are a member of.
 
-A link is `{"id", "pubkey", "author", "from", "to", "relation", "quote", "reason", "received_at"}`. Distances, ranks and counts are retrieval aids, not confidence.
+#### publish
+
+Writes a batch of signed events. It's the only write tool, and the only tool that takes no `request`: each event is already signed.
+
+| Argument | Type | Default | |
+|---|---|---|---|
+| `events` | list of signed events | | 1 to 1000 events, any kinds, in dependency order |
+
+- **All or nothing.** If any event is rejected, nothing in the batch is stored, and the error names the event that failed.
+- **Retries are safe.** Events already stored are listed in `skipped`, not rejected.
+- **New collections:** the first event that names a new slug creates it, with its signer as owner, if the signer is approved.
+- **Embeddings** for new claims are computed after the batch commits. If that fails, the events are still stored, `embedded` becomes `embedding_error`, and the vectors catch up on a later publish.
+
+Returns `{"accepted": [ids], "skipped": [ids], "collections": [slugs], "embedded": n}`. See [Publishing](#publishing) for a full example.
+
+#### fetch_url
+
+Fetches a page or document and returns its plain text, ready to sign as evidence. Nothing is stored.
+
+| Argument | Type | Default | |
+|---|---|---|---|
+| `url` | string | | http(s) only |
+
+- Handles PDF (via pdftotext), HTML (readability extraction) and JATS XML.
+- Refuses internal hosts, downloads over 50 MB, and bot-challenge or near-empty pages (under 200 characters of text, or a captcha page). When that happens, get the text another way and record where in `archive_url` and `retrieved_via`.
+- Publish the **whole** text: link quotes are checked against it.
+
+Returns `{"url", "title", "chars", "text"}`.
+
+```json
+{"url": "https://example.org/paper.pdf"}
+```
+
+#### list_collections
+
+The collections you are a member of. Call it first to learn the slugs. It takes no arguments.
+
+Returns `{"result": [{"slug", "owner", "created_at", "members": [pubkeys], "evidence", "claims", "links", "contradictions"}]}`.
+
+#### get_event
+
+Reads one event by ID, with its content parsed. Use it to read evidence text in full.
+
+| Argument | Type | Default | |
+|---|---|---|---|
+| `id` | string | | 64 hex characters |
+| `offset` | integer | `0` | evidence only: where the text window starts |
+| `max_chars` | integer | `20000` | evidence only: how much text to return |
+
+- For evidence, `content.text` is the window from `offset`, and the result adds `chars` (the full length) and `offset`. Raise `offset` until you have read `chars`.
+- Returns `{"result": null}`, not an error, if the event doesn't exist **or** is in a collection you're not a member of. So it never reveals other collections.
+
+Returns `{"result": {"id", "pubkey", "author", "kind", "kind_name", "collection", "created_at", "received_at", "content": {...}}}`.
+
+```json
+{"id": "6d9fb6f6ab…", "offset": 20000}
+```
+
+#### search_claims
+
+Finds claims in a collection that match a question or statement. Search before adding a claim, so you reuse an existing one instead of duplicating it.
+
+| Argument | Type | Default | |
+|---|---|---|---|
+| `collection` | string | | |
+| `text` | string | | the question or statement |
+| `method` | string | `"vector"` | `"vector"` (by meaning) or `"keyword"` (by words) |
+| `limit` | integer | `10` | at most 200 |
+
+- **vector** ranks by embedding distance (Qwen3-Embedding-8B, cosine). Lower `distance` is closer. A claim whose vector hasn't been computed yet doesn't appear.
+- **keyword** is PostgreSQL full-text search. Every word must appear, and `rank` is higher for better matches. Try it when vector results look thin, or to find exact terms.
+- Each result inlines the links that target the claim, with quotes cut to 300 characters (use `get_links` for whole quotes), plus the IDs of contradictions it belongs to.
+- There's no `offset`; raise `limit` instead.
+
+Returns `{"method", "note", "items": [{"id", "pubkey", "author", "text", "received_at", "distance" or "rank", "links": [link], "contradiction_ids": [ids]}]}`.
+
+```json
+{"collection": "mcas", "text": "Does low DAO activity cause histamine intolerance?", "method": "vector", "limit": 10}
+```
+
+#### list_claims
+
+Claims in a collection with their link counts, in an order that serves as a worklist.
+
+| Argument | Type | Default | |
+|---|---|---|---|
+| `collection` | string | | |
+| `sort` | string | `"unsupported"` | see below |
+| `limit` | integer | `50` | at most 200 |
+| `offset` | integer | `0` | for paging |
+
+| `sort` | Order | Good for |
+|---|---|---|
+| `unsupported` | fewest links first | finding claims that need evidence (hypotheses come first) |
+| `unchallenged` | never rebutted or qualified first, then most supported | finding claims nobody has tested |
+| `contested` | most rebuts, then most contradictions | finding disputes worth researching |
+| `links` | most links first | finding the best-documented claims |
+| `recent` | newest first | seeing what just arrived |
+| `oldest` | oldest first | reading every claim: this order doesn't shift as claims arrive |
+
+Returns `{"result": [{"id", "pubkey", "author", "text", "received_at", "supports", "qualifies", "rebuts", "findings"}]}`, where `findings` counts the contradictions the claim belongs to.
+
+```json
+{"collection": "mcas", "sort": "oldest", "limit": 200, "offset": 200}
+```
+
+#### get_links
+
+Links in a collection, oldest first. Filter by what a link points at, what grounds it, or both.
+
+| Argument | Type | Default | |
+|---|---|---|---|
+| `collection` | string | | |
+| `to_id` | string | `""` | links targeting this claim, link, contradiction or evidence |
+| `from_id` | string | `""` | links grounded in this evidence |
+| `relation` | string | `""` | `SUPPORTS`, `REBUTS` or `QUALIFIES` |
+| `limit` | integer | `100` | at most 1000 |
+| `offset` | integer | `0` | for paging |
+
+Use `to_id` to see everything said about a record, and `from_id` to see everything a document was used for. Quotes come back whole.
+
+Returns `{"result": [link]}`.
+
+```json
+{"collection": "mcas", "to_id": "911d5aeb5c…", "relation": "REBUTS"}
+```
+
+#### list_evidence
+
+Evidence documents in a collection, oldest first, without their text (read that with `get_event`).
+
+| Argument | Type | Default | |
+|---|---|---|---|
+| `collection` | string | | |
+| `ungrounded_only` | boolean | `false` | only documents no link cites yet |
+| `source` | string | `""` | case-insensitive substring of `source` |
+| `limit` | integer | `50` | at most 500 |
+| `offset` | integer | `0` | for paging |
+
+`ungrounded_only: true` is the natural worklist for a claims pass: documents that have been added but not yet mined for claims.
+
+Returns `{"result": [{"id", "pubkey", "author", "title", "url", "source", "archive_url", "retrieved_via", "received_at", "chars", "link_count"}]}`.
+
+```json
+{"collection": "mcas", "ungrounded_only": true, "limit": 20}
+```
+
+#### search_contradictions
+
+Contradictions in a collection, oldest first, each with its member claims and the links that target the contradiction itself.
+
+| Argument | Type | Default | |
+|---|---|---|---|
+| `collection` | string | | |
+| `claim` | string | `""` | only contradictions this claim ID belongs to |
+| `text` | string | `""` | words in the reason; every word must appear |
+| `limit` | integer | `20` | at most 200 |
+
+With no filters, it lists the collection's contradictions. Whether one is open or resolved is your reading of the claims and links, not a field.
+
+Returns `{"result": [{"id", "pubkey", "author", "reason", "claim_ids", "received_at", "claims": [{"id", "pubkey", "author", "text"}], "links": [link]}]}`.
+
+```json
+{"collection": "mcas", "claim": "911d5aeb5c…"}
+```
+
+#### check_proof
+
+Checks a thinking proof before you answer a question, and returns it as a readable tree. It checks structure and citations only, never whether the reasoning is right.
+
+| Argument | Type | Default | |
+|---|---|---|---|
+| `collection` | string | | |
+| `proof` | object | | `{"question", "steps": [...]}`; see [Thinking proofs](#thinking-proofs-check-proof) |
+
+Returns `{"ok", "problems": [strings], "root", "tree"}`. Fix every problem and call it again until `ok` is true.
 
 ### Thinking proofs (`check_proof`)
 
