@@ -237,7 +237,7 @@ def showcase() -> list[dict]:
 
 
 async def showcase_json(request) -> JSONResponse:
-    return JSONResponse({"collections": await run_in_threadpool(showcase)}, headers={"Cache-Control": "public, max-age=60"})
+    return JSONResponse({"collections": await run_in_threadpool(showcase)}, headers={"Cache-Control": "no-cache"})
 
 
 routes = [Route("/office.json", office_json), Route("/stats.json", stats_json), Route("/showcase.json", showcase_json)]

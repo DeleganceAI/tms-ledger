@@ -156,7 +156,7 @@ def publish(events: list[dict]) -> dict[str, Any]:
       4704 contradiction {collection, claims: [>=2 distinct claim ids], reason}
       4705 members       {collection, members: [pubkeys]}   owner only; the full list
       4709 about         {collection, topic (<=140 chars), public: bool}   owner only; latest wins;
-                         public shows the name, topic and counts on the home page
+                         public shows the name, topic and counts on /communities
       4706 terms         {version, sha256}   sign once before your first write (see TERMS.md)
       0    profile       {name, about?, picture?}
     References stay inside one collection and may point at events earlier in the same batch. A

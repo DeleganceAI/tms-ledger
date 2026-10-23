@@ -94,7 +94,7 @@ KINDS = {
     REQUEST: ("request", {"tool": _text, "args": _object}, {"nonce": _opt_text}),
     SNAPSHOT: ("snapshot", {"date": _text, "cid": _text, "sha256": _id, "count": _count,
                             "last_received_at": _text}, {}),
-    # owner only, latest wins: a one-line topic, and whether the home page may show the
+    # owner only, latest wins: a one-line topic, and whether the Communities page may show the
     # collection's name, topic and record counts (never its records)
     ABOUT: ("about", {"collection": _slug, "topic": _topic, "public": _bool}, {}),
 }
