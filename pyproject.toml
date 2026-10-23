@@ -12,6 +12,7 @@ dependencies = [
     "starlette>=0.40",
     "coincurve>=21.0.0",
     "psycopg-pool>=3.3.3",
+    "cryptography>=43",
 ]
 
 [project.scripts]

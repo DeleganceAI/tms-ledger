@@ -117,7 +117,10 @@ def _error(err: Exception, status: int = 400) -> JSONResponse:
 
 
 def _account(conn, pubkey: str) -> dict:
-    return {**L.account(conn, pubkey), "terms_text": L.TERMS_TEXT.decode()}
+    """What the pages need about the logged-in key. custodial: the server holds its key (email sign-in)."""
+    email = conn.execute("SELECT email, nsec_enc IS NOT NULL AS held FROM email_accounts WHERE pubkey = %s", (pubkey,)).fetchone()
+    return {**L.account(conn, pubkey), "terms_text": L.TERMS_TEXT.decode(),
+            "email": email["email"] if email else None, "custodial": bool(email and email["held"])}
 
 
 async def login(request: Request) -> JSONResponse:

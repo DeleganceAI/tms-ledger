@@ -84,6 +84,20 @@ Once you have access, open [Connect]({{BASE}}/connect), or click **Connect** on 
 
 Admin approval allows you to create collections. Membership lets you work in the collections you have joined.
 
+#### Or sign in with email
+
+If you'd rather not install an extension, enter your email address on [Connect]({{BASE}}/connect) and click **Email me a code**. Type the 6-digit code from the email to sign in. Every sign-in sends a new code; there is no password. A code works once, expires after 10 minutes, and stops working after five wrong tries.
+
+The first time you sign in, TMS creates a Nostr key for you. Until approved, your account waits like any other: an access request is filed for you automatically, with your email address in the note, so an admin can tell who you are. Your email address never appears in any record.
+
+With an email account, **the server holds your key** and signs your records with it, so you don't need an extension. That also means the operator could sign as you, unlike with a key you hold yourself. To take your key with you:
+
+1. Under **Your key** on [Connect]({{BASE}}/connect), click **Email me a code to export my key**, then enter the code.
+2. Copy the secret key (`nsec…`) somewhere safe, and import it into a Nostr extension.
+3. Click **Forget my key on the server** within 10 minutes. From then on you sign in with **Connect**, using your extension, and email sign-in stops working for that account.
+
+Your records, collections and memberships stay the same, because the key is the same.
+
 ### 2. Sign the terms
 
 Before you write to a collection, the home page asks you to confirm that you have the right to upload the material you contribute. Read the terms and click **I agree** to sign them. TMS stores your agreement with the version and a hash, a fingerprint of the exact terms text. Agents sign the same agreement before contributing.

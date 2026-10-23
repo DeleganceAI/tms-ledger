@@ -442,6 +442,7 @@ def server(ids) -> None:
     office_data()
     fetch_stub()
     chat_agent()
+    email_signin()
 
     with L.connect() as conn:
         rows = conn.execute("SELECT tool, pubkey, collection, ok FROM mcp_calls WHERE method = 'tools/call'").fetchall()
@@ -507,6 +508,75 @@ def access(client, W) -> None:
         assert conn.execute("SELECT approved_by FROM approvals WHERE pubkey = %s", (vpk,)).fetchone()["approved_by"] == PK[OWNER]
         assert conn.execute("SELECT count(*) AS n FROM approvals WHERE pubkey = %s", (opk,)).fetchone()["n"] == 0
         assert {r["status"] for r in conn.execute("SELECT status FROM access_requests")} == {"approved", "dismissed", "pending"}
+
+
+def email_signin() -> None:
+    """Email sign-in: codes, a held key that signs for the account, export, and forgetting it."""
+    import re as _re
+
+    from starlette.testclient import TestClient
+
+    from tms import email_login as EL
+    from tms import server as S
+    from tms import web as W
+    sent = []
+    EL.send = lambda to, subject, text: sent.append((to, _re.search(r"\b(\d{6})\b", text).group(1)))
+    EL.KEY_SECRET, EL.RESEND_API_KEY = "smoke-key-secret", "test"
+    code = lambda: sent[-1][1]  # noqa: E731
+    with TestClient(S.http_app()) as client:
+        W._recent.clear()
+        assert client.post("/api/email/start", json={"email": "not an email"}).status_code == 400
+        assert client.post("/api/email/start", json={"email": "Ann@Example.com"}).json() == {"sent": True}
+        assert sent[-1][0] == "ann@example.com"
+        assert client.post("/api/email/verify", json={"email": "ann@example.com", "code": "000000" if code() != "000000" else "111111"}).status_code == 400
+        r = client.post("/api/email/verify", json={"email": "ann@example.com", "code": code()})
+        assert r.status_code == 403 and "waiting for an admin" in r.json()["error"], r.text  # new, not yet approved
+        with L.connect() as conn:
+            pk = conn.execute("SELECT pubkey FROM email_accounts WHERE email = 'ann@example.com'").fetchone()["pubkey"]
+            assert conn.execute("SELECT note FROM access_requests WHERE npub = %s", (E.bech32_encode("npub", pk),)).fetchone()["note"].endswith("ann@example.com")
+            conn.execute("INSERT INTO approvals (pubkey, approved_by) VALUES (%s, 'smoke')", (pk,))
+            assert not conn.execute("SELECT 1 FROM events WHERE content LIKE '%%ann@example.com%%'").fetchone(), "the email never reaches a record"
+        client.post("/api/email/start", json={"email": "ann@example.com"})
+        me = client.post("/api/email/verify", json={"email": "ann@example.com", "code": code()}).json()
+        assert me["pubkey"] == pk and me["custodial"] and me["email"] == "ann@example.com", me
+        assert client.post("/api/email/verify", json={"email": "ann@example.com", "code": code()}).status_code == 400, "a code works once"
+        # The held key signs; the event is a normal signed event and publishes like any other.
+        ev = client.post("/api/sign", json={"kind": E.TERMS, "content": L.TERMS}).json()
+        assert ev["pubkey"] == pk and E.verify(ev) is not None
+        assert client.post("/api/publish", json={"events": [ev]}).json()["accepted"] == [ev["id"]]
+        assert client.post("/api/sign", json={"kind": E.REQUEST, "content": {"tool": "login", "args": {}}}).status_code == 400
+        assert client.post("/api/sign", json={"kind": E.CLAIM, "content": {"collection": "x", "text": "t"}},
+                           headers={"Origin": "https://evil.example"}).status_code == 403
+        # Wrong guesses use up a code.
+        client.post("/api/email/start", json={"email": "ann@example.com"})
+        good = code()
+        for _ in range(EL.MAX_ATTEMPTS):
+            client.post("/api/email/verify", json={"email": "ann@example.com", "code": "999999" if good != "999999" else "888888"})
+        assert client.post("/api/email/verify", json={"email": "ann@example.com", "code": good}).status_code == 400
+        W._recent.clear()
+        for _ in range(EL.CODES_PER_HOUR):
+            client.post("/api/email/start", json={"email": "ann@example.com"})
+        assert client.post("/api/email/start", json={"email": "ann@example.com"}).status_code == 429
+        with L.connect() as conn:
+            conn.execute("DELETE FROM email_codes")
+        # Export needs a fresh code, returns the same key, then the server can forget it.
+        assert client.post("/api/key/forget").status_code == 400, "export first"
+        assert client.post("/api/key/export", json={"code": "123456"}).status_code == 400
+        client.post("/api/key/export-code")
+        k = client.post("/api/key/export", json={"code": code()}).json()
+        assert E.pubkey_of(k["nsec"]) == pk and k["npub"] == E.bech32_encode("npub", pk)
+        assert client.post("/api/key/forget").json() == {"forgotten": True}
+        assert client.get("/api/me").json()["custodial"] is False
+        assert client.post("/api/sign", json={"kind": E.CLAIM, "content": {"collection": "x", "text": "t"}}).status_code == 403
+        W._recent.clear()
+        client.post("/api/email/start", json={"email": "ann@example.com"})
+        assert client.post("/api/email/verify", json={"email": "ann@example.com", "code": code()}).status_code == 409
+        # Keys that were never email accounts can't use /api/sign.
+        client.cookies.set(W.COOKIE, W.make_cookie(PK[OWNER]))
+        assert client.post("/api/sign", json={"kind": E.CLAIM, "content": {"collection": "x", "text": "t"}}).status_code == 403
+        client.cookies.clear()
+    with L.connect() as conn:
+        assert conn.execute("SELECT nsec_enc FROM email_accounts WHERE pubkey = %s", (pk,)).fetchone()["nsec_enc"] is None
 
 
 def chat_agent() -> None:

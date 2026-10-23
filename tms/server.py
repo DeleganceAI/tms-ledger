@@ -318,12 +318,12 @@ def http_app():
     """MCP at /mcp plus the web pages, in one Starlette app."""
     from mcp.server.transport_security import TransportSecuritySettings
 
-    from . import admin, chat, office, ui, web
+    from . import admin, chat, email_login, office, ui, web
     app = mcp.streamable_http_app(
         stateless_http=True, json_response=True,
         # The Host header is the deployment's own hostname; requests are signed, so no rebinding risk.
         transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False))
-    app.router.routes.extend(web.routes + ui.routes + chat.routes + admin.routes + office.routes)
+    app.router.routes.extend(web.routes + email_login.routes + ui.routes + chat.routes + admin.routes + office.routes)
     return app
 
 
