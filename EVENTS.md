@@ -104,7 +104,7 @@ A signed tool call. `tool` names the MCP tool (or `login` for the browser), and 
 Requests are not stored in the ledger.
 
 ### about (4709)
-Signed by the collection's owner. `topic` is a one-line description, at most 140 characters. `public` (true or false) says whether the home page may show the collection's name, topic, and its counts of evidence, claims, links and contradictions. Its records, members and everything else stay private either way. The latest one, by `received_at`, is in effect.
+Signed by the collection's owner. `topic` is a one-line description, at most 140 characters. `public` (true or false) says whether the public [Communities](/communities) page may show the collection's name, topic, and its counts of evidence, claims, links and contradictions. Its records, members and everything else stay private either way. The latest one, by `received_at`, is in effect.
 
 ### snapshot (4708)
 Signed by the server's own key after each daily backup upload to Filecoin. The backup is the whole ledger, encrypted with a server-held key. It's for disaster recovery; members get their own copies from the export. `cid` and `sha256` identify the encrypted file, `count` is the number of events in it, and `last_received_at` marks where it ends. This gives a signed, dated history of what the ledger held.

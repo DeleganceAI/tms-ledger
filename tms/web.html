@@ -16,6 +16,13 @@ button.ghost{background:none;color:var(--accent)}button:disabled{opacity:.5;curs
 input,textarea,select{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;width:100%}
 textarea{font:12.5px/1.45 var(--mono);min-height:90px}label{display:grid;gap:4px;color:var(--ink2);font-size:12.5px}
 label.check{display:flex;align-items:center;gap:8px;margin-top:10px}label.check input{width:auto;margin:0}
+.aboutrow{display:grid;grid-template-columns:minmax(110px,auto) 1fr auto auto;gap:8px 12px;align-items:center;padding:6px 0;border-top:1px solid var(--line)}
+.aboutrow label.check{margin:0}.aboutrow .msg{grid-column:2/-1;font-size:12px}.aboutrow .msg:empty{display:none}
+@media(max-width:640px){.aboutrow{grid-template-columns:1fr auto auto}.aboutrow b{grid-column:1/-1}}
+.cgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}.cgrid>p{grid-column:1/-1;margin:0}
+.ccard{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px 12px;display:grid;gap:4px}
+.ccard b{font:600 14px var(--mono)}.ccard .counts{color:var(--ink3);font-size:12.5px}.ccard .counts b{font:600 13px var(--sans);color:var(--ink)}
+.pubtag{font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:#1e1826;background:var(--accent);border-radius:999px;padding:1px 6px;margin-left:4px}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}@media(max-width:640px){.grid2{grid-template-columns:1fr}}
 .row{display:grid;grid-template-columns:2fr 130px 2fr 2fr 28px;gap:6px;align-items:start;margin-bottom:6px}@media(max-width:720px){.row{grid-template-columns:1fr}}
 .mono{font-family:var(--mono);font-size:12px;word-break:break-all}.muted{color:var(--ink3)}.err{color:var(--bad)}.ok{color:var(--good)}
@@ -25,7 +32,7 @@ table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:6px 4px;
 td.n{font-family:var(--mono);text-align:right}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center}
 [hidden]{display:none!important}
 </style></head><body>
-<header><b>TMS ledger</b><nav><a href="/">Home</a><a href="/submit">Submit</a><a href="/dashboard">Dashboard</a><a href="/office">Office</a><a href="/docs">Docs</a><a href="https://github.com/DeleganceAI/tms-ledger" target="_blank" rel="noopener" title="Source on GitHub"><svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-2px;margin-right:4px"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>GitHub</a></nav>
+<header><b>TMS ledger</b><nav><a href="/">Home</a><a href="/submit">Submit</a><a href="/dashboard">Dashboard</a><a href="/communities">Communities</a><a href="/office">Office</a><a href="/docs">Docs</a><a href="https://github.com/DeleganceAI/tms-ledger" target="_blank" rel="noopener" title="Source on GitHub"><svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-2px;margin-right:4px"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>GitHub</a></nav>
   <div id="who"></div></header>
 <main>
   <section id="connect" hidden><h2>Connect</h2>
@@ -44,9 +51,12 @@ td.n{font-family:var(--mono);text-align:right}.actions{display:flex;gap:8px;flex
   <section id="termsBox" hidden><h2>Terms</h2><pre id="termsText"></pre>
     <button id="termsBtn">I agree: sign the terms</button> <span id="termsMsg"></span></section>
   <section id="home" hidden><h2>Your collections</h2><div id="collections"></div>
+    <div id="aboutList" hidden><h2 style="margin-top:16px">Topic and visibility</h2>
+      <p class="muted" style="margin-top:0">For collections you own. A <b>public</b> collection shows its name, topic and record counts on <a href="/communities">Communities</a>; its records and members stay private. Change either at any time.</p>
+      <div id="aboutRows"></div></div>
     <div id="newCol" hidden style="margin-top:12px"><div class="grid2"><label>New collection<input id="newSlug" placeholder="new-collection-slug"></label>
       <label>Topic (one line, up to 140 characters)<input id="newTopic" maxlength="140" placeholder="What this collection is about"></label></div>
-      <label class="check"><input type="checkbox" id="newPublic"> Show its name, topic and record counts on the home page (its records stay private)</label>
+      <label class="check"><input type="checkbox" id="newPublic"> Public: show its name, topic and record counts on Communities (its records stay private)</label>
       <div class="actions"><button id="newBtn" class="ghost">Create collection</button><span id="newMsg"></span></div></div></section>
   <section id="submit" hidden><h2>Submit evidence</h2>
     <div class="grid2"><label>Collection<select id="sCol"></select></label>
@@ -59,8 +69,11 @@ td.n{font-family:var(--mono);text-align:right}.actions{display:flex;gap:8px;flex
     <div class="actions"><button id="addRow" class="ghost">Add row</button><button id="submitBtn">Sign and publish</button><span id="submitMsg"></span></div></section>
   <section id="aboutBox" hidden><h2>About this collection</h2>
     <label>Topic (one line, up to 140 characters)<input id="aTopic" maxlength="140" placeholder="What this collection is about"></label>
-    <label class="check"><input type="checkbox" id="aPublic"> Show its name, topic and record counts on the home page (its records stay private)</label>
+    <label class="check"><input type="checkbox" id="aPublic"> Public: show its name, topic and record counts on Communities (its records stay private)</label>
     <div class="actions"><button id="aSave">Sign and save</button><span id="aMsg"></span></div></section>
+  <section id="communities" hidden><h2>Communities</h2>
+    <p class="muted" style="margin-top:0">Collections whose owners chose to show them. You see each one's name, topic and record counts; the records themselves stay private to its members. To join one, ask its owner.</p>
+    <div id="cList" class="cgrid"></div></section>
   <section id="members" hidden><h2>Members of <span id="mSlug"></span></h2><table id="mTable"></table>
     <label style="margin-top:12px">Members besides you, one npub or hex pubkey per line (the full list: anyone left out is removed)<textarea id="mList"></textarea></label>
     <div class="actions"><button id="mSave">Sign members list</button><a id="mExport" href="#">Download export (JSONL)</a><span id="mMsg"></span></div></section>
@@ -151,12 +164,35 @@ function renderHome() {
   $('home').hidden = false
   const cs = ME.collections
   $('collections').innerHTML = cs.length ? `<table><tr><th>Collection</th><th>Members</th><th>Evidence</th><th>Claims</th><th>Links</th><th>Contra.</th><th></th></tr>${cs.map(c => `
-    <tr><td><b>${esc(c.slug)}</b>${c.owner === ME.pubkey ? ' <span class="muted">(owner)</span>' : ''}${c.public ? ' <span class="muted">· on the home page</span>' : ''}${c.topic ? `<div class="muted">${esc(c.topic)}</div>` : ''}</td><td class="n">${c.members.length}</td>
+    <tr><td><b>${esc(c.slug)}</b>${c.owner === ME.pubkey ? ' <span class="muted">(owner)</span>' : ''}${c.public ? ' <span class="pubtag">public</span>' : ''}${c.topic ? `<div class="muted">${esc(c.topic)}</div>` : ''}</td><td class="n">${c.members.length}</td>
     <td class="n">${c.evidence}</td><td class="n">${c.claims}</td><td class="n">${c.links}</td><td class="n">${c.contradictions}</td>
     <td>${c.owner === ME.pubkey ? `<a href="/c/${esc(c.slug)}/members">members</a> · ` : ''}<a href="/c/${esc(c.slug)}/export.jsonl">export</a></td></tr>`).join('')}</table>`
     : '<p class="muted">You are not a member of any collection yet.</p>'
+  renderAbout(cs.filter(c => c.owner === ME.pubkey))
   $('newCol').hidden = !ME.approved
   if (ME.approved && location.hash === '#new') { $('newCol').scrollIntoView({block: 'center'}); $('newSlug').focus() }  // from the dashboard's + card
+}
+
+// Owners set each collection's topic and whether Communities shows it. Ticking or unticking
+// Public saves at once; a changed topic saves with its Save button. Records always stay private.
+function renderAbout(owned) {
+  $('aboutList').hidden = !owned.length
+  $('aboutRows').innerHTML = owned.map(c => `<div class="aboutrow" data-slug="${esc(c.slug)}"><b class="mono">${esc(c.slug)}</b>
+    <input class="topic" maxlength="140" value="${esc(c.topic || '')}" placeholder="Topic: what this collection is about">
+    <label class="check"><input type="checkbox" class="pub"${c.public ? ' checked' : ''}> Public</label>
+    <button class="ghost save">Save</button><span class="msg muted"></span></div>`).join('')
+  for (const row of $('aboutRows').children) {
+    const slug = row.dataset.slug, topic = row.querySelector('.topic'), pub = row.querySelector('.pub'), msg = row.querySelector('.msg')
+    const save = async () => {
+      try {
+        if (!topic.value.trim()) { pub.checked = false; throw new Error('write a topic first') }
+        await publish([await sign(4709, {collection: slug, topic: topic.value.trim(), public: pub.checked})])
+        msg.className = 'msg ok'; msg.textContent = pub.checked ? 'Saved: public on Communities.' : 'Saved: private.'
+      } catch (e) { msg.className = 'msg err'; msg.textContent = e.message }
+    }
+    pub.onchange = save; row.querySelector('.save').onclick = save
+    topic.onkeydown = e => { if (e.key === 'Enter') save() }
+  }
 }
 
 $('newBtn').onclick = async () => {  // an empty members list names the collection, so this event creates it
@@ -164,7 +200,7 @@ $('newBtn').onclick = async () => {  // an empty members list names the collecti
     const collection = $('newSlug').value.trim(), topic = $('newTopic').value.trim()
     const batch = [await sign(4705, {collection, members: []})]
     if (topic || $('newPublic').checked) {
-      if (!topic) throw new Error('add a topic to show the collection on the home page')
+      if (!topic) throw new Error('add a topic to make the collection public')
       batch.push(await sign(4709, {collection, topic, public: $('newPublic').checked}))
     }
     await publish(batch); await refresh()
@@ -306,6 +342,19 @@ async function renderMembers(slug) {
   }
 }
 
-api('/api/me').then(d => { ME = d; show(null) }).catch(() => { $('connect').hidden = false; renderWho() })
+async function renderCommunities() {
+  $('communities').hidden = false
+  const n = (v, one, many) => `<b>${Number(v).toLocaleString('en-US')}</b> ${v === 1 ? one : many}`
+  try {
+    const d = await api('/showcase.json')
+    $('cList').innerHTML = d.collections.length ? d.collections.map(c => `<div class="ccard"><b>${esc(c.slug)}</b><span>${esc(c.topic)}</span>
+      <span class="counts">${n(c.evidence, 'evidence', 'evidence')} · ${n(c.claims, 'claim', 'claims')} · ${n(c.links, 'link', 'links')} · ${n(c.contradictions, 'contradiction', 'contradictions')}</span></div>`).join('')
+      : '<p class="muted">No collections are public yet. Owners can make theirs public under Topic and visibility on <a href="/connect">Connect</a>.</p>'
+  } catch (e) { $('cList').innerHTML = `<p class="err">${esc(e.message)}</p>` }
+}
+if (location.pathname === '/communities') {  // public: no login needed
+  renderCommunities()
+  api('/api/me').then(d => { ME = d; renderWho() }).catch(() => renderWho())
+} else api('/api/me').then(d => { ME = d; show(null) }).catch(() => { $('connect').hidden = false; renderWho() })
 </script>
 <script src="/chat.js" defer></script></body></html>

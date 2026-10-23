@@ -531,12 +531,14 @@ def showcase() -> None:
     O._showcase.clear()
     with TestClient(S.http_app()) as client:
         r = client.get("/showcase.json")
-        assert r.status_code == 200 and r.headers["cache-control"] == "public, max-age=60"
+        assert r.status_code == 200 and r.headers["cache-control"] == "no-cache"
         cols = r.json()["collections"]
         assert [c["slug"] for c in cols] == ["smoke"], cols  # "other" and "outside" stay hidden
         assert set(cols[0]) == {"slug", "topic", "evidence", "claims", "links", "contradictions"}, "counts only, no records"
         assert all(cols[0][k] == counts[k] for k in counts), (cols, counts)
-        assert 'id="tab-communities"' in client.get("/").text
+        page = client.get("/communities")  # public page, no login
+        assert page.status_code == 200 and 'id="communities"' in page.text and "/showcase.json" in page.text
+        assert 'href="/communities"' in client.get("/").text and "tab-communities" not in client.get("/").text
         with L.connect() as conn:
             L.publish(conn, [sign(OWNER, E.ABOUT, {"collection": "smoke", "topic": "Histamine intolerance and MCAS", "public": False},
                                   created_at=int(time.time()) + 1)])
