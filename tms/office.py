@@ -1,5 +1,6 @@
 """/office.json: anonymous, hourly data for the office animation (OFFICE.md sections 2 and 4).
 /stats.json: the six global counts for the ticker, at most a minute old.
+/showcase.json: collections their owners chose to show: name, topic and record counts only.
 
 Anonymous by construction. The output holds only counts, buckets, node kinds, local indices,
 relation letters, and seconds-into-the-hour. No slugs, pubkeys, record ids, text or timestamps.
@@ -222,4 +223,21 @@ async def stats_json(request) -> JSONResponse:
     return JSONResponse(await run_in_threadpool(stats), headers={"Cache-Control": "public, max-age=60"})
 
 
-routes = [Route("/office.json", office_json), Route("/stats.json", stats_json)]
+_showcase: dict = {}
+
+
+def showcase() -> list[dict]:
+    """Collections their owners made public: name, topic and counts, at most a minute old."""
+    minute = int(time.time() // 60)
+    with _stats_lock:
+        if _showcase.get("minute") != minute:
+            with L.connect() as conn:
+                _showcase.update(minute=minute, body=L.showcase(conn))
+        return _showcase["body"]
+
+
+async def showcase_json(request) -> JSONResponse:
+    return JSONResponse({"collections": await run_in_threadpool(showcase)}, headers={"Cache-Control": "public, max-age=60"})
+
+
+routes = [Route("/office.json", office_json), Route("/stats.json", stats_json), Route("/showcase.json", showcase_json)]

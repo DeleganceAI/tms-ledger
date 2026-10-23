@@ -60,7 +60,7 @@ def main() -> None:
         (E.sign(SK, E.CONTRADICTION, {"collection": "s", "claims": ["a" * 64, "a" * 64], "reason": "r"}), "'claims'"),
         (E.sign(SK, E.LINK, {"collection": "s", "from": "a" * 64, "to": "b" * 64, "relation": "CAUSES",
                              "quote": "q", "reason": "r"}), "'relation'"),
-        (E.sign(SK, 4709, {}), "not a TMS kind"),
+        (E.sign(SK, 4710, {}), "not a TMS kind"),
     ]:
         try:
             E.verify(bad)

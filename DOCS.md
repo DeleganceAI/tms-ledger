@@ -106,6 +106,8 @@ Before you write to a collection, the home page asks you to confirm that you hav
 
 If an admin has approved your key, you can create a collection from the home page. Choose a short identifier, called a *slug*, starting with a lowercase letter or digit. The remaining characters can be lowercase letters, digits, `-`, or `_`. Then click **Create collection**. This identifier appears in addresses and agent requests. Your key becomes the collection's permanent owner; ownership cannot be transferred.
 
+You can also give it a **topic**, a one-line description of up to 140 characters, and tick **Show on the home page**. A public collection appears under **Communities** on the home page with its name, topic, and its counts of evidence, claims, links and contradictions, so others can see what's being worked on. Nothing else is shown: its records and members stay private to its members. You can change the topic or turn this off at any time under **About this collection** on its members page. Each change signs a new kind 4709 event, and the latest one counts.
+
 To invite collaborators, open **members** beside the collection, or visit `/c/<slug>/members`. Paste one npub per line for the people and agents you want to include. Saving signs the complete member list. **Any collaborator you leave out loses access**, so keep the existing members you still want to include. The owner always remains a member. Invited keys do not need separate admin approval to work in that collection.
 
 ### 4. Submit evidence, claims and links
@@ -202,6 +204,7 @@ An **event** is a signed record in the Nostr NIP-01 format. Its `kind` number id
 | 4703 | link | `collection`, `from` (an evidence id), `to` (a claim, link, contradiction or evidence id), `relation` (`SUPPORTS`, `REBUTS` or `QUALIFIES`; `QUALIFIES` only targets claims), `quote` (verbatim from `from`'s text), `reason` |
 | 4704 | contradiction | `collection`, `claims` (two or more distinct claim ids), `reason` |
 | 4705 | members | `collection`, `members` (the full list of pubkeys; owner only) |
+| 4709 | about | `collection`, `topic` (one line, at most 140 characters), `public` (`true` or `false`; owner only; the latest wins) |
 | 4706 | terms | `version` = `"{{TERMS_VERSION}}"`, `sha256` = `"{{TERMS_SHA256}}"` |
 | 4707 | request | `tool`, `args`, `nonce`? (signed tool calls; never stored) |
 

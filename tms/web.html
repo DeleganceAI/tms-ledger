@@ -15,6 +15,7 @@ button{font:inherit;padding:6px 12px;border-radius:6px;border:1px solid var(--ac
 button.ghost{background:none;color:var(--accent)}button:disabled{opacity:.5;cursor:default}
 input,textarea,select{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;width:100%}
 textarea{font:12.5px/1.45 var(--mono);min-height:90px}label{display:grid;gap:4px;color:var(--ink2);font-size:12.5px}
+label.check{display:flex;align-items:center;gap:8px;margin-top:10px}label.check input{width:auto;margin:0}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}@media(max-width:640px){.grid2{grid-template-columns:1fr}}
 .row{display:grid;grid-template-columns:2fr 130px 2fr 2fr 28px;gap:6px;align-items:start;margin-bottom:6px}@media(max-width:720px){.row{grid-template-columns:1fr}}
 .mono{font-family:var(--mono);font-size:12px;word-break:break-all}.muted{color:var(--ink3)}.err{color:var(--bad)}.ok{color:var(--good)}
@@ -43,8 +44,10 @@ td.n{font-family:var(--mono);text-align:right}.actions{display:flex;gap:8px;flex
   <section id="termsBox" hidden><h2>Terms</h2><pre id="termsText"></pre>
     <button id="termsBtn">I agree: sign the terms</button> <span id="termsMsg"></span></section>
   <section id="home" hidden><h2>Your collections</h2><div id="collections"></div>
-    <div class="actions" id="newCol" hidden><input id="newSlug" placeholder="new-collection-slug" style="max-width:260px">
-      <button id="newBtn" class="ghost">Create collection</button><span id="newMsg"></span></div></section>
+    <div id="newCol" hidden style="margin-top:12px"><div class="grid2"><label>New collection<input id="newSlug" placeholder="new-collection-slug"></label>
+      <label>Topic (one line, up to 140 characters)<input id="newTopic" maxlength="140" placeholder="What this collection is about"></label></div>
+      <label class="check"><input type="checkbox" id="newPublic"> Show its name, topic and record counts on the home page (its records stay private)</label>
+      <div class="actions"><button id="newBtn" class="ghost">Create collection</button><span id="newMsg"></span></div></div></section>
   <section id="submit" hidden><h2>Submit evidence</h2>
     <div class="grid2"><label>Collection<select id="sCol"></select></label>
       <label>URL<div style="display:flex;gap:6px"><input id="sUrl" placeholder="https://..."><button id="fetchBtn" class="ghost">Fetch</button></div></label>
@@ -54,6 +57,10 @@ td.n{font-family:var(--mono);text-align:right}.actions{display:flex;gap:8px;flex
     <p class="muted" style="margin-top:0">Each row signs a link from this evidence to a claim. Write the claim's text to sign a new claim, or paste an existing claim's event id. The quote must appear in the text above.</p>
     <div id="rows"></div>
     <div class="actions"><button id="addRow" class="ghost">Add row</button><button id="submitBtn">Sign and publish</button><span id="submitMsg"></span></div></section>
+  <section id="aboutBox" hidden><h2>About this collection</h2>
+    <label>Topic (one line, up to 140 characters)<input id="aTopic" maxlength="140" placeholder="What this collection is about"></label>
+    <label class="check"><input type="checkbox" id="aPublic"> Show its name, topic and record counts on the home page (its records stay private)</label>
+    <div class="actions"><button id="aSave">Sign and save</button><span id="aMsg"></span></div></section>
   <section id="members" hidden><h2>Members of <span id="mSlug"></span></h2><table id="mTable"></table>
     <label style="margin-top:12px">Members besides you, one npub or hex pubkey per line (the full list: anyone left out is removed)<textarea id="mList"></textarea></label>
     <div class="actions"><button id="mSave">Sign members list</button><a id="mExport" href="#">Download export (JSONL)</a><span id="mMsg"></span></div></section>
@@ -144,7 +151,7 @@ function renderHome() {
   $('home').hidden = false
   const cs = ME.collections
   $('collections').innerHTML = cs.length ? `<table><tr><th>Collection</th><th>Members</th><th>Evidence</th><th>Claims</th><th>Links</th><th>Contra.</th><th></th></tr>${cs.map(c => `
-    <tr><td><b>${esc(c.slug)}</b>${c.owner === ME.pubkey ? ' <span class="muted">(owner)</span>' : ''}</td><td class="n">${c.members.length}</td>
+    <tr><td><b>${esc(c.slug)}</b>${c.owner === ME.pubkey ? ' <span class="muted">(owner)</span>' : ''}${c.public ? ' <span class="muted">· on the home page</span>' : ''}${c.topic ? `<div class="muted">${esc(c.topic)}</div>` : ''}</td><td class="n">${c.members.length}</td>
     <td class="n">${c.evidence}</td><td class="n">${c.claims}</td><td class="n">${c.links}</td><td class="n">${c.contradictions}</td>
     <td>${c.owner === ME.pubkey ? `<a href="/c/${esc(c.slug)}/members">members</a> · ` : ''}<a href="/c/${esc(c.slug)}/export.jsonl">export</a></td></tr>`).join('')}</table>`
     : '<p class="muted">You are not a member of any collection yet.</p>'
@@ -153,8 +160,15 @@ function renderHome() {
 }
 
 $('newBtn').onclick = async () => {  // an empty members list names the collection, so this event creates it
-  try { await publish([await sign(4705, {collection: $('newSlug').value.trim(), members: []})]); await refresh() }
-  catch (e) { say('newMsg', e.message, 'err') }
+  try {
+    const collection = $('newSlug').value.trim(), topic = $('newTopic').value.trim()
+    const batch = [await sign(4705, {collection, members: []})]
+    if (topic || $('newPublic').checked) {
+      if (!topic) throw new Error('add a topic to show the collection on the home page')
+      batch.push(await sign(4709, {collection, topic, public: $('newPublic').checked}))
+    }
+    await publish(batch); await refresh()
+  } catch (e) { say('newMsg', e.message, 'err') }
 }
 
 $('termsBtn').onclick = async () => {
@@ -275,7 +289,15 @@ async function renderMembers(slug) {
     $('mTable').innerHTML = '<tr><th>Name</th><th>npub</th></tr>' + d.members.map(m =>
       `<tr><td>${esc(m.name || '—')}${m.pubkey === d.owner ? ' <span class="muted">(owner)</span>' : ''}<div class="muted">${esc(m.about || '')}</div></td><td class="mono">${esc(m.npub)}</td></tr>`).join('')
     $('mList').value = d.members.filter(m => m.pubkey !== d.owner).map(m => m.npub).join('\n')
+    $('aboutBox').hidden = false; $('aTopic').value = d.topic || ''; $('aPublic').checked = d.public
   } catch (e) { say('mMsg', e.message, 'err') }
+  $('aSave').onclick = async () => {
+    try {
+      const topic = $('aTopic').value.trim()
+      if (!topic) throw new Error('write a topic first')
+      await publish([await sign(4709, {collection: slug, topic, public: $('aPublic').checked})]); say('aMsg', 'Saved.', 'ok')
+    } catch (e) { say('aMsg', e.message, 'err') }
+  }
   $('mSave').onclick = async () => {
     try {
       const members = [...new Set($('mList').value.split(/[\s,]+/).filter(Boolean).map(toHex))]

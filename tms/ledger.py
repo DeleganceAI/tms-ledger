@@ -317,8 +317,8 @@ def _authorize(conn, ev: dict, data: dict) -> str | None:
         conn.execute("INSERT INTO collections (slug, owner) VALUES (%s, %s) ON CONFLICT DO NOTHING", (col, pk))
         row = conn.execute("SELECT owner FROM collections WHERE slug = %s", (col,)).fetchone()
     require_member(conn, pk, col)
-    if kind == E.MEMBERS and row["owner"] != pk:
-        raise Denied(f"{ev['id']}: only the owner of '{col}' changes its members")
+    if kind in (E.MEMBERS, E.ABOUT) and row["owner"] != pk:
+        raise Denied(f"{ev['id']}: only the owner of '{col}' changes its {E.NAMES[kind]}")
     return col
 
 
@@ -376,9 +376,22 @@ def list_collections(conn, pubkey: str) -> list[dict]:
                   (SELECT count(*) FROM evidence WHERE collection = c.slug) AS evidence,
                   (SELECT count(*) FROM claims WHERE collection = c.slug) AS claims,
                   (SELECT count(*) FROM links WHERE collection = c.slug) AS links,
-                  (SELECT count(*) FROM contradictions WHERE collection = c.slug) AS contradictions
-           FROM collections c WHERE c.slug IN (SELECT collection FROM members WHERE pubkey = %s)
+                  (SELECT count(*) FROM contradictions WHERE collection = c.slug) AS contradictions,
+                  a.topic, coalesce(a.public, false) AS public
+           FROM collections c LEFT JOIN collection_about a ON a.collection = c.slug
+           WHERE c.slug IN (SELECT collection FROM members WHERE pubkey = %s)
            ORDER BY c.created_at, c.slug""", (pubkey,))]
+
+
+def showcase(conn) -> list[dict]:
+    """Collections whose owner made them public: name, topic and record counts only."""
+    return [_clean(r) for r in conn.execute(
+        """SELECT a.collection AS slug, a.topic,
+                  count(*) FILTER (WHERE e.kind = 4701) AS evidence, count(*) FILTER (WHERE e.kind = 4702) AS claims,
+                  count(*) FILTER (WHERE e.kind = 4703) AS links, count(*) FILTER (WHERE e.kind = 4704) AS contradictions
+           FROM collection_about a LEFT JOIN events e ON e.collection = a.collection
+           WHERE a.public GROUP BY a.collection, a.topic
+           ORDER BY count(*) FILTER (WHERE e.kind BETWEEN 4701 AND 4704) DESC, a.collection""")]
 
 
 def _visible(conn, pubkey: str, ref: str):

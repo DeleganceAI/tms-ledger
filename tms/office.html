@@ -52,6 +52,10 @@
   #legend-tabs{display:flex;justify-content:center;gap:4px;margin:0 0 6px}
   #legend-tabs button{font:inherit;font-size:12.5px;padding:2px 12px;border-radius:999px;border:1px solid #4a3f57;background:none;color:#cbbfd4;cursor:pointer}
   #legend-tabs button[aria-selected="true"]{background:#4a3f57;color:#fff}
+  #communities{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px 18px;max-height:260px;overflow:auto;align-content:start}
+  #communities li{display:grid;gap:2px;font-size:12.5px;line-height:1.35;color:#cbbfd4;background:#342b3e;border:1px solid #4a3f57;border-radius:8px;padding:8px 10px}
+  #communities .slug{font:600 13.5px ui-monospace,Menlo,monospace;color:#f4efe6}#communities i{font-style:normal;color:#9d91a8;font-size:12px}#communities i b{color:#f4efe6;font-weight:600}
+  #communities li.none{grid-column:1/-1;background:none;border:0;text-align:center;color:#9d91a8}
   #records{list-style:none;margin:0 auto;padding:0;max-width:1300px;display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px 18px}
   #records li{display:grid;grid-template-columns:48px 1fr;align-content:start;column-gap:8px;font-size:12.5px;line-height:1.35;color:#cbbfd4}
   #records canvas{width:48px;height:48px;grid-row:span 3}#records b{font-size:13.5px;color:#f4efe6}#records i{font-style:normal;color:#9d91a8;margin-top:2px}
@@ -71,8 +75,8 @@
 <canvas id="c" role="img" aria-label="Animated office of little bots pinning anonymous papers and cards to boards" aria-describedby="office-desc"></canvas>
 </main>
 <section id="agency" aria-label="Legend">
-  <div id="legend-tabs" role="tablist"><button role="tab" id="tab-agents" aria-controls="agents" aria-selected="true">Agents</button><button role="tab" id="tab-records" aria-controls="records" aria-selected="false">Records</button></div>
-  <div id="legend-panels"><ul id="agents" role="tabpanel" aria-labelledby="tab-agents"></ul><ul id="records" role="tabpanel" aria-labelledby="tab-records" class="off" aria-hidden="true"></ul></div>
+  <div id="legend-tabs" role="tablist"><button role="tab" id="tab-agents" aria-controls="agents" aria-selected="true">Agents</button><button role="tab" id="tab-records" aria-controls="records" aria-selected="false">Records</button><button role="tab" id="tab-communities" aria-controls="communities" aria-selected="false">Communities</button></div>
+  <div id="legend-panels"><ul id="agents" role="tabpanel" aria-labelledby="tab-agents"></ul><ul id="records" role="tabpanel" aria-labelledby="tab-records" class="off" aria-hidden="true"></ul><ul id="communities" role="tabpanel" aria-labelledby="tab-communities" class="off" aria-hidden="true"></ul></div>
 </section>
 <footer id="ticker" aria-label="Ledger totals"></footer>
 <dialog id="req"><form id="req-form" method="dialog">
@@ -1091,12 +1095,21 @@ $('records').innerHTML = RECORDS.map(r => `<li><canvas width="96" height="96" ar
 const header = document.querySelector('header');
 $('menu-btn').onclick = () => $('menu-btn').setAttribute('aria-expanded', String(header.classList.toggle('open')));
 document.addEventListener('click', e => { if (!header.contains(e.target)) { header.classList.remove('open'); $('menu-btn').setAttribute('aria-expanded', 'false'); } });
-const showLegend = which => ['agents', 'records'].forEach(k => {
+const showLegend = which => ['agents', 'records', 'communities'].forEach(k => {
   $(k).classList.toggle('off', k !== which); $(k).setAttribute('aria-hidden', String(k !== which));
   $('tab-' + k).setAttribute('aria-selected', String(k === which));
 });
 $('tab-agents').onclick = () => showLegend('agents');
 $('tab-records').onclick = () => showLegend('records');
+$('tab-communities').onclick = () => showLegend('communities');
+// Communities: collections their owners chose to show. Name, topic and counts only; the records stay private.
+const plural = (n, one, many) => `<b>${Number(n).toLocaleString('en-US')}</b> ${n === 1 ? one : many}`;
+fetch('/showcase.json').then(r => r.ok ? r.json() : { collections: [] }).then(d => {
+  const esc = t => String(t ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  $('communities').innerHTML = d.collections.length ? d.collections.map(c => `<li><b class="slug">${esc(c.slug)}</b><span>${esc(c.topic)}</span>` +
+    `<i>${plural(c.evidence, 'evidence', 'evidence')} · ${plural(c.claims, 'claim', 'claims')} · ${plural(c.links, 'link', 'links')} · ${plural(c.contradictions, 'contradiction', 'contradictions')}</i></li>`).join('')
+    : '<li class="none">No collections are public yet. Owners can choose to show their collection\u2019s name, topic and counts here; its records always stay private.</li>';
+}).catch(() => {});
 if (location.pathname === '/') $('landing').hidden = false;
 fetch('/office.json').then(r => r.ok ? r.json() : null).then(d => {
   if (!d) return;

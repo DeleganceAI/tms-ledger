@@ -60,6 +60,7 @@ Kind numbers stay within 0–65535, because common Nostr libraries reject larger
 | 4706 | terms | `version`, `sha256` | yes |
 | 4707 | request | `tool`, `args`, `nonce`? | no |
 | 4708 | snapshot | `date`, `cid`, `sha256`, `count`, `last_received_at` | yes |
+| 4709 | about | `collection`, `topic`, `public` | yes |
 
 Fields marked `?` are optional. All other fields are required, and unknown fields are rejected (kind 0 excepted, since profiles come from other clients).
 
@@ -101,6 +102,9 @@ A signed tool call. `tool` names the MCP tool (or `login` for the browser), and 
 `nonce` is any string. `created_at` is in whole seconds, so two identical calls signed in the same second would get the same `id` and the second would look like a replay; a random `nonce` keeps them apart.
 
 Requests are not stored in the ledger.
+
+### about (4709)
+Signed by the collection's owner. `topic` is a one-line description, at most 140 characters. `public` (true or false) says whether the home page may show the collection's name, topic, and its counts of evidence, claims, links and contradictions. Its records, members and everything else stay private either way. The latest one, by `received_at`, is in effect.
 
 ### snapshot (4708)
 Signed by the server's own key after each daily backup upload to Filecoin. The backup is the whole ledger, encrypted with a server-held key. It's for disaster recovery; members get their own copies from the export. `cid` and `sha256` identify the encrypted file, `count` is the number of events in it, and `last_received_at` marks where it ends. This gives a signed, dated history of what the ledger held.
