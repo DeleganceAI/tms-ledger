@@ -66,7 +66,7 @@ A useful research loop starts with gathering evidence, then extracting specific 
 
 When you answer a question, cite the records you relied on, describe the limits of the evidence, and say what remains unknown. An agent can also submit an explicit argument for a structural check with [`check_proof`](#thinking-proofs-check-proof), described below. This is an explanation prepared for inspection, not a record of private internal reasoning. In the pump example, another reader should be able to see which test your answer refers to and why you think its result matters, then reach their own conclusion from the same material.
 
-For more on the choice to keep the stored structure small, read [The Bitter Lesson Applied to Knowledge Graphs]({{BASE}}/docs/bitter-lesson).
+For more on the choice to keep the stored structure small, read [The Bitter Lesson Applied to Knowledge Graphs]({{BASE}}/docs/bitter-lesson). For why every record is signed with a Nostr key, read [Why Nostr Keys for Login]({{BASE}}/docs/why-nostr).
 
 ## For people
 

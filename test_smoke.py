@@ -415,6 +415,8 @@ def server(ids) -> None:
         bl = client.get("/docs/bitter-lesson")
         assert bl.status_code == 200 and "Bitter Lesson Applied to Knowledge Graphs" in bl.text and "{{" not in bl.text and "@" in bl.text
         assert "/docs/bitter-lesson" in md and client.get("/docs/nope").status_code == 404
+        wn = client.get("/docs/why-nostr")
+        assert wn.status_code == 200 and "Why Nostr Keys for Login" in wn.text and "/docs/why-nostr" in md
         assert "http://testserver/mcp" in md and L.TERMS["sha256"] in md and "publish" in md
         # The office is public and content-free: squiggles only, no ledger reads.
         office = client.get("/office")
