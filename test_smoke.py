@@ -545,6 +545,7 @@ def chat_agent() -> None:
             assert js.status_code == 200 and "javascript" in js.headers["content-type"] and "/dashboard/api/chat" in js.text
             assert "marked@15.0.12" in js.text and "createElement('template')" in js.text, "answers render as markdown, cleaned in an inert template"
             assert all('src="/chat.js"' in client.get(p).text for p in ("/", "/office", "/docs", "/connect")), "on every page"
+            assert all("github.com/DeleganceAI/tms-ledger" in client.get(p).text for p in ("/", "/office", "/docs", "/connect", "/dashboard")), "GitHub link"
             client.cookies.set(W.COOKIE, W.make_cookie(PK[BOB]))  # a member, not an admin
             assert client.get("/dashboard/api/chat").status_code == 404
             assert client.post("/dashboard/api/chat", json={}).status_code == 404
