@@ -218,14 +218,17 @@ CREATE INDEX embed_calls_at_idx ON embed_calls (at DESC);
 -- Unsigned requests from the landing page. One pending request per npub. Safe to prune.
 CREATE TABLE access_requests (
     id         bigserial PRIMARY KEY,
-    npub       text NOT NULL CHECK (npub ~ '^npub1[02-9ac-hj-np-z]{58}$'),
+    npub       text CHECK (npub ~ '^npub1[02-9ac-hj-np-z]{58}$'),
+    email      text CHECK (email = lower(email) AND email LIKE '%_@_%'),  -- for people without a Nostr key
     note       text CHECK (char_length(note) <= 500),
     at         timestamptz NOT NULL DEFAULT now(),
     status     text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'dismissed')),
     decided_by text,               -- the admin's pubkey
-    decided_at timestamptz
+    decided_at timestamptz,
+    CONSTRAINT access_requests_who CHECK (npub IS NOT NULL OR email IS NOT NULL)
 );
 CREATE UNIQUE INDEX access_requests_one_pending ON access_requests (npub) WHERE status = 'pending';
+CREATE UNIQUE INDEX access_requests_one_pending_email ON access_requests (email) WHERE status = 'pending' AND npub IS NULL;
 
 -- Keys an admin approved in /admin. Access = TMS_ADMINS + TMS_APPROVED (env, bootstrap) + this table.
 CREATE TABLE approvals (
