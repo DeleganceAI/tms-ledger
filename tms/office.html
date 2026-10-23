@@ -77,8 +77,8 @@
 <footer id="ticker" aria-label="Ledger totals"></footer>
 <dialog id="req"><form id="req-form" method="dialog">
   <b>Request access</b>
-  <p style="margin:6px 0 0;font-size:13px;color:#cbbfd4">Every record here is signed with a Nostr key. Paste yours and an admin will review it. No key yet? A browser extension such as <a href="https://getalby.com" style="color:#cfe0ff">Alby</a> makes one.</p>
-  <label>Your npub<input id="req-npub" name="npub" required autocomplete="off" placeholder="npub1..."></label>
+  <p style="margin:6px 0 0;font-size:13px;color:#cbbfd4">Every record here is signed with a Nostr key. Paste your npub, or just your email address if you don't have a key: once approved, you sign in with an emailed code and we hold a key for you, which you can export any time. An admin reviews every request.</p>
+  <label>Your npub or email<input id="req-npub" name="contact" required autocomplete="email" placeholder="npub1... or you@example.com"></label>
   <label>Note (optional)<textarea id="req-note" name="note" maxlength="500" placeholder="Who you are and what you would like to work on"></textarea></label>
   <div id="req-msg" role="status"></div>
   <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn ghost" type="button" id="req-close">Close</button><button class="btn" type="submit" id="req-send">Send request</button></div>
@@ -1111,10 +1111,11 @@ $('req-form').addEventListener('submit', async e => {
   const msg = $('req-msg'); msg.className = ''; msg.textContent = 'Sending…'; $('req-send').disabled = true;
   try {
     const r = await fetch('/api/access-request', { method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ npub: $('req-npub').value.trim(), note: $('req-note').value.trim() }) });
+      body: JSON.stringify({ contact: $('req-npub').value.trim(), note: $('req-note').value.trim() }) });
     const d = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(d.error || `${r.status}`);
-    msg.className = 'ok'; msg.textContent = 'Request sent. Once an admin approves it, connect with your extension.';
+    msg.className = 'ok'; msg.textContent = d.email ? `Request sent. Once an admin approves it, we'll email ${d.email} with how to sign in.`
+      : 'Request sent. Once an admin approves it, connect with your extension.';
   } catch (err) { msg.className = 'err'; msg.textContent = err.message; }
   finally { $('req-send').disabled = false; }
 });
