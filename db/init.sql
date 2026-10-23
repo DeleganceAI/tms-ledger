@@ -22,7 +22,7 @@ CREATE TABLE events (
     id          text PRIMARY KEY CHECK (id ~ '^[0-9a-f]{64}$'),
     pubkey      text NOT NULL CHECK (pubkey ~ '^[0-9a-f]{64}$'),
     created_at  bigint NOT NULL,          -- claimed by the signer
-    kind        integer NOT NULL CHECK (kind IN (0, 4701, 4702, 4703, 4704, 4705, 4706, 4708)),
+    kind        integer NOT NULL CHECK (kind IN (0, 4701, 4702, 4703, 4704, 4705, 4706, 4708, 4709)),
     tags        jsonb NOT NULL DEFAULT '[]' CHECK (kind = 0 OR tags = '[]'::jsonb),
     content     text NOT NULL CHECK (jsonb_typeof(content::jsonb) = 'object'),
     sig         text NOT NULL CHECK (sig ~ '^[0-9a-f]{128}$'),
@@ -76,6 +76,13 @@ CREATE VIEW members AS
           FROM events e JOIN collections c ON c.slug = e.collection AND c.owner = e.pubkey
           WHERE e.kind = 4705 ORDER BY e.collection, e.received_at DESC, e.id) l,
          jsonb_array_elements_text(l.content::jsonb -> 'members') AS m(pubkey);
+
+-- A collection's topic and visibility: the latest about event its owner signed.
+CREATE VIEW collection_about AS
+    SELECT DISTINCT ON (e.collection) e.collection, e.content::jsonb ->> 'topic' AS topic,
+           (e.content::jsonb ->> 'public')::boolean AS public, e.received_at
+    FROM events e JOIN collections c ON c.slug = e.collection AND c.owner = e.pubkey
+    WHERE e.kind = 4709 ORDER BY e.collection, e.received_at DESC, e.id;
 
 -- Quote matching forgives case, whitespace, curly quotes, dashes, soft hyphens and fi/fl
 -- ligatures (common in pdftotext output). It checks that the citation exists, nothing more.

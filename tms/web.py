@@ -272,11 +272,13 @@ async def collection(request: Request) -> JSONResponse:
             members = [L._clean(r) for r in conn.execute(
                 """SELECT m.pubkey, p.name, p.about FROM members m LEFT JOIN profiles p ON p.pubkey = m.pubkey
                    WHERE m.collection = %s ORDER BY m.pubkey = %s DESC, p.name NULLS LAST, m.pubkey""", (slug, owner))]
+            about = conn.execute("SELECT topic, public FROM collection_about WHERE collection = %s", (slug,)).fetchone()
     except ValueError as err:
         return _error(err)
     for m in members:
         m["npub"] = E.bech32_encode("npub", m["pubkey"])
-    return JSONResponse({"slug": slug, "owner": owner, "members": members})
+    return JSONResponse({"slug": slug, "owner": owner, "members": members,
+                         "topic": about["topic"] if about else None, "public": bool(about and about["public"])})
 
 
 async def publish(request: Request) -> JSONResponse:

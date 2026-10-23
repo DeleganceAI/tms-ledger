@@ -443,6 +443,7 @@ def server(ids) -> None:
     fetch_stub()
     chat_agent()
     email_signin()
+    showcase()
 
     with L.connect() as conn:
         rows = conn.execute("SELECT tool, pubkey, collection, ok FROM mcp_calls WHERE method = 'tools/call'").fetchall()
@@ -508,6 +509,39 @@ def access(client, W) -> None:
         assert conn.execute("SELECT approved_by FROM approvals WHERE pubkey = %s", (vpk,)).fetchone()["approved_by"] == PK[OWNER]
         assert conn.execute("SELECT count(*) AS n FROM approvals WHERE pubkey = %s", (opk,)).fetchone()["n"] == 0
         assert {r["status"] for r in conn.execute("SELECT status FROM access_requests")} == {"approved", "dismissed", "pending"}
+
+
+def showcase() -> None:
+    """Owners can make a collection public: the home page shows its name, topic and counts, nothing else."""
+    from starlette.testclient import TestClient
+
+    from tms import office as O
+    from tms import server as S
+    with L.connect() as conn:
+        rejects(lambda: L.publish(conn, [sign(BOB, E.ABOUT, {"collection": "smoke", "topic": "Mine now", "public": True})]),
+                "only the owner")
+        rejects(lambda: L.publish(conn, [sign(OWNER, E.ABOUT, {"collection": "smoke", "topic": "x" * 141, "public": True})]),
+                "topic")
+        L.publish(conn, [sign(OWNER, E.ABOUT, {"collection": "smoke", "topic": "Histamine intolerance and MCAS", "public": True})])
+        mine = {c["slug"]: c for c in L.list_collections(conn, PK[OWNER])}
+        assert mine["smoke"]["topic"].startswith("Histamine") and mine["smoke"]["public"] and not mine["other"]["public"], mine
+        counts = conn.execute("""SELECT count(*) FILTER (WHERE kind = 4701) AS evidence, count(*) FILTER (WHERE kind = 4702) AS claims,
+            count(*) FILTER (WHERE kind = 4703) AS links, count(*) FILTER (WHERE kind = 4704) AS contradictions
+            FROM events WHERE collection = 'smoke'""").fetchone()
+    O._showcase.clear()
+    with TestClient(S.http_app()) as client:
+        r = client.get("/showcase.json")
+        assert r.status_code == 200 and r.headers["cache-control"] == "public, max-age=60"
+        cols = r.json()["collections"]
+        assert [c["slug"] for c in cols] == ["smoke"], cols  # "other" and "outside" stay hidden
+        assert set(cols[0]) == {"slug", "topic", "evidence", "claims", "links", "contradictions"}, "counts only, no records"
+        assert all(cols[0][k] == counts[k] for k in counts), (cols, counts)
+        assert 'id="tab-communities"' in client.get("/").text
+        with L.connect() as conn:
+            L.publish(conn, [sign(OWNER, E.ABOUT, {"collection": "smoke", "topic": "Histamine intolerance and MCAS", "public": False},
+                                  created_at=int(time.time()) + 1)])
+        O._showcase.clear()
+        assert client.get("/showcase.json").json()["collections"] == [], "the latest about wins"
 
 
 def email_signin() -> None:

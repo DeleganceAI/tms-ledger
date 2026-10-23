@@ -23,8 +23,9 @@ HEX128 = re.compile(r"^[0-9a-f]{128}$")
 SLUG = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 RELATIONS = ("SUPPORTS", "REBUTS", "QUALIFIES")
 
-PROFILE, EVIDENCE, CLAIM, LINK, CONTRADICTION, MEMBERS, TERMS, REQUEST, SNAPSHOT = (
-    0, 4701, 4702, 4703, 4704, 4705, 4706, 4707, 4708)
+PROFILE, EVIDENCE, CLAIM, LINK, CONTRADICTION, MEMBERS, TERMS, REQUEST, SNAPSHOT, ABOUT = (
+    0, 4701, 4702, 4703, 4704, 4705, 4706, 4707, 4708, 4709)
+TOPIC_MAX = 140  # characters in a collection's public topic line
 
 
 class Invalid(ValueError):
@@ -65,6 +66,14 @@ def _object(v):
     return isinstance(v, dict)
 
 
+def _topic(v):
+    return _text(v) and len(v) <= TOPIC_MAX
+
+
+def _bool(v):
+    return isinstance(v, bool)
+
+
 def _count(v):
     return isinstance(v, int) and not isinstance(v, bool) and v >= 0
 
@@ -85,6 +94,9 @@ KINDS = {
     REQUEST: ("request", {"tool": _text, "args": _object}, {"nonce": _opt_text}),
     SNAPSHOT: ("snapshot", {"date": _text, "cid": _text, "sha256": _id, "count": _count,
                             "last_received_at": _text}, {}),
+    # owner only, latest wins: a one-line topic, and whether the home page may show the
+    # collection's name, topic and record counts (never its records)
+    ABOUT: ("about", {"collection": _slug, "topic": _topic, "public": _bool}, {}),
 }
 NAMES = {kind: spec[0] for kind, spec in KINDS.items()}
 STORED = frozenset(KINDS) - {REQUEST}
