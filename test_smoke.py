@@ -101,11 +101,11 @@ def apply_sql(url: str, name: str) -> None:
 
 
 def assert_fresh_migration(url: str) -> None:
-    """migrate_index.sql on a database created from init.sql is a no-op."""
-    apply_sql(url, "migrate_index.sql")
+    """migrate_embedding_index.sql on a database created from init.sql is a no-op."""
+    apply_sql(url, "migrate_embedding_index.sql")
     with psycopg.connect(url, autocommit=True) as c:
         assert c.execute("SELECT to_regclass('public.embeddings') IS NOT NULL").fetchone()[0] is False
-        assert c.execute("SELECT to_regclass('public.index_entries') IS NOT NULL").fetchone()[0] is True
+        assert c.execute("SELECT to_regclass('public.embedding_index') IS NOT NULL").fetchone()[0] is True
 
 
 def legacy_migration() -> None:
@@ -124,7 +124,7 @@ def legacy_migration() -> None:
         sig = "0" * 128
         vec = "[" + ",".join(["1"] + ["0"] * 4095) + "]"
         with psycopg.connect(url, autocommit=True) as c:
-            c.execute("DROP TABLE index_entries")
+            c.execute("DROP TABLE embedding_index")
             c.execute("""CREATE TABLE embeddings (
                 event_id text PRIMARY KEY REFERENCES events(id),
                 vector vector(4096) NOT NULL,
@@ -135,16 +135,16 @@ def legacy_migration() -> None:
             c.execute("INSERT INTO embeddings (event_id, vector, model) VALUES (%s, %s::vector, %s)",
                       (eid, vec, "Qwen/Qwen3-Embedding-8B"))
             before = c.execute("SELECT content, sig FROM events WHERE id = %s", (eid,)).fetchone()
-        apply_sql(url, "migrate_index.sql")
+        apply_sql(url, "migrate_embedding_index.sql")
         with psycopg.connect(url, autocommit=True) as c:
             assert c.execute("SELECT to_regclass('public.embeddings') IS NOT NULL").fetchone()[0] is False
-            row = c.execute("""SELECT kind, model, dimensions, vector_dims(vector) AS d
-                               FROM index_entries WHERE event_id = %s""", (eid,)).fetchone()
-            assert row == ("embedding", "Qwen/Qwen3-Embedding-8B", 4096, 4096), row
+            row = c.execute("""SELECT model, dimensions, vector_dims(vector) AS d
+                               FROM embedding_index WHERE event_id = %s""", (eid,)).fetchone()
+            assert row == ("Qwen/Qwen3-Embedding-8B", 4096, 4096), row
             assert c.execute("SELECT content, sig FROM events WHERE id = %s", (eid,)).fetchone() == before
-        apply_sql(url, "migrate_index.sql")
+        apply_sql(url, "migrate_embedding_index.sql")
         with psycopg.connect(url, autocommit=True) as c:
-            assert c.execute("SELECT count(*) FROM index_entries").fetchone()[0] == 1
+            assert c.execute("SELECT count(*) FROM embedding_index").fetchone()[0] == 1
             assert c.execute("SELECT content FROM events WHERE id = %s", (eid,)).fetchone()[0] == content
     finally:
         with psycopg.connect(admin, autocommit=True) as c:
@@ -189,8 +189,8 @@ def ledger(conn) -> list[str]:
     assert res["accepted"] == [e["id"] for e in batch] and res["embedded"] == 2 and res["collections"] == ["smoke"], res
     assert conn.execute("SELECT owner FROM collections WHERE slug = 'smoke'").fetchone()["owner"] == PK[OWNER]
     stored = dict(conn.execute(
-        "SELECT kind, model, dimensions FROM index_entries WHERE event_id = %s", (c1["id"],)).fetchone())
-    assert stored == {"kind": "embedding", "model": L.EMBED_MODEL, "dimensions": L.EMBED_DIM}, stored
+        "SELECT model, dimensions FROM embedding_index WHERE event_id = %s", (c1["id"],)).fetchone())
+    assert stored == {"model": L.EMBED_MODEL, "dimensions": L.EMBED_DIM}, stored
     assert conn.execute("""SELECT count(*) AS n FROM information_schema.columns
         WHERE table_schema = 'public' AND table_name IN ('events', 'collections')
           AND column_name IN ('embedding', 'embeddings', 'vector')""").fetchone()["n"] == 0
@@ -267,23 +267,23 @@ def ledger(conn) -> list[str]:
     assert hits["items"][0]["author_model"] is None  # the author's profile has no model yet
     # A vector from another model, even an identical or shorter one, is not ranked with these.
     query = L.embed(["what causes histamine intolerance?"], query=True)[0]
-    conn.execute("""INSERT INTO index_entries (event_id, kind, model, dimensions, vector) VALUES
-                    (%s, 'embedding', 'other-model', %s, %s::vector),
-                    (%s, 'embedding', 'small-model', 2, '[1,0]')""",
+    conn.execute("""INSERT INTO embedding_index (event_id, model, dimensions, vector) VALUES
+                    (%s, 'other-model', %s, %s::vector),
+                    (%s, 'small-model', 2, '[1,0]')""",
                  (c2["id"], L.EMBED_DIM, query, c1["id"]))
     trapped = L.search_claims(conn, PK[BOB], "smoke", "what causes histamine intolerance?", "vector", 5)
     assert trapped["items"][0]["id"] == c1["id"], trapped
     assert next(i for i in trapped["items"] if i["id"] == c2["id"])["distance"] > 0
     event_before = dict(conn.execute("SELECT content, sig FROM events WHERE id = %s", (c1["id"],)).fetchone())
-    conn.execute("UPDATE index_entries SET vector = %s::vector WHERE event_id = %s AND model = %s",
+    conn.execute("UPDATE embedding_index SET vector = %s::vector WHERE event_id = %s AND model = %s",
                  ("[" + ",".join(["0"] * L.EMBED_DIM) + "]", c1["id"], L.EMBED_MODEL))
     assert L.rebuild_embeddings(conn, PK[BOB]) >= 1
     fresh = L.embed([conn.execute("SELECT text FROM claims WHERE id = %s", (c1["id"],)).fetchone()["text"]])[0]
-    assert conn.execute("""SELECT vector <=> %s::vector AS d FROM index_entries
-                           WHERE event_id = %s AND kind = 'embedding' AND model = %s""",
+    assert conn.execute("""SELECT vector <=> %s::vector AS d FROM embedding_index
+                           WHERE event_id = %s AND model = %s""",
                         (fresh, c1["id"], L.EMBED_MODEL)).fetchone()["d"] == 0
-    assert conn.execute("SELECT count(*) AS n FROM index_entries WHERE model = 'other-model'").fetchone()["n"] == 1
-    assert conn.execute("SELECT count(*) AS n FROM index_entries WHERE model = 'small-model'").fetchone()["n"] == 1
+    assert conn.execute("SELECT count(*) AS n FROM embedding_index WHERE model = 'other-model'").fetchone()["n"] == 1
+    assert conn.execute("SELECT count(*) AS n FROM embedding_index WHERE model = 'small-model'").fetchone()["n"] == 1
     assert dict(conn.execute("SELECT content, sig FROM events WHERE id = %s", (c1["id"],)).fetchone()) == event_before
     kw = L.search_claims(conn, PK[BOB], "smoke", "serum symptom", "keyword", 5)
     assert [h["id"] for h in kw["items"]] == [c2["id"]]

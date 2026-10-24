@@ -42,7 +42,7 @@ Specified in EVENTS.md sections 3, 4 (`request`) and 6.
 - `events` is the only table that stores anything signed: `id`, `pubkey`, `kind`, `created_at`, `content`, `sig`, `received_at`, `collection`.
 - `evidence`, `claims`, `links`, `contradictions` and `contradiction_claims` are views over `events`.
 - `collections` (`slug`, `owner`) is written by the first event that uses a slug.
-- `index_entries` (`event_id`, `kind`, `model`, `dimensions`, `vector`) holds derived indexes and isn't signed. `kind = 'embedding'` is the first kind. The ledger tables have no embedding columns.
+- `embedding_index` (`event_id`, `model`, `dimensions`, `vector`) holds derived claim embeddings and isn't signed. The ledger tables have no embedding columns. Another kind of index would be its own table.
 - Expression indexes cover full-text search and lookups by collection, kind and reference.
 - Operational tables, which aren't ledger data and are allowed to change: `mcp_calls`, `auth_seen`.
 

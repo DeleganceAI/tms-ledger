@@ -17,7 +17,7 @@ The server enforces exactly two mechanical things beyond structure: a link's quo
 | Path | What |
 |---|---|
 | [EVENTS.md](EVENTS.md), [TERMS.md](TERMS.md) | Event kinds, acceptance rules, access; the one upload-rights clause users sign. |
-| [db/init.sql](db/init.sql) | `events` (the only signed table), views `evidence`, `claims`, `links`, `contradictions`, `contradiction_claims`, `profiles`, `members`; `collections`, `index_entries` (derived embeddings and later index kinds), `auth_seen`, `mcp_calls`. Reference and quote triggers, append-only on the ledger. |
+| [db/init.sql](db/init.sql) | `events` (the only signed table), views `evidence`, `claims`, `links`, `contradictions`, `contradiction_claims`, `profiles`, `members`; `collections`, `embedding_index` (derived claim vectors), `auth_seen`, `mcp_calls`. Reference and quote triggers, append-only on the ledger. |
 | [db/verify.sql](db/verify.sql) | Database-side guards on unsigned stand-in events. Rolls back. |
 | [tms/events.py](tms/events.py) | NIP-01 IDs, BIP-340 signing (`coincurve`), per-kind content rules, the `tms-sign` CLI. |
 | [tms/ledger.py](tms/ledger.py) | `publish(events)`, member-scoped reads, retrieval, fetch, embeddings, proof check, the connection pool. |
@@ -125,15 +125,15 @@ Prompts: `briefing` (answer from one collection with a checked proof) and `claim
    psql "$DIRECT_URL" -c "CREATE EXTENSION IF NOT EXISTS vector" -v ON_ERROR_STOP=1 -f db/init.sql
    ```
 
-   Then grant the app's user access, if it isn't `doadmin`: `GRANT SELECT, INSERT ON ALL TABLES IN SCHEMA public TO tms; GRANT UPDATE, DELETE ON index_entries, auth_seen, mcp_calls TO tms; GRANT UPDATE ON access_requests TO tms; GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO tms;`
+   Then grant the app's user access, if it isn't `doadmin`: `GRANT SELECT, INSERT ON ALL TABLES IN SCHEMA public TO tms; GRANT UPDATE, DELETE ON embedding_index, auth_seen, mcp_calls TO tms; GRANT UPDATE ON access_requests TO tms; GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO tms;`
 
-   **Existing database.** `db/init.sql` is for an empty database. A database that already has the `embeddings` table is upgraded with [db/migrate_index.sql](db/migrate_index.sql), which copies every vector into `index_entries` (recording the model and the vector's dimensions) and drops `embeddings` only after the copy matches. It does not modify `events`. Run it on the direct connection before the new app starts serving:
+   **Existing database.** `db/init.sql` is for an empty database. A database that already has the `embeddings` table is upgraded with [db/migrate_embedding_index.sql](db/migrate_embedding_index.sql), which copies every vector into `embedding_index` (recording the model and the vector's dimensions) and drops `embeddings` only after the copy matches. It does not modify `events`. Run it on the direct connection before the new app starts serving:
 
    ```bash
-   psql "$DIRECT_URL" -v ON_ERROR_STOP=1 -f db/migrate_index.sql
+   psql "$DIRECT_URL" -v ON_ERROR_STOP=1 -f db/migrate_embedding_index.sql
    ```
 
-   The file locks `embeddings` for the copy, so a publish in that window still stores its events and fills the vector on a later publish. Deploy this app immediately after. The migration grants `index_entries` to a role named `tms` when that role exists. It is safe to run twice. Changing `EMBED_MODEL` later leaves old vectors in place and does not compare them with the new model; delete that model's `index_entries` rows, or call `ledger.rebuild_embeddings`, to fill them again from claim text.
+   The file locks `embeddings` for the copy, so a publish in that window still stores its events and fills the vector on a later publish. Deploy this app immediately after. The migration grants `embedding_index` to a role named `tms` when that role exists. It is safe to run twice. Changing `EMBED_MODEL` later leaves old vectors in place and does not compare them with the new model; delete that model's `embedding_index` rows, or call `ledger.rebuild_embeddings`, to fill them again from claim text.
 2. Create a connection pool `tms-pool` in **transaction** mode on database `tms` (size around 10):
 
    ```bash

@@ -37,7 +37,6 @@ EMBED_URL = os.environ.get("EMBED_URL", "http://localhost:11434/v1").rstrip("/")
 EMBED_API_KEY = os.environ.get("EMBED_API_KEY", "")
 EMBED_MODEL = os.environ.get("EMBED_MODEL", "qwen3-embedding:8b")  # DeepInfra: Qwen/Qwen3-Embedding-8B
 EMBED_DIM = 4096
-EMBED_KIND = "embedding"  # index_entries.kind; other kinds can be added without altering events
 EMBED_PRICE_PER_MTOK = float(os.environ.get("EMBED_PRICE_PER_MTOK", "0.01"))  # USD; DeepInfra's Qwen3-Embedding-8B rate
 QUERY_PREFIX = "Instruct: Given a question or statement, retrieve claims relevant to it\nQuery: "
 APPROVED = {E.pubkey_hex(p) for p in re.split(r"[\s,]+", os.environ.get("TMS_APPROVED", "")) if p}
@@ -146,11 +145,11 @@ def _write_embeddings(conn, chunk: list[dict], pubkey: str | None) -> None:
     is a different row. The claim event is not modified."""
     vecs = embed([r["text"] for r in chunk], pubkey=pubkey, collection=chunk[0]["collection"], conn=conn)
     conn.cursor().executemany(
-        """INSERT INTO index_entries (event_id, kind, model, dimensions, vector)
-           VALUES (%s, %s, %s, %s, %s::vector)
-           ON CONFLICT (event_id, kind, model) DO UPDATE
+        """INSERT INTO embedding_index (event_id, model, dimensions, vector)
+           VALUES (%s, %s, %s, %s::vector)
+           ON CONFLICT (event_id, model) DO UPDATE
            SET dimensions = EXCLUDED.dimensions, vector = EXCLUDED.vector, created_at = now()""",
-        [(r["id"], EMBED_KIND, EMBED_MODEL, EMBED_DIM, v) for r, v in zip(chunk, vecs)])
+        [(r["id"], EMBED_MODEL, EMBED_DIM, v) for r, v in zip(chunk, vecs)])
 
 
 def embed_pending(conn, pubkey: str | None = None, limit: int = 64) -> int:
@@ -160,10 +159,10 @@ def embed_pending(conn, pubkey: str | None = None, limit: int = 64) -> int:
     rows = conn.execute(
         """SELECT c.id, c.text, c.collection FROM claims c
            WHERE NOT EXISTS (
-               SELECT 1 FROM index_entries v
-               WHERE v.event_id = c.id AND v.kind = %s AND v.model = %s AND v.dimensions = %s)
+               SELECT 1 FROM embedding_index v
+               WHERE v.event_id = c.id AND v.model = %s AND v.dimensions = %s)
            ORDER BY c.collection, c.received_at LIMIT %s""",
-        (EMBED_KIND, EMBED_MODEL, EMBED_DIM, limit)).fetchall()
+        (EMBED_MODEL, EMBED_DIM, limit)).fetchall()
     for chunk in _embedding_chunks(rows):
         _write_embeddings(conn, chunk, pubkey)
     return len(rows)
@@ -494,16 +493,16 @@ def search_claims(conn, pubkey: str, collection: str, text: str, method: str = "
     require_member(conn, pubkey, collection)
     limit = _limit(limit)
     if method == "vector":
-        # kind, model and dimensions together: a vector from another model is never ranked, even
+        # model and dimensions together: a vector from another model is never ranked, even
         # when it has the same length as the query.
         vec = embed([text], query=True, pubkey=pubkey, collection=collection, conn=conn)[0]
         rows = conn.execute(
             f"""SELECT x.id, x.pubkey, {AUTHOR}, x.text, x.received_at, v.vector <=> %s::vector AS distance
-                FROM claims x JOIN index_entries v ON v.event_id = x.id
-                 AND v.kind = %s AND v.model = %s AND v.dimensions = %s
+                FROM claims x JOIN embedding_index v ON v.event_id = x.id
+                 AND v.model = %s AND v.dimensions = %s
                 WHERE x.collection = %s
                 ORDER BY distance, x.id LIMIT %s""",
-            (vec, EMBED_KIND, EMBED_MODEL, EMBED_DIM, collection, limit))
+            (vec, EMBED_MODEL, EMBED_DIM, collection, limit))
     elif method == "keyword":
         rows = conn.execute(
             f"""SELECT x.id, x.pubkey, {AUTHOR}, x.text, x.received_at,

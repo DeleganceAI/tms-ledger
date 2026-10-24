@@ -107,11 +107,11 @@ def browse(conn, pk: str, cols: list[str], kind: str, q: str, collection: str, m
     if method == "vector" and kind == "claim" and q:
         vec = L.embed([q], query=True, pubkey=pk, collection=collection or None, conn=conn)[0]
         items = _rows(conn, f"""SELECT {base}, {extra}, round((v.vector <=> %s::vector)::numeric, 3)::float8 AS distance
-            FROM claims x JOIN index_entries v ON v.event_id = x.id
-             AND v.kind = %s AND v.model = %s AND v.dimensions = %s
+            FROM claims x JOIN embedding_index v ON v.event_id = x.id
+             AND v.model = %s AND v.dimensions = %s
             WHERE x.collection = ANY(%s)
             ORDER BY v.vector <=> %s::vector, x.id LIMIT %s""",
-            (vec, L.EMBED_KIND, L.EMBED_MODEL, L.EMBED_DIM, scope, vec, size))
+            (vec, L.EMBED_MODEL, L.EMBED_DIM, scope, vec, size))
         return {"items": items, "more": False, "method": "vector"}
     where, params = ["x.collection = ANY(%s)"], [scope]
     if q:
@@ -277,9 +277,9 @@ def collections(conn, pk: str, cols: list[str]) -> dict:
         SELECT c.slug, c.owner, coalesce((SELECT p.name FROM profiles p WHERE p.pubkey = c.owner), left(c.owner, 12)) AS owner_name,
                c.created_at, (SELECT count(*) FROM members m WHERE m.collection = c.slug) AS members,
                s.evidence, s.claims, s.links, s.contradictions, s.contributors, s.last_at, s.bytes,
-               (SELECT coalesce(sum(pg_column_size(v.vector)), 0) FROM index_entries v
+               (SELECT coalesce(sum(pg_column_size(v.vector)), 0) FROM embedding_index v
                  JOIN events e ON e.id = v.event_id
-                 WHERE e.collection = c.slug AND v.kind = 'embedding') AS vector_bytes
+                 WHERE e.collection = c.slug) AS vector_bytes
         FROM collections c, LATERAL (
           SELECT count(*) FILTER (WHERE e.kind = 4701) AS evidence, count(*) FILTER (WHERE e.kind = 4702) AS claims,
                  count(*) FILTER (WHERE e.kind = 4703) AS links, count(*) FILTER (WHERE e.kind = 4704) AS contradictions,

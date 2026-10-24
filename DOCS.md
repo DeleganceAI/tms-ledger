@@ -354,7 +354,7 @@ Writes a batch of signed events. It's the only write tool, and the only tool tha
 - **All or nothing.** If any event is rejected, nothing in the batch is stored, and the error names the event that failed.
 - **Retries are safe.** Events already stored are listed in `skipped`, not rejected.
 - **New collections:** the first event that names a new slug creates it, with its signer as owner, if the signer is approved.
-- **Embeddings** for new claims are computed after the batch commits and stored in `index_entries`, not on the event. Each row records the model name and the vector's dimensions. A different model is another row; re-embedding the same model replaces that row and does not change the claim. If embedding fails, the events are still stored, `embedded` becomes `embedding_error`, and the vectors catch up on a later publish. Search ranks only the model the server is configured to use (`EMBED_MODEL`). Vectors from any other model stay stored and are not compared with it.
+- **Embeddings** for new claims are computed after the batch commits and stored in `embedding_index`, not on the event. Each row records the model name and the vector's dimensions. A different model is another row; re-embedding the same model replaces that row and does not change the claim. If embedding fails, the events are still stored, `embedded` becomes `embedding_error`, and the vectors catch up on a later publish. Search ranks only the model the server is configured to use (`EMBED_MODEL`). Vectors from any other model stay stored and are not compared with it.
 
 Returns `{"accepted": [ids], "skipped": [ids], "collections": [slugs], "embedded": n}`. See [Publishing](#publishing) for a full example.
 

@@ -185,31 +185,34 @@ $$;
 
 -- Full-dimensional vectors, exact cosine retrieval, one model at a time.
 -- The 2-d row is a different model of the same claim. It must not enter the 4096-d ranking.
-INSERT INTO index_entries (event_id, kind, model, dimensions, vector) VALUES
-    (pg_temp.k('c1'), 'embedding', 'Qwen/Qwen3-Embedding-8B', 4096,
+INSERT INTO embedding_index (event_id, model, dimensions, vector) VALUES
+    (pg_temp.k('c1'), 'Qwen/Qwen3-Embedding-8B', 4096,
         (ARRAY[1::real] || array_fill(0::real, ARRAY[4095]))::vector),
-    (pg_temp.k('c2'), 'embedding', 'Qwen/Qwen3-Embedding-8B', 4096,
+    (pg_temp.k('c2'), 'Qwen/Qwen3-Embedding-8B', 4096,
         (ARRAY[0::real, 1::real] || array_fill(0::real, ARRAY[4094]))::vector),
-    (pg_temp.k('c2'), 'embedding', 'other-model', 2, '[1,0]');
+    (pg_temp.k('c2'), 'other-model', 2, '[1,0]');
 DO $$
 BEGIN
     ASSERT (SELECT c.text FROM claims c
-            JOIN index_entries v ON v.event_id = c.id
-             AND v.kind = 'embedding' AND v.model = 'Qwen/Qwen3-Embedding-8B' AND v.dimensions = 4096
+            JOIN embedding_index v ON v.event_id = c.id
+             AND v.model = 'Qwen/Qwen3-Embedding-8B' AND v.dimensions = 4096
             ORDER BY v.vector <=> (ARRAY[1::real] || array_fill(0::real, ARRAY[4095]))::vector, c.id LIMIT 1) = 'Alice is CEO.',
         'exact cosine retrieval preserves all 4096 dimensions and stays inside one model';
-    ASSERT (SELECT count(*) FROM index_entries WHERE event_id = pg_temp.k('c2')) = 2,
+    ASSERT (SELECT count(*) FROM embedding_index WHERE event_id = pg_temp.k('c2')) = 2,
         'the same claim can carry two models';
     ASSERT (SELECT count(*) FROM information_schema.columns
             WHERE table_schema = 'public'
               AND table_name IN ('events', 'collections', 'evidence', 'claims', 'links', 'contradictions')
               AND column_name IN ('embedding', 'embeddings', 'vector')) = 0,
         'core tables and views have no embedding columns';
+    ASSERT (SELECT count(*) FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'embedding_index' AND column_name = 'kind') = 0,
+        'the embedding index is not a generic kind table';
 END;
 $$;
 SELECT pg_temp.expect_error($sql$
-    INSERT INTO index_entries (event_id, kind, model, dimensions, vector)
-    VALUES (pg_temp.k('d1'), 'embedding', 'x', 4096, '[1,0]')
+    INSERT INTO embedding_index (event_id, model, dimensions, vector)
+    VALUES (pg_temp.k('d1'), 'x', 4096, '[1,0]')
 $sql$, '23514');
 
 ROLLBACK;
