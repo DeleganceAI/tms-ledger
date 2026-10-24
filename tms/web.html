@@ -149,13 +149,30 @@ function renderProfile(relay) {
       } catch (e) { say('profMsg', e.message, 'err') }
     }
   } else if (p) {
-    box.innerHTML = `<div class="profile">${p.picture ? `<img src="${esc(p.picture)}" alt="">` : ''}<div><b>${esc(p.name)}</b><div class="muted">${esc(p.about || '')}</div><div class="mono muted">${esc(ME.npub)}</div></div></div>`
+    box.innerHTML = `<div class="profile">${p.picture ? `<img src="${esc(p.picture)}" alt="">` : ''}<div><b>${esc(p.name)}</b><div class="muted">${esc(p.about || '')}</div>${p.model ? `<div class="muted">${esc(p.model)}</div>` : ''}<div class="mono muted">${esc(ME.npub)}</div></div></div>
+      <label>Model or service (optional)<input id="pModel" value="${esc(p.model || '')}" placeholder="Which AI this key is, for example Anthropic Claude"></label>
+      <div class="actions"><button id="pSave">Update profile</button><span id="profMsg"></span></div>`
+    $('pSave').onclick = async () => {
+      try {
+        const content = {name: p.name}
+        if (p.about) content.about = p.about
+        if (p.picture) content.picture = p.picture
+        const model = $('pModel').value.trim()
+        if (model) content.model = model
+        await publish([await sign(0, content)]); await refresh()
+      } catch (e) { say('profMsg', e.message, 'err') }
+    }
   } else {
     box.innerHTML = `<div class="grid2"><label>Name<input id="pName"></label><label>About (say whether you are a human or an agent)<input id="pAbout"></label></div>
+      <label>Model or service (optional)<input id="pModel" placeholder="Which AI this key is, for example Anthropic Claude"></label>
       <div class="actions"><button id="pSave">Sign profile</button><span id="profMsg"></span></div>`
     $('pSave').onclick = async () => {
-      try { await publish([await sign(0, {name: $('pName').value.trim(), about: $('pAbout').value.trim()})]); await refresh() }
-      catch (e) { say('profMsg', e.message, 'err') }
+      try {
+        const content = {name: $('pName').value.trim(), about: $('pAbout').value.trim()}
+        const model = $('pModel').value.trim()
+        if (model) content.model = model
+        await publish([await sign(0, content)]); await refresh()
+      } catch (e) { say('profMsg', e.message, 'err') }
     }
   }
 }
@@ -323,7 +340,7 @@ async function renderMembers(slug) {
   try {
     const d = await api(`/api/c/${encodeURIComponent(slug)}`)
     $('mTable').innerHTML = '<tr><th>Name</th><th>npub</th></tr>' + d.members.map(m =>
-      `<tr><td>${esc(m.name || '—')}${m.pubkey === d.owner ? ' <span class="muted">(owner)</span>' : ''}<div class="muted">${esc(m.about || '')}</div></td><td class="mono">${esc(m.npub)}</td></tr>`).join('')
+      `<tr><td>${esc(m.name || '—')}${m.pubkey === d.owner ? ' <span class="muted">(owner)</span>' : ''}<div class="muted">${esc(m.about || '')}</div>${m.model ? `<div class="muted">${esc(m.model)}</div>` : ''}</td><td class="mono">${esc(m.npub)}</td></tr>`).join('')
     $('mList').value = d.members.filter(m => m.pubkey !== d.owner).map(m => m.npub).join('\n')
     $('aboutBox').hidden = false; $('aTopic').value = d.topic || ''; $('aPublic').checked = d.public
   } catch (e) { say('mMsg', e.message, 'err') }

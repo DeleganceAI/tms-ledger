@@ -106,8 +106,25 @@ SELECT pg_temp.ev('p2', 0, 'agent', '{"name": "second", "display_name": "extra"}
 DO $$
 BEGIN
     ASSERT (SELECT name FROM profiles WHERE pubkey = pg_temp.ev_id('agent')) = 'second', 'latest profile wins';
+    ASSERT (SELECT model FROM profiles WHERE pubkey = pg_temp.ev_id('agent')) IS NULL, 'model is optional';
     ASSERT (SELECT count(*) FROM events WHERE kind = 0 AND pubkey = pg_temp.ev_id('agent')) = 3, 'versions kept';
     ASSERT (SELECT tags FROM events WHERE id = pg_temp.ev_id('p0')) = '[["client", "Damus"]]', 'profile tags kept';
+END;
+$$;
+-- A later profile can name the AI service in free text. Older profiles, and other signers, stay null.
+-- Joining a claim to profiles.model is how a reader asks which model wrote it.
+SELECT pg_temp.ev('p3', 0, 'agent', '{"name": "third", "model": "any free text, not a list"}');
+SELECT pg_temp.ev('po', 0, 'owner', '{"name": "Owner"}');
+DO $$
+BEGIN
+    ASSERT (SELECT name FROM profiles WHERE pubkey = pg_temp.ev_id('agent')) = 'third', 'newer profile replaces the name';
+    ASSERT (SELECT model FROM profiles WHERE pubkey = pg_temp.ev_id('agent')) = 'any free text, not a list',
+        'model is the latest profile text';
+    ASSERT (SELECT model FROM profiles WHERE pubkey = pg_temp.ev_id('owner')) IS NULL, 'a profile without model still loads';
+    ASSERT (SELECT p.model FROM claims c JOIN profiles p ON p.pubkey = c.pubkey WHERE c.id = pg_temp.k('c2'))
+        = 'any free text, not a list', 'claims join to the author model description';
+    ASSERT (SELECT p.model FROM claims c JOIN profiles p ON p.pubkey = c.pubkey WHERE c.id = pg_temp.k('c1')) IS NULL,
+        'an author without a description still joins';
 END;
 $$;
 
@@ -166,18 +183,37 @@ BEGIN
 END;
 $$;
 
--- Full-dimensional vectors, exact cosine retrieval.
-INSERT INTO embeddings (event_id, vector, model) VALUES
-    (pg_temp.k('c1'), (ARRAY[1::real] || array_fill(0::real, ARRAY[4095]))::vector, 'Qwen/Qwen3-Embedding-8B'),
-    (pg_temp.k('c2'), (ARRAY[0::real, 1::real] || array_fill(0::real, ARRAY[4094]))::vector, 'Qwen/Qwen3-Embedding-8B');
+-- Full-dimensional vectors, exact cosine retrieval, one model at a time.
+-- The 2-d row is a different model of the same claim. It must not enter the 4096-d ranking.
+INSERT INTO embedding_index (event_id, model, dimensions, vector) VALUES
+    (pg_temp.k('c1'), 'Qwen/Qwen3-Embedding-8B', 4096,
+        (ARRAY[1::real] || array_fill(0::real, ARRAY[4095]))::vector),
+    (pg_temp.k('c2'), 'Qwen/Qwen3-Embedding-8B', 4096,
+        (ARRAY[0::real, 1::real] || array_fill(0::real, ARRAY[4094]))::vector),
+    (pg_temp.k('c2'), 'other-model', 2, '[1,0]');
 DO $$
 BEGIN
-    ASSERT (SELECT c.text FROM claims c JOIN embeddings v ON v.event_id = c.id
-            ORDER BY v.vector <=> (ARRAY[1::real] || array_fill(0::real, ARRAY[4095]))::vector LIMIT 1) = 'Alice is CEO.',
-        'exact cosine retrieval preserves all 4096 dimensions';
+    ASSERT (SELECT c.text FROM claims c
+            JOIN embedding_index v ON v.event_id = c.id
+             AND v.model = 'Qwen/Qwen3-Embedding-8B' AND v.dimensions = 4096
+            ORDER BY v.vector <=> (ARRAY[1::real] || array_fill(0::real, ARRAY[4095]))::vector, c.id LIMIT 1) = 'Alice is CEO.',
+        'exact cosine retrieval preserves all 4096 dimensions and stays inside one model';
+    ASSERT (SELECT count(*) FROM embedding_index WHERE event_id = pg_temp.k('c2')) = 2,
+        'the same claim can carry two models';
+    ASSERT (SELECT count(*) FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name IN ('events', 'collections', 'evidence', 'claims', 'links', 'contradictions')
+              AND column_name IN ('embedding', 'embeddings', 'vector')) = 0,
+        'core tables and views have no embedding columns';
+    ASSERT (SELECT count(*) FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'embedding_index' AND column_name = 'kind') = 0,
+        'the embedding index is not a generic kind table';
 END;
 $$;
-SELECT pg_temp.expect_error($sql$ INSERT INTO embeddings VALUES (pg_temp.k('d1'), '[1,0]', 'x') $sql$, '22000');
+SELECT pg_temp.expect_error($sql$
+    INSERT INTO embedding_index (event_id, model, dimensions, vector)
+    VALUES (pg_temp.k('d1'), 'x', 4096, '[1,0]')
+$sql$, '23514');
 
 ROLLBACK;
 \echo 'PASS: views, membership, references, quotes, shapes, append-only, retrieval'

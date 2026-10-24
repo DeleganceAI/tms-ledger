@@ -80,7 +80,9 @@ def _count(v):
 
 # kind -> (name, required fields, optional fields); each field maps to its check.
 KINDS = {
-    PROFILE: ("profile", {"name": _text}, {"about": _opt_text, "picture": _opt_text}),
+    # model: optional free text naming the AI service or model this key is (a provider and a
+    # model, in the signer's own words). Not an enum. Absent on human keys and older profiles.
+    PROFILE: ("profile", {"name": _text}, {"about": _opt_text, "picture": _opt_text, "model": _opt_text}),
     EVIDENCE: ("evidence", {"collection": _slug, "text": _text},
                {"url": _opt_text, "title": _opt_text, "source": _opt_text,
                 "archive_url": _opt_text, "retrieved_via": _opt_text}),

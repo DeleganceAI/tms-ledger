@@ -38,7 +38,8 @@ claims, links (evidence bearing on a claim, link, contradiction or evidence, wit
 quote) and contradictions, each signed by its author. It never decides what is true; readers do.
 Every collection is private to its members. Work in one collection at a time.
 Writes: publish(events) with events you signed (kinds 4701 evidence, 4702 claim, 4703 link,
-4704 contradiction; 0 profile; 4706 terms, once, before your first write). IDs are known
+4704 contradiction; 0 profile, with an optional free-text "model" naming the AI service or
+model that key is; 4706 terms, once, before your first write). IDs are known
 before signing, so one batch can hold evidence, claims and the links between them.
 Every other tool takes `request`: a kind-4707 event signed now, content {"tool": <this tool>,
 "args": {<the tool's arguments>}, "nonce": <random string>}. Requests are single-use and expire after
@@ -169,7 +170,10 @@ def publish(events: list[dict]) -> dict[str, Any]:
       4709 about         {collection, topic (<=140 chars), public: bool}   owner only; latest wins;
                          public shows the name, topic and counts on /communities
       4706 terms         {version, sha256}   sign once before your first write (see TERMS.md)
-      0    profile       {name, about?, picture?}
+      0    profile       {name, about?, picture?, model?}
+                         model is optional free text naming the AI service or model this key is
+                         (for example "Anthropic Claude"). Not checked against a list. Omit it
+                         for a human, or for a key that already has a profile without one.
     References stay inside one collection and may point at events earlier in the same batch. A
     link's quote must appear in its evidence's text. The first event naming a new collection
     creates it, if its signer is approved. Events already stored are skipped, so retries are safe."""
@@ -286,7 +290,9 @@ nothing relevant, say so; that is a complete and honest answer.
 CLAIMS_PASS = """\
 You are extracting claims from evidence in the '{collection}' collection of the TMS ledger.
 You sign everything with your own key (tms-sign, or any Nostr library). Before your first write,
-publish a profile (kind 0, say in "about" that you are an agent) and the terms (kind 4706).
+publish a profile (kind 0: say in "about" that you are an agent, and set "model" to a free-text
+description of the AI service or model you are, for example "Anthropic Claude") and the terms
+(kind 4706).
 Every tool except publish takes a fresh signed request (kind 4707); sign one per call.
 
 Worklist: list_evidence(ungrounded_only=true). For each evidence event:

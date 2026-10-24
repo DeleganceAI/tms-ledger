@@ -95,11 +95,69 @@ def no_db_on_event_loop(root: Path = Path(__file__).parent / "tms") -> None:
         walk(path, ast.parse(path.read_text()), False)
 
 
+def apply_sql(url: str, name: str) -> None:
+    with psycopg.connect(url, autocommit=True) as c:
+        c.execute(Path(__file__).with_name("db").joinpath(name).read_text())
+
+
+def assert_fresh_migration(url: str) -> None:
+    """migrate_embedding_index.sql on a database created from init.sql is a no-op."""
+    apply_sql(url, "migrate_embedding_index.sql")
+    with psycopg.connect(url, autocommit=True) as c:
+        assert c.execute("SELECT to_regclass('public.embeddings') IS NOT NULL").fetchone()[0] is False
+        assert c.execute("SELECT to_regclass('public.embedding_index') IS NOT NULL").fetchone()[0] is True
+
+
+def legacy_migration() -> None:
+    """A database that still has embeddings keeps every vector and every event byte."""
+    name = "tmsv2_migrate_smoke"
+    assert name.endswith("_smoke")
+    admin = URL.rsplit("/", 1)[0] + "/postgres"
+    url = URL.rsplit("/", 1)[0] + "/" + name
+    with psycopg.connect(admin, autocommit=True) as c:
+        c.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+        c.execute(f'CREATE DATABASE "{name}"')
+    try:
+        apply_sql(url, "init.sql")
+        owner, eid = "ab" * 32, "cd" * 32
+        content = '{"collection": "mig", "text": "migrated claim"}'
+        sig = "0" * 128
+        vec = "[" + ",".join(["1"] + ["0"] * 4095) + "]"
+        with psycopg.connect(url, autocommit=True) as c:
+            c.execute("DROP TABLE embedding_index")
+            c.execute("""CREATE TABLE embeddings (
+                event_id text PRIMARY KEY REFERENCES events(id),
+                vector vector(4096) NOT NULL,
+                model text NOT NULL)""")
+            c.execute("INSERT INTO collections (slug, owner) VALUES ('mig', %s)", (owner,))
+            c.execute("""INSERT INTO events (id, pubkey, created_at, kind, content, sig, collection)
+                         VALUES (%s, %s, 1792454400, 4702, %s, %s, 'mig')""", (eid, owner, content, sig))
+            c.execute("INSERT INTO embeddings (event_id, vector, model) VALUES (%s, %s::vector, %s)",
+                      (eid, vec, "Qwen/Qwen3-Embedding-8B"))
+            before = c.execute("SELECT content, sig FROM events WHERE id = %s", (eid,)).fetchone()
+        apply_sql(url, "migrate_embedding_index.sql")
+        with psycopg.connect(url, autocommit=True) as c:
+            assert c.execute("SELECT to_regclass('public.embeddings') IS NOT NULL").fetchone()[0] is False
+            row = c.execute("""SELECT model, dimensions, vector_dims(vector) AS d
+                               FROM embedding_index WHERE event_id = %s""", (eid,)).fetchone()
+            assert row == ("Qwen/Qwen3-Embedding-8B", 4096, 4096), row
+            assert c.execute("SELECT content, sig FROM events WHERE id = %s", (eid,)).fetchone() == before
+        apply_sql(url, "migrate_embedding_index.sql")
+        with psycopg.connect(url, autocommit=True) as c:
+            assert c.execute("SELECT count(*) FROM embedding_index").fetchone()[0] == 1
+            assert c.execute("SELECT content FROM events WHERE id = %s", (eid,)).fetchone()[0] == content
+    finally:
+        with psycopg.connect(admin, autocommit=True) as c:
+            c.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+
+
 def main() -> None:
     no_db_on_event_loop()
     recreate()
+    assert_fresh_migration(URL)
     with L.connect() as conn:
         ids = ledger(conn)
+    legacy_migration()
     embed_calls()
     server(ids)
     print("PASS: smoke")
@@ -130,6 +188,12 @@ def ledger(conn) -> list[str]:
     res = pub(batch)
     assert res["accepted"] == [e["id"] for e in batch] and res["embedded"] == 2 and res["collections"] == ["smoke"], res
     assert conn.execute("SELECT owner FROM collections WHERE slug = 'smoke'").fetchone()["owner"] == PK[OWNER]
+    stored = dict(conn.execute(
+        "SELECT model, dimensions FROM embedding_index WHERE event_id = %s", (c1["id"],)).fetchone())
+    assert stored == {"model": L.EMBED_MODEL, "dimensions": L.EMBED_DIM}, stored
+    assert conn.execute("""SELECT count(*) AS n FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name IN ('events', 'collections')
+          AND column_name IN ('embedding', 'embeddings', 'vector')""").fetchone()["n"] == 0
 
     # A duplicate ID is a no-op.
     n = count()
@@ -200,6 +264,27 @@ def ledger(conn) -> list[str]:
     assert hits["items"][0]["id"] == c1["id"], hits
     assert {e["id"] for e in hits["items"][0]["links"]} == {l1["id"], q1["id"]}
     assert hits["items"][0]["contradiction_ids"] == [k1["id"]] and hits["items"][0]["author"] == "Owner"
+    assert hits["items"][0]["author_model"] is None  # the author's profile has no model yet
+    # A vector from another model, even an identical or shorter one, is not ranked with these.
+    query = L.embed(["what causes histamine intolerance?"], query=True)[0]
+    conn.execute("""INSERT INTO embedding_index (event_id, model, dimensions, vector) VALUES
+                    (%s, 'other-model', %s, %s::vector),
+                    (%s, 'small-model', 2, '[1,0]')""",
+                 (c2["id"], L.EMBED_DIM, query, c1["id"]))
+    trapped = L.search_claims(conn, PK[BOB], "smoke", "what causes histamine intolerance?", "vector", 5)
+    assert trapped["items"][0]["id"] == c1["id"], trapped
+    assert next(i for i in trapped["items"] if i["id"] == c2["id"])["distance"] > 0
+    event_before = dict(conn.execute("SELECT content, sig FROM events WHERE id = %s", (c1["id"],)).fetchone())
+    conn.execute("UPDATE embedding_index SET vector = %s::vector WHERE event_id = %s AND model = %s",
+                 ("[" + ",".join(["0"] * L.EMBED_DIM) + "]", c1["id"], L.EMBED_MODEL))
+    assert L.rebuild_embeddings(conn, PK[BOB]) >= 1
+    fresh = L.embed([conn.execute("SELECT text FROM claims WHERE id = %s", (c1["id"],)).fetchone()["text"]])[0]
+    assert conn.execute("""SELECT vector <=> %s::vector AS d FROM embedding_index
+                           WHERE event_id = %s AND model = %s""",
+                        (fresh, c1["id"], L.EMBED_MODEL)).fetchone()["d"] == 0
+    assert conn.execute("SELECT count(*) AS n FROM embedding_index WHERE model = 'other-model'").fetchone()["n"] == 1
+    assert conn.execute("SELECT count(*) AS n FROM embedding_index WHERE model = 'small-model'").fetchone()["n"] == 1
+    assert dict(conn.execute("SELECT content, sig FROM events WHERE id = %s", (c1["id"],)).fetchone()) == event_before
     kw = L.search_claims(conn, PK[BOB], "smoke", "serum symptom", "keyword", 5)
     assert [h["id"] for h in kw["items"]] == [c2["id"]]
     assert [e["id"] for e in L.list_evidence(conn, PK[BOB], "smoke")] == [doc["id"]]
@@ -228,6 +313,17 @@ def ledger(conn) -> list[str]:
     assert L.list_evidence(conn, PK[OWNER], "other", offset=1) == [] and L.get_links(conn, PK[OWNER], "other", offset=5) == []
     acct = L.account(conn, PK[BOB])
     assert acct["allowed"] and acct["terms_signed"] and not acct["approved"] and acct["profile"]["name"] == "Bob"
+    assert acct["profile"]["model"] is None
+    described = "plain text, not an enum: 実験"
+    claim_before = dict(conn.execute("SELECT content, sig FROM events WHERE id = %s", (c1["id"],)).fetchone())
+    pub([sign(OWNER, E.PROFILE, {"name": "Owner", "about": "human", "model": described})])
+    again = L.search_claims(conn, PK[BOB], "smoke", "what causes histamine intolerance?", "vector", 5)
+    assert again["items"][0]["id"] == c1["id"] and again["items"][0]["author_model"] == described
+    assert conn.execute("""SELECT p.model FROM claims c JOIN profiles p ON p.pubkey = c.pubkey
+                           WHERE c.id = %s""", (c1["id"],)).fetchone()["model"] == described
+    assert dict(conn.execute("SELECT content, sig FROM events WHERE id = %s", (c1["id"],)).fetchone()) == claim_before
+    assert L.get_event(conn, PK[BOB], b1["id"])["author_model"] is None
+    rejects(lambda: pub([sign(OWNER, E.PROFILE, {"name": "Owner", "model": {"provider": "x"}})]), "'model'")
 
     # check_proof looks events up by ID and never reveals other collections.
     proof = {"question": "Does DAO deficiency cause HIT?", "steps": [

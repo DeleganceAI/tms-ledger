@@ -107,8 +107,11 @@ def browse(conn, pk: str, cols: list[str], kind: str, q: str, collection: str, m
     if method == "vector" and kind == "claim" and q:
         vec = L.embed([q], query=True, pubkey=pk, collection=collection or None, conn=conn)[0]
         items = _rows(conn, f"""SELECT {base}, {extra}, round((v.vector <=> %s::vector)::numeric, 3)::float8 AS distance
-            FROM claims x JOIN embeddings v ON v.event_id = x.id WHERE x.collection = ANY(%s)
-            ORDER BY v.vector <=> %s::vector, x.id LIMIT %s""", (vec, scope, vec, size))
+            FROM claims x JOIN embedding_index v ON v.event_id = x.id
+             AND v.model = %s AND v.dimensions = %s
+            WHERE x.collection = ANY(%s)
+            ORDER BY v.vector <=> %s::vector, x.id LIMIT %s""",
+            (vec, L.EMBED_MODEL, L.EMBED_DIM, scope, vec, size))
         return {"items": items, "more": False, "method": "vector"}
     where, params = ["x.collection = ANY(%s)"], [scope]
     if q:
@@ -134,8 +137,9 @@ def record(conn, cols: list[str], id: str) -> dict | None:
     data = json.loads(row["content"])
     raw = {k: row[k] for k in ("id", "pubkey", "created_at", "kind")} | {"tags": row["tags"], "content": row["content"], "sig": row["sig"]}
     rec = L._clean({k: row[k] for k in ("id", "pubkey", "collection", "created_at", "received_at")})
-    rec |= {"kind": E.NAMES[kind], "raw": raw, "author": conn.execute(
-        f"SELECT {WHO.format('e')} FROM events e WHERE e.id = %s", (id,)).fetchone()["author"]}
+    author = conn.execute(f"SELECT {WHO.format('e')} FROM events e WHERE e.id = %s", (id,)).fetchone()["author"]
+    author_model = (conn.execute("SELECT model FROM profiles WHERE pubkey = %s", (row["pubkey"],)).fetchone() or {}).get("model")
+    rec |= {"kind": E.NAMES[kind], "raw": raw, "author": author, "author_model": author_model}
     if len(row["content"]) > RAW_MAX:  # ponytail: drawer only; the export has every byte
         raw["content"], rec["raw_truncated"] = row["content"][:RAW_MAX], True
     if kind == E.EVIDENCE:
@@ -181,7 +185,7 @@ def agents(conn, pk: str, cols: list[str]) -> dict:
                         count(*) FILTER (WHERE kind = 4703) AS links, count(*) FILTER (WHERE kind = 4704) AS contradictions,
                         count(*) FILTER (WHERE kind = 4705) AS members
                  FROM ev GROUP BY pubkey)
-        SELECT k.pubkey AS id, pr.name, pr.about, pr.received_at AS profile_at,
+        SELECT k.pubkey AS id, pr.name, pr.about, pr.model, pr.received_at AS profile_at,
                coalesce(r.records, 0) AS records, r.last_record_at, coalesce(r.evidence, 0) AS evidence,
                coalesce(r.claims, 0) AS claims, coalesce(r.links, 0) AS links,
                coalesce(r.contradictions, 0) AS contradictions, coalesce(r.members, 0) AS members,
@@ -217,7 +221,7 @@ def npubs(conn, pk: str, cols: list[str]):
                 WHERE m.collection = ANY(%(scope)s) GROUP BY 1),
         rec AS (SELECT pubkey, count(*) AS records, max(received_at) AS last_at FROM events
                 WHERE collection = ANY(%(scope)s) AND kind BETWEEN 4701 AND 4704 GROUP BY 1)
-        SELECT k.pubkey, p.name, p.about, p.picture, p.received_at AS profile_at,
+        SELECT k.pubkey, p.name, p.about, p.model, p.picture, p.received_at AS profile_at,
                (k.pubkey = ANY(%(env)s::text[]) OR EXISTS (SELECT 1 FROM approvals a WHERE a.pubkey = k.pubkey)) AS approved,
                coalesce(mem.owns, '{}') AS owns, coalesce(mem.member_of, '{}') AS member_of,
                coalesce(rec.records, 0) AS records, rec.last_at
@@ -273,7 +277,8 @@ def collections(conn, pk: str, cols: list[str]) -> dict:
         SELECT c.slug, c.owner, coalesce((SELECT p.name FROM profiles p WHERE p.pubkey = c.owner), left(c.owner, 12)) AS owner_name,
                c.created_at, (SELECT count(*) FROM members m WHERE m.collection = c.slug) AS members,
                s.evidence, s.claims, s.links, s.contradictions, s.contributors, s.last_at, s.bytes,
-               (SELECT coalesce(sum(pg_column_size(v.vector)), 0) FROM embeddings v JOIN events e ON e.id = v.event_id
+               (SELECT coalesce(sum(pg_column_size(v.vector)), 0) FROM embedding_index v
+                 JOIN events e ON e.id = v.event_id
                  WHERE e.collection = c.slug) AS vector_bytes
         FROM collections c, LATERAL (
           SELECT count(*) FILTER (WHERE e.kind = 4701) AS evidence, count(*) FILTER (WHERE e.kind = 4702) AS claims,

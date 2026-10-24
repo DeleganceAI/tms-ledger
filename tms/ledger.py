@@ -130,21 +130,51 @@ def embed(texts: list[str], query: bool = False, pubkey: str | None = None,
     return out
 
 
-def embed_pending(conn, pubkey: str | None = None, limit: int = 64) -> int:
-    """Embed claims that have no vector yet (this batch's, plus any an earlier outage left),
-    one call per collection so embed_calls can attribute the cost."""
-    rows = conn.execute("""SELECT c.id, c.text, c.collection FROM claims c LEFT JOIN embeddings v ON v.event_id = c.id
-                           WHERE v.event_id IS NULL ORDER BY c.collection, c.received_at LIMIT %s""", (limit,)).fetchall()
+def _embedding_chunks(rows: list[dict], n: int = 32) -> list[list[dict]]:
+    """Groups of claims, split so one embeddings call stays inside one collection."""
     chunks: list[list[dict]] = []
     for r in rows:
-        if not chunks or len(chunks[-1]) == 32 or chunks[-1][0]["collection"] != r["collection"]:
+        if not chunks or len(chunks[-1]) == n or chunks[-1][0]["collection"] != r["collection"]:
             chunks.append([])
         chunks[-1].append(r)
-    for chunk in chunks:
-        vecs = embed([r["text"] for r in chunk], pubkey=pubkey, collection=chunk[0]["collection"], conn=conn)
-        conn.cursor().executemany(
-            "INSERT INTO embeddings (event_id, vector, model) VALUES (%s, %s::vector, %s) ON CONFLICT DO NOTHING",
-            [(r["id"], v, EMBED_MODEL) for r, v in zip(chunk, vecs)])
+    return chunks
+
+
+def _write_embeddings(conn, chunk: list[dict], pubkey: str | None) -> None:
+    """Store vectors for the configured model. The same model replaces its row; another model
+    is a different row. The claim event is not modified."""
+    vecs = embed([r["text"] for r in chunk], pubkey=pubkey, collection=chunk[0]["collection"], conn=conn)
+    conn.cursor().executemany(
+        """INSERT INTO embedding_index (event_id, model, dimensions, vector)
+           VALUES (%s, %s, %s, %s::vector)
+           ON CONFLICT (event_id, model) DO UPDATE
+           SET dimensions = EXCLUDED.dimensions, vector = EXCLUDED.vector, created_at = now()""",
+        [(r["id"], EMBED_MODEL, EMBED_DIM, v) for r, v in zip(chunk, vecs)])
+
+
+def embed_pending(conn, pubkey: str | None = None, limit: int = 64) -> int:
+    """Embed claims that have no vector for the configured model and dimensionality yet
+    (this batch's, plus any an earlier outage or model change left), one call per collection
+    so embed_calls can attribute the cost. Rows for other models are left alone."""
+    rows = conn.execute(
+        """SELECT c.id, c.text, c.collection FROM claims c
+           WHERE NOT EXISTS (
+               SELECT 1 FROM embedding_index v
+               WHERE v.event_id = c.id AND v.model = %s AND v.dimensions = %s)
+           ORDER BY c.collection, c.received_at LIMIT %s""",
+        (EMBED_MODEL, EMBED_DIM, limit)).fetchall()
+    for chunk in _embedding_chunks(rows):
+        _write_embeddings(conn, chunk, pubkey)
+    return len(rows)
+
+
+def rebuild_embeddings(conn, pubkey: str | None = None) -> int:
+    """Re-embed every claim for the configured model, replacing those index rows. Other models
+    stay. Events are not modified. Returns how many claims were embedded."""
+    rows = conn.execute(
+        "SELECT id, text, collection FROM claims ORDER BY collection, received_at").fetchall()
+    for chunk in _embedding_chunks(rows):
+        _write_embeddings(conn, chunk, pubkey)
     return len(rows)
 
 
@@ -374,7 +404,8 @@ def publish(conn, events: list) -> dict:
 
 # -------------------------------------------------------------------- reads
 
-AUTHOR = "(SELECT name FROM profiles p WHERE p.pubkey = x.pubkey) AS author"
+AUTHOR = """(SELECT name FROM profiles p WHERE p.pubkey = x.pubkey) AS author,
+            (SELECT model FROM profiles p WHERE p.pubkey = x.pubkey) AS author_model"""
 LINK_COLS = f"""x.id, x.pubkey, {AUTHOR}, x.from_id AS "from", x.to_id AS "to", x.relation, x.quote, x.reason,
                 x.received_at"""
 
@@ -427,8 +458,9 @@ def get_event(conn, pubkey: str, id: str, offset: int = 0, max_chars: int = 2000
     data = json.loads(row["content"])
     out = _clean({k: row[k] for k in ("id", "pubkey", "kind", "collection", "created_at", "received_at")})
     out["kind_name"] = E.NAMES[row["kind"]]
-    out["author"] = (conn.execute("SELECT name FROM profiles WHERE pubkey = %s", (row["pubkey"],)).fetchone()
-                     or {}).get("name")
+    profile = conn.execute("SELECT name, model FROM profiles WHERE pubkey = %s", (row["pubkey"],)).fetchone() or {}
+    out["author"] = profile.get("name")
+    out["author_model"] = profile.get("model")
     if row["kind"] == E.EVIDENCE:
         offset, text = max(0, int(offset)), data["text"]
         data["text"] = text[offset:offset + max(0, int(max_chars))]
@@ -461,10 +493,16 @@ def search_claims(conn, pubkey: str, collection: str, text: str, method: str = "
     require_member(conn, pubkey, collection)
     limit = _limit(limit)
     if method == "vector":
+        # model and dimensions together: a vector from another model is never ranked, even
+        # when it has the same length as the query.
+        vec = embed([text], query=True, pubkey=pubkey, collection=collection, conn=conn)[0]
         rows = conn.execute(
             f"""SELECT x.id, x.pubkey, {AUTHOR}, x.text, x.received_at, v.vector <=> %s::vector AS distance
-                FROM claims x JOIN embeddings v ON v.event_id = x.id WHERE x.collection = %s
-                ORDER BY distance, x.id LIMIT %s""", (embed([text], query=True, pubkey=pubkey, collection=collection, conn=conn)[0], collection, limit))
+                FROM claims x JOIN embedding_index v ON v.event_id = x.id
+                 AND v.model = %s AND v.dimensions = %s
+                WHERE x.collection = %s
+                ORDER BY distance, x.id LIMIT %s""",
+            (vec, EMBED_MODEL, EMBED_DIM, collection, limit))
     elif method == "keyword":
         rows = conn.execute(
             f"""SELECT x.id, x.pubkey, {AUTHOR}, x.text, x.received_at,

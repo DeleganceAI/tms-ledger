@@ -276,7 +276,7 @@ async def collection(request: Request) -> JSONResponse:
         L.require_member(conn, pubkey, slug)
         owner = conn.execute("SELECT owner FROM collections WHERE slug = %s", (slug,)).fetchone()["owner"]
         members = [L._clean(r) for r in conn.execute(
-            """SELECT m.pubkey, p.name, p.about FROM members m LEFT JOIN profiles p ON p.pubkey = m.pubkey
+            """SELECT m.pubkey, p.name, p.about, p.model FROM members m LEFT JOIN profiles p ON p.pubkey = m.pubkey
                WHERE m.collection = %s ORDER BY m.pubkey = %s DESC, p.name NULLS LAST, m.pubkey""", (slug, owner))]
         about = conn.execute("SELECT topic, public FROM collection_about WHERE collection = %s", (slug,)).fetchone()
         return owner, members, about
