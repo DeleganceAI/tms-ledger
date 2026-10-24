@@ -149,7 +149,8 @@ const short = pk => String(pk || '').slice(0, 12);
 const who = (author, pk) => `<span title="${esc(pk || '')}">${esc(author || short(pk))}</span>`;
 const seenRec = new Set(), seenCall = new Set(); let first = true, selected = null, colsKnown = '';
 async function api(path) {  // the cookie expired: back to the ledger home to log in again
-  const r = await fetch('/dashboard/api/' + path);
+  // A request that never settles would stall its polling loop, so give up after a minute.
+  const r = await fetch('/dashboard/api/' + path, {signal: AbortSignal.timeout(60000)});
   if (r.status === 401) { location.href = '/'; throw new Error('not logged in'); }
   return r.json();
 }
@@ -219,6 +220,16 @@ async function poll() {
     st.textContent = `live · ${new Date().toLocaleTimeString()}`; live.className = 'live'; }
   catch (e) { st.textContent = `unreachable: ${e.message}`; live.className = 'live err'; }
 }
+// Run fn every ms() after the previous run finishes, skipping hidden tabs, so a slow server
+// slows the page down instead of stacking requests. Returns a function that runs it now.
+function every(ms, fn) {
+  let timer, busy = false;
+  const tick = async () => {
+    clearTimeout(timer); if (busy) return; busy = true;
+    try { if (!document.hidden) await fn(); } finally { busy = false; timer = setTimeout(tick, ms()); }
+  };
+  timer = setTimeout(tick, ms()); return tick;
+}
 
 // ---- browse ---------------------------------------------------------------
 const segBar = (s, q, r, max, cls = '') => { const tot = s + q + r; if (!tot) return `<div class="seg empty ${cls}"></div>`;
@@ -264,6 +275,7 @@ function showTab(name) {
   document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x.dataset.tab === name));
   ['collections', 'activity', 'browse', 'agents', 'npubs', 'sources'].forEach(id => $(id).hidden = id !== name);
   if (name === 'collections') loadCollections();
+  if (name === 'activity') snapNow();
   if (name === 'browse' && !bshown) { bshown = true; browse(); }
   if (name === 'agents') loadAgents();
   if (name === 'npubs') loadNpubs();
@@ -354,7 +366,6 @@ async function loadSources() {
 }
 $('sq').oninput = e => { S.q = e.target.value; clearTimeout(stimer); stimer = setTimeout(loadSources, 250); };
 $('ssort').onchange = e => { S.sort = e.target.value; loadSources(); };
-setInterval(() => { if (activeTab === 'collections') loadCollections(); if (activeTab === 'agents') loadAgents(); if (activeTab === 'sources' && !S.q) loadSources(); }, 5000);
 
 // ---- drawer ---------------------------------------------------------------
 const hist = [];
@@ -404,7 +415,12 @@ document.addEventListener('click', e => {
   const card = e.target.closest('.card[data-col]'); if (card) { B.col = card.dataset.col; $('bcol').value = B.col; bshown = true; showTab('browse'); rebrowse(); }
 });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') hideDetail(); });
-showTab('collections'); poll(); setInterval(poll, 2000);
+// The snapshot is live (2 s) only on Activity; elsewhere it just feeds the header strip.
+const snapNow = every(() => activeTab === 'activity' ? 2000 : 30000, poll);
+const tabNow = every(() => 30000, () => activeTab === 'collections' ? loadCollections() : activeTab === 'agents' ? loadAgents()
+  : activeTab === 'sources' && !S.q ? loadSources() : null);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { snapNow(); tabNow(); } });
+showTab('collections'); snapNow();
 // /dashboard#record=<id> opens that record, for links from the chat on other pages.
 const deep = location.hash.match(/^#record=([0-9a-f]{64})$/); if (deep) showDetail(deep[1]);
 </script><script src="/chat.js" defer></script></body></html>

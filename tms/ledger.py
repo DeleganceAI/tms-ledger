@@ -18,6 +18,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+from contextlib import nullcontext
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
@@ -64,9 +65,15 @@ _pool: ConnectionPool | None = None
 _pool_lock = threading.Lock()
 
 
-def connect():
+# Telemetry waits this long for a pooled connection, then drops its row: a full pool must not
+# hold up the call being logged (the pool's own default wait is 30 s).
+TELEMETRY_WAIT = 2.0
+
+
+def connect(timeout: float | None = None):
     """A pooled connection (context manager). Autocommit; batches open their own transaction.
-    prepare_threshold=None because PgBouncer in transaction mode breaks prepared statements."""
+    prepare_threshold=None because PgBouncer in transaction mode breaks prepared statements.
+    timeout: seconds to wait for a free connection; None is the pool default."""
     global _pool
     with _pool_lock:
         if _pool is None:
@@ -74,7 +81,7 @@ def connect():
             _pool = ConnectionPool(DB_URL, min_size=1, max_size=10, open=True, check=ConnectionPool.check_connection, kwargs={
                 "autocommit": True, "row_factory": dict_row, "prepare_threshold": None})
             atexit.register(_pool.close)
-    return _pool.connection()
+    return _pool.connection(timeout=timeout)
 
 
 def _clean(row: dict | None) -> dict | None:
@@ -94,9 +101,12 @@ def _offset(n) -> int:
 # ---------------------------------------------------------------- embeddings
 
 def embed(texts: list[str], query: bool = False, pubkey: str | None = None,
-          collection: str | None = None) -> list[str]:
+          collection: str | None = None, conn=None) -> list[str]:
     """pgvector literals for each text. Queries get the Qwen3 instruct prefix. Each call is
-    logged in embed_calls with the tokens the endpoint reports; a local endpoint costs nothing."""
+    logged in embed_calls with the tokens the endpoint reports; a local endpoint costs nothing.
+    Pass the caller's conn when it holds one: a second checkout while holding the first can
+    starve a full pool. The embed_calls row then commits (or rolls back) with the caller's
+    transaction, if one is open."""
     r = httpx.post(f"{EMBED_URL}/embeddings", timeout=120,
                    headers={"Authorization": f"Bearer {EMBED_API_KEY}"} if EMBED_API_KEY else {},
                    json={"model": EMBED_MODEL, "input": [(QUERY_PREFIX + t) if query else t for t in texts],
@@ -106,10 +116,10 @@ def embed(texts: list[str], query: bool = False, pubkey: str | None = None,
     usage = body.get("usage") or {}
     tokens = int(usage.get("total_tokens") or usage.get("prompt_tokens") or 0)
     cost = 0.0 if _is_internal(urlparse(EMBED_URL).hostname or "") else tokens * EMBED_PRICE_PER_MTOK / 1e6
-    try:
-        with connect() as conn:
-            conn.execute("""INSERT INTO embed_calls (pubkey, collection, model, tokens, cost_usd)
-                            VALUES (%s, %s, %s, %s, %s)""", (pubkey, collection, EMBED_MODEL, tokens, cost))
+    try:  # in its own transaction, or a savepoint in the caller's, so a failed insert aborts nothing else
+        with nullcontext(conn) if conn is not None else connect(timeout=TELEMETRY_WAIT) as c, c.transaction():
+            c.execute("""INSERT INTO embed_calls (pubkey, collection, model, tokens, cost_usd)
+                         VALUES (%s, %s, %s, %s, %s)""", (pubkey, collection, EMBED_MODEL, tokens, cost))
     except Exception as err:  # telemetry never fails an embedding
         print(f"embed_calls logging failed: {err}", file=sys.stderr)
     out = []
@@ -131,7 +141,7 @@ def embed_pending(conn, pubkey: str | None = None, limit: int = 64) -> int:
             chunks.append([])
         chunks[-1].append(r)
     for chunk in chunks:
-        vecs = embed([r["text"] for r in chunk], pubkey=pubkey, collection=chunk[0]["collection"])
+        vecs = embed([r["text"] for r in chunk], pubkey=pubkey, collection=chunk[0]["collection"], conn=conn)
         conn.cursor().executemany(
             "INSERT INTO embeddings (event_id, vector, model) VALUES (%s, %s::vector, %s) ON CONFLICT DO NOTHING",
             [(r["id"], v, EMBED_MODEL) for r, v in zip(chunk, vecs)])
@@ -454,7 +464,7 @@ def search_claims(conn, pubkey: str, collection: str, text: str, method: str = "
         rows = conn.execute(
             f"""SELECT x.id, x.pubkey, {AUTHOR}, x.text, x.received_at, v.vector <=> %s::vector AS distance
                 FROM claims x JOIN embeddings v ON v.event_id = x.id WHERE x.collection = %s
-                ORDER BY distance, x.id LIMIT %s""", (embed([text], query=True, pubkey=pubkey, collection=collection)[0], collection, limit))
+                ORDER BY distance, x.id LIMIT %s""", (embed([text], query=True, pubkey=pubkey, collection=collection, conn=conn)[0], collection, limit))
     elif method == "keyword":
         rows = conn.execute(
             f"""SELECT x.id, x.pubkey, {AUTHOR}, x.text, x.received_at,
