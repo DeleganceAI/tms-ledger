@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 import re
+import tempfile
 import time
 from pathlib import Path
 
@@ -75,7 +76,27 @@ def rejects(fn, needle):
         raise AssertionError(f"accepted, expected rejection: {needle}")
 
 
+def no_db_on_event_loop(root: Path = Path(__file__).parent / "tms") -> None:
+    """Async handlers reach the pool only from a worker thread (web.db): a checkout on the event loop
+    waits up to 30 s when the pool is full, and every request, MCP included, waits with it.
+    ponytail: lexical, so it misses a sync helper that connects, called straight from an async def."""
+    import ast
+
+    def walk(path, node, in_async):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                walk(path, child, isinstance(child, ast.AsyncFunctionDef))
+                continue
+            f = getattr(child, "func", None)
+            assert not (in_async and getattr(f, "attr", getattr(f, "id", None)) == "connect"), \
+                f"{path}:{child.lineno}: connect() inside an async def; use web.db or run_in_threadpool"
+            walk(path, child, in_async)
+    for path in sorted(root.glob("*.py")):
+        walk(path, ast.parse(path.read_text()), False)
+
+
 def main() -> None:
+    no_db_on_event_loop()
     recreate()
     with L.connect() as conn:
         ids = ledger(conn)
@@ -330,6 +351,7 @@ def server(ids) -> None:
         r = client.post("/login", json=req(BOB, "login"))
         assert r.status_code == 200 and r.json()["pubkey"] == PK[BOB] and "httponly" in r.headers["set-cookie"].lower()
         assert client.post("/login", json=req(BOB, "list_collections")).status_code == 400
+        assert client.post("/login", content=b"not json").status_code == 400
 
         # Web pages: Bob is a member of smoke, not its owner; the owner manages members; export verifies.
         from tms import web as W
@@ -382,6 +404,14 @@ def server(ids) -> None:
         good = W.make_cookie(PK[OWNER])
         client.cookies.set(W.COOKIE, good[:-1] + ("1" if good.endswith("0") else "0"))
         assert client.get("/api/me").status_code == 401 and client.get("/c/smoke/export.jsonl").status_code == 401
+        client.cookies.set(W.COOKIE, W.make_cookie(PK[STRANGER]))  # logged in, but neither approved nor a member
+        assert client.get("/api/fetch?url=https://example.org/").status_code == 403
+        client.cookies.set(W.COOKIE, W.make_cookie(PK[BOB]))  # a member; tests allow local files, so no network
+        with tempfile.NamedTemporaryFile("w", suffix=".txt") as f:
+            f.write(DOC)
+            f.flush()
+            r = client.get("/api/fetch", params={"url": f.name})
+            assert r.status_code == 200 and r.json()["text"].startswith("Histamine intolerance"), r.text
         client.cookies.clear()
         assert client.get("/api/me").status_code == 401
         assert client.get("/admin").status_code == 404
