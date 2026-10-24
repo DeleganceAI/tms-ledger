@@ -8,7 +8,7 @@ A number-free epistemic ledger for humans and AI agents: signed evidence, claims
 - **Keep interpretation with readers.** Humans and AI agents decide what is believed or contested and whether a contradiction is open or resolved. The ledger neither stores nor derives those conclusions.
 - **Show the reasons.** Every link cites a grounding evidence document, quotes it verbatim, and gives a specific reason. Contradictions name at least two distinct claims and explain their incompatibility.
 - **Preserve history.** Records are append-only: corrections add records and evidence, never edit, delete, retire, or automatically replace earlier assertions.
-- **Keep provenance explicit.** Every record is a signed event: the author's key signed exactly these bytes. The server records when it received each one. Whether a key is a human or an agent is self-declared in its profile, not verified.
+- **Keep provenance explicit.** Every record is a signed event: the author's key signed exactly these bytes. The server records when it received each one. Whether a key is a human or an agent is self-declared in its profile, not verified. An optional profile field, `model`, is free text naming the AI service or model that key is, also self-declared and not checked against a list.
 
 The server enforces exactly two mechanical things beyond structure: a link's quote must occur in the evidence it cites, and a thinking proof may only cite records that exist. Neither is a judgement about what the records show.
 
@@ -17,7 +17,7 @@ The server enforces exactly two mechanical things beyond structure: a link's quo
 | Path | What |
 |---|---|
 | [EVENTS.md](EVENTS.md), [TERMS.md](TERMS.md) | Event kinds, acceptance rules, access; the one upload-rights clause users sign. |
-| [db/init.sql](db/init.sql) | `events` (the only signed table), views `evidence`, `claims`, `links`, `contradictions`, `contradiction_claims`, `profiles`, `members`; `collections`, `embeddings`, `auth_seen`, `mcp_calls`. Reference and quote triggers, append-only. |
+| [db/init.sql](db/init.sql) | `events` (the only signed table), views `evidence`, `claims`, `links`, `contradictions`, `contradiction_claims`, `profiles`, `members`; `collections`, `index_entries` (derived embeddings and later index kinds), `auth_seen`, `mcp_calls`. Reference and quote triggers, append-only on the ledger. |
 | [db/verify.sql](db/verify.sql) | Database-side guards on unsigned stand-in events. Rolls back. |
 | [tms/events.py](tms/events.py) | NIP-01 IDs, BIP-340 signing (`coincurve`), per-kind content rules, the `tms-sign` CLI. |
 | [tms/ledger.py](tms/ledger.py) | `publish(events)`, member-scoped reads, retrieval, fetch, embeddings, proof check, the connection pool. |
@@ -73,7 +73,7 @@ Environment:
 | `TMS_SECRET` | HMAC key for login cookies. Required over HTTP. |
 | `TMS_NSEC` | stdio only: your key; tool calls without a `request` are signed with it. |
 | `TMS_SERVER_NSEC` | The server's own key, which signs snapshot events and nothing else. |
-| `EMBED_URL`, `EMBED_MODEL`, `EMBED_API_KEY` | Default `http://localhost:11434/v1`, `qwen3-embedding:8b`. DeepInfra: `https://api.deepinfra.com/v1/openai`, `Qwen/Qwen3-Embedding-8B`. Must return 4096 dimensions. |
+| `EMBED_URL`, `EMBED_MODEL`, `EMBED_API_KEY` | Default `http://localhost:11434/v1`, `qwen3-embedding:8b`. DeepInfra: `https://api.deepinfra.com/v1/openai`, `Qwen/Qwen3-Embedding-8B`. Must return 4096 dimensions. Search compares only rows stored for this model and dimensionality. |
 | `RESEND_API_KEY`, `TMS_EMAIL_FROM`, `TMS_KEY_SECRET` | Email sign-in ([tms/email_login.py](tms/email_login.py)). Codes go out through Resend from `TMS_EMAIL_FROM` (default `TMS ledger <login@delegance.ai>`). `TMS_KEY_SECRET` encrypts the keys held for email accounts: **if it is lost, those keys are lost**, so back it up. Without both, email sign-in returns 503. `TMS_EMAIL_DEV=1` prints codes to the log instead of emailing them (local only). |
 | `CHAT_MODEL`, `CHAT_URL`, `CHAT_API_KEY` | The admin chat popup. Default `deepseek-ai/DeepSeek-V4.1-Flash` on `https://api.deepinfra.com/v1/openai`; the key defaults to `EMBED_API_KEY`. `CHAT_PRICE_IN_PER_MTOK` / `CHAT_PRICE_OUT_PER_MTOK` (0.20 / 0.60 USD) price it on `/admin`. |
 | `EMBED_PRICE_PER_MTOK` | USD per million embedding tokens for the spend shown on `/admin` (default 0.01). Local endpoints are logged at $0. |
@@ -125,7 +125,15 @@ Prompts: `briefing` (answer from one collection with a checked proof) and `claim
    psql "$DIRECT_URL" -c "CREATE EXTENSION IF NOT EXISTS vector" -v ON_ERROR_STOP=1 -f db/init.sql
    ```
 
-   Then grant the app's user access, if it isn't `doadmin`: `GRANT SELECT, INSERT ON ALL TABLES IN SCHEMA public TO tms; GRANT UPDATE, DELETE ON embeddings, auth_seen, mcp_calls TO tms; GRANT UPDATE ON access_requests TO tms; GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO tms;`
+   Then grant the app's user access, if it isn't `doadmin`: `GRANT SELECT, INSERT ON ALL TABLES IN SCHEMA public TO tms; GRANT UPDATE, DELETE ON index_entries, auth_seen, mcp_calls TO tms; GRANT UPDATE ON access_requests TO tms; GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO tms;`
+
+   **Existing database.** `db/init.sql` is for an empty database. A database that already has the `embeddings` table is upgraded with [db/migrate_index.sql](db/migrate_index.sql), which copies every vector into `index_entries` (recording the model and the vector's dimensions) and drops `embeddings` only after the copy matches. It does not modify `events`. Run it on the direct connection before the new app starts serving:
+
+   ```bash
+   psql "$DIRECT_URL" -v ON_ERROR_STOP=1 -f db/migrate_index.sql
+   ```
+
+   The file locks `embeddings` for the copy, so a publish in that window still stores its events and fills the vector on a later publish. Deploy this app immediately after. The migration grants `index_entries` to a role named `tms` when that role exists. It is safe to run twice. Changing `EMBED_MODEL` later leaves old vectors in place and does not compare them with the new model; delete that model's `index_entries` rows, or call `ledger.rebuild_embeddings`, to fill them again from claim text.
 2. Create a connection pool `tms-pool` in **transaction** mode on database `tms` (size around 10):
 
    ```bash

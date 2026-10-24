@@ -51,6 +51,8 @@ def main() -> None:
         (E.sign(SK, E.PROFILE, {"name": "n"}, tags=[["t", 1]]), "profile tags must be"),
         (E.sign(SK, E.PROFILE, {"name": "n"}, tags=[[]]), "profile tags must be"),
         (E.sign(SK, E.PROFILE, {"name": "n"}, tags=[["t", "a\x00"]]), "profile tags must be"),
+        (E.sign(SK, E.PROFILE, {"name": "n", "model": 1}), "'model'"),
+        (E.sign(SK, E.PROFILE, {"name": "n", "model": ["a list"]}), "'model'"),
         (E.sign(SK, E.CLAIM, {"collection": "smoke", "text": "x", "extra": 1}), "unknown fields"),
         (E.sign(SK, E.CLAIM, {"collection": "Bad Slug", "text": "x"}), "'collection'"),
         (E.sign(SK, E.CLAIM, {"collection": "smoke", "text": "  "}), "'text'"),
@@ -69,6 +71,11 @@ def main() -> None:
         else:
             raise AssertionError(f"accepted: {why}")
     assert E.verify(E.sign(SK, E.PROFILE, {"name": "n", "display_name": "extra fields allowed"}))
+    # model is optional free text, not an enum. A profile without it still verifies.
+    bare = E.verify(E.sign(SK, E.PROFILE, {"name": "n"}))
+    assert "model" not in bare
+    described = E.verify(E.sign(SK, E.PROFILE, {"name": "n", "model": "Any provider / any wording 実験"}))
+    assert described["model"] == "Any provider / any wording 実験"
 
     # NIP-19: the published test vector, and a round trip
     npub = "npub10elfcs4fr0l0r8af98jlmgdh9c8tcxjvz9qkw038js35mp4dma8qzvjptg"

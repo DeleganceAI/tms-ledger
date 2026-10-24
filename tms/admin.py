@@ -29,7 +29,7 @@ SPEND_SQL = """SELECT
 USERS_SQL = """WITH keys AS (
     SELECT unnest(%s::text[]) AS pubkey UNION SELECT pubkey FROM approvals UNION SELECT pubkey FROM admins
     UNION SELECT pubkey FROM members UNION SELECT pubkey FROM events)
-  SELECT k.pubkey, p.name, p.about,
+  SELECT k.pubkey, p.name, p.about, p.model,
          (SELECT count(*) FROM members m WHERE m.pubkey = k.pubkey) AS collections,
          (SELECT count(*) FROM collections c WHERE c.owner = k.pubkey) AS owned,
          (SELECT count(*) FROM events e WHERE e.pubkey = k.pubkey) AS events,
@@ -134,8 +134,9 @@ button.ghost{{background:none;color:var(--accent)}}form.add{{display:block;margi
 <h2>Spend by collection</h2>
 {_table(["Collection", "Calls", "Tokens", "Cost"], [[escape(x["collection"] or "—"), x["calls"], f"{x['tokens']:,}", _usd(x["cost"])] for x in r["by_collection"]])}
 <h2>Users ({r["pubkeys"]})</h2>
-{_table(["npub", "Name", "About", "Collections", "Owns", "Events", "Last activity"],
+{_table(["npub", "Name", "About", "Model", "Collections", "Owns", "Events", "Last activity"],
         [[f'<span class="mono">{escape(E.bech32_encode("npub", u["pubkey"]))}</span>', escape(u["name"] or "—"), escape(u["about"] or ""),
+          escape(u["model"] or ""),
           u["collections"], u["owned"], u["events"], when(u["last_activity"])] for u in r["users"]])}
 <h2>Context</h2>
 {_table(["Database size", "Pubkeys", "Collections"], [[f"{r['db_bytes'] / 1e6:,.1f} MB", r["pubkeys"], r["collections"]]])}

@@ -314,16 +314,17 @@ const kindTag = a => a.name == null ? '<span class="kindtag unreg">no profile</s
 async function loadAgents() {
   let d; try { d = await api('agents'); } catch (e) { $('atable').innerHTML = `<tr><td class="empty">${esc(e)}</td></tr>`; return; }
   $('anote').textContent = `${d.agents.length} · active ${d.agents.filter(a => a.last_call && Date.now() - new Date(a.last_call) < 300000).length} in last 5m`;
-  const th = '<tr><th>key</th><th>name</th><th>about</th><th>last seen</th><th>last hour</th><th class="n">calls</th><th class="n">writes</th><th class="n">reads</th><th class="n">errors</th><th class="n">avg</th>' +
+  const th = '<tr><th>key</th><th>name</th><th>about</th><th>model</th><th>last seen</th><th>last hour</th><th class="n">calls</th><th class="n">writes</th><th class="n">reads</th><th class="n">errors</th><th class="n">avg</th>' +
     '<th class="n">evidence</th><th class="n">claims</th><th class="n">links</th><th class="n">contra.</th><th class="n">members</th></tr>';
   $('atable').innerHTML = th + (d.agents.length ? d.agents.map(a => {
     const last = a.last_call && a.last_record_at ? (new Date(a.last_call) > new Date(a.last_record_at) ? a.last_call : a.last_record_at) : (a.last_call || a.last_record_at);
     return `<tr><td class="k" title="${esc(a.id)}">${esc(short(a.id))}</td><td class="a" style="max-width:220px" title="${esc(a.name || '')}">${esc(a.name || '')}</td><td>${kindTag(a)}</td>` +
+      `<td class="s" style="max-width:220px" title="${esc(a.model || '')}">${esc(a.model || '')}</td>` +
       `<td class="t" title="${esc(last || '')}">${last ? ago(last) + ' ago' : '—'}</td><td class="sp">${spark(d.per_min[a.id])}</td>` +
       `<td class="n">${esc(a.calls)}</td><td class="n">${esc(a.writes)}</td><td class="n">${esc(a.reads)}</td>` +
       `<td class="n" style="color:${a.errors ? 'var(--bad)' : 'var(--ink3)'}">${esc(a.errors)}</td><td class="n" style="color:var(--ink3)">${a.avg_ms != null ? esc(a.avg_ms) + 'ms' : '—'}</td>` +
       `<td class="n">${esc(a.evidence)}</td><td class="n">${esc(a.claims)}</td><td class="n">${esc(a.links)}</td><td class="n">${esc(a.contradictions)}</td><td class="n">${esc(a.members)}</td></tr>`; }).join('')
-    : '<tr><td class="empty" colspan="15">no keys yet</td></tr>');
+    : '<tr><td class="empty" colspan="16">no keys yet</td></tr>');
 }
 
 // ---- npubs (admins and collection owners) ---------------------------------
@@ -333,14 +334,15 @@ async function loadNpubs() {
   const d = await r.json();
   if (!r.ok) { $('ntable').innerHTML = `<tr><td class="empty">${esc(d.error)}</td></tr>`; return d; }
   $('nnote').textContent = `${d.npubs.length} keys · ${d.admin ? 'every collection' : 'memberships in your collections only'} · ★ owner`;
-  const th = '<tr><th>npub</th><th>name</th><th>about</th><th>approved</th><th>collections</th><th class="n">records</th><th>last active</th></tr>';
+  const th = '<tr><th>npub</th><th>name</th><th>about</th><th>model</th><th>approved</th><th>collections</th><th class="n">records</th><th>last active</th></tr>';
   $('ntable').innerHTML = th + (d.npubs.length ? d.npubs.map(n =>
     `<tr><td class="k" title="${esc(n.npub)} (click to copy)" style="cursor:copy" onclick="navigator.clipboard.writeText('${esc(n.npub)}')">${esc(n.npub.slice(0, 16))}…</td>` +
     `<td class="a" style="max-width:200px">${esc(n.name || '')}${n.name == null ? '<span class="kindtag unreg">no profile</span>' : ''}</td>` +
     `<td class="s" style="max-width:360px" title="${esc(n.about || '')}">${esc((n.about || '').slice(0, 140))}</td>` +
+    `<td class="s" style="max-width:220px" title="${esc(n.model || '')}">${esc(n.model || '')}</td>` +
     `<td>${n.approved ? '✓' : ''}</td><td>${slugs(n.owns, true)} ${slugs(n.member_of)}</td>` +
     `<td class="n">${esc(n.records)}</td><td class="t" title="${esc(n.last_at || '')}">${n.last_at ? ago(n.last_at) + ' ago' : '—'}</td></tr>`).join('')
-    : '<tr><td class="empty" colspan="7">no keys yet</td></tr>');
+    : '<tr><td class="empty" colspan="8">no keys yet</td></tr>');
   return d;
 }
 fetch('/dashboard/api/npubs').then(r => { if (r.ok) document.querySelector('[data-tab="npubs"]').hidden = false; }).catch(() => {});
@@ -382,7 +384,7 @@ function renderRecord(r) {
   if (kind === 'link') h += `<p class="big q">“${esc(c.quote)}”</p>${kv('reason', esc(c.reason))}${kv('relation', `<b>${esc(c.relation)}</b> ${esc(r.target ? r.target.kind : '')} ${link(c.to)}`)}${kv('grounded in', link(c.from))}`;
   if (kind === 'evidence') h += `<p class="big">${esc(c.title || '(untitled)')}</p>${kv('url', c.url ? `<a class="ext" href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.url)}</a>` : '')}${kv('source', esc(c.source))}${kv('chars', esc(r.chars))}`;
   if (kind === 'members') h += `<p class="big">${esc((c.members || []).length)} members</p>` + (c.members || []).map(m => `<div class="li muted">${esc(m)}</div>`).join('');
-  h += kv('id', `<span class="muted">${esc(r.id)}</span>`) + kv('author', `${esc(r.author)} <span class="muted">${esc(r.pubkey)}</span>`) + kv('collection', esc(r.collection))
+  h += kv('id', `<span class="muted">${esc(r.id)}</span>`) + kv('author', `${esc(r.author)} <span class="muted">${esc(r.pubkey)}</span>`) + kv('model', esc(r.author_model)) + kv('collection', esc(r.collection))
     + kv('created', unix(r.created_at) + ' <span class="muted">(signer-claimed)</span>') + kv('received', `${esc(r.received_at)} <span class="muted">· ${ago(r.received_at)} ago</span>`);
   if (kind === 'link' && r.target) h += `<h3>Target</h3><div class="li">${link(r.target.id)} <span class="tag">${esc(r.target.kind)}</span> ${esc(r.target.summary || '')}</div>`;
   if (kind === 'link' && r.evidence) h += `<h3>Evidence</h3><div class="li">${link(r.evidence.id)} ${esc(r.evidence.title || r.evidence.url || r.evidence.source || '')} <span class="muted">· ${esc(r.evidence.chars)} chars</span></div>`;

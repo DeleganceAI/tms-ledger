@@ -4,8 +4,9 @@
 -- `events` is the only table holding anything signed. The typed tables are views over it.
 -- The server checks signatures and access (tms/ledger.py); the database enforces what it
 -- can see on its own: shapes, references inside one collection, link quotes, append-only.
--- Full Qwen/Qwen3-Embedding-8B vectors use exact cosine retrieval (<=>); 4096 dimensions
--- exceed the HNSW index limits.
+-- Embeddings are not stored on events. They live in index_entries, a derived index that
+-- can be dropped and rebuilt from claim text. Exact cosine (<=>); 4096 dimensions exceed
+-- the HNSW index limits, and vectors from different models are never compared.
 
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS vector;
@@ -61,10 +62,12 @@ CREATE VIEW contradiction_claims AS
     WHERE e.kind = 4704;
 
 -- Latest profile per pubkey; every version stays in events.
+-- model is an optional free-text description of the AI service or model this key is.
+-- It is omitted on human keys and on older profiles; nothing checks the wording.
 CREATE VIEW profiles AS
     SELECT DISTINCT ON (pubkey) pubkey, id, received_at,
            content::jsonb ->> 'name' AS name, content::jsonb ->> 'about' AS about,
-           content::jsonb ->> 'picture' AS picture
+           content::jsonb ->> 'picture' AS picture, content::jsonb ->> 'model' AS model
     FROM events WHERE kind = 0 ORDER BY pubkey, received_at DESC, id;
 
 -- Current membership: the owner, plus the latest owner-signed members list.
@@ -174,12 +177,29 @@ CREATE INDEX events_contradiction_claims_idx ON events USING gin ((content::json
 CREATE INDEX events_text_idx ON events USING gin (to_tsvector('simple', content::jsonb ->> 'text'))
     WHERE kind IN (4701, 4702);
 
--- Derived, unsigned, and allowed to change: the server embeds claim text after accepting it.
-CREATE TABLE embeddings (
-    event_id text PRIMARY KEY REFERENCES events(id),
-    vector   vector(4096) NOT NULL,
-    model    text NOT NULL
+-- Derived index layer over ledger events. Not source of truth, not signed, and allowed to
+-- change or be deleted: drop the rows and rebuild them from events. Core tables stay free of
+-- index payloads, so a new kind (full text, another embedding) is another row here, or a
+-- sibling table, and never a column on events.
+-- kind 'embedding': model is the model that produced the vector, dimensions must match it.
+-- One row per (event, kind, model). A different model is a new row. Re-embedding the same
+-- model replaces the row. Search must filter kind, model and dimensions together: vectors
+-- from different models are not comparable, even when the lengths match.
+CREATE TABLE index_entries (
+    id          bigserial PRIMARY KEY,
+    event_id    text NOT NULL REFERENCES events(id),
+    kind        text NOT NULL CHECK (kind ~ '^[a-z][a-z0-9_-]*$'),
+    model       text NOT NULL CHECK (model <> ''),
+    dimensions  integer,
+    vector      vector,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT index_entries_one_per_model UNIQUE (event_id, kind, model),
+    CONSTRAINT index_entries_embedding CHECK (
+        kind <> 'embedding' OR (
+            vector IS NOT NULL AND dimensions IS NOT NULL AND dimensions > 0
+            AND dimensions = vector_dims(vector)))
 );
+CREATE INDEX index_entries_lookup_idx ON index_entries (kind, model, dimensions, event_id);
 
 -- Operational tables, not ledger data.
 -- Request IDs seen in the last two minutes: replay protection for signed tool calls.
