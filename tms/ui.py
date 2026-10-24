@@ -2,7 +2,8 @@
 
 Read-only. Every query is scoped to the viewer's collections (EVENTS.md section 3), mcp_calls
 included: a call row is visible when one of its collections is the viewer's, and a call with no
-collection only to the key that made it. The page polls every two seconds.
+collection only to the key that made it. The page polls every two seconds on the Activity tab
+and every thirty elsewhere, one request at a time, and not at all while the browser tab is hidden.
 """
 from __future__ import annotations
 
@@ -104,7 +105,7 @@ def browse(conn, pk: str, cols: list[str], kind: str, q: str, collection: str, m
     view, extra, searchable = BROWSE[kind]
     base = f"x.id, x.collection, x.pubkey, {WHO.format('x')}, x.received_at"
     if method == "vector" and kind == "claim" and q:
-        vec = L.embed([q], query=True, pubkey=pk, collection=collection or None)[0]
+        vec = L.embed([q], query=True, pubkey=pk, collection=collection or None, conn=conn)[0]
         items = _rows(conn, f"""SELECT {base}, {extra}, round((v.vector <=> %s::vector)::numeric, 3)::float8 AS distance
             FROM claims x JOIN embeddings v ON v.event_id = x.id WHERE x.collection = ANY(%s)
             ORDER BY v.vector <=> %s::vector, x.id LIMIT %s""", (vec, scope, vec, size))
@@ -265,18 +266,21 @@ def sources(conn, cols: list[str], q: str = "", sort: str = "evidence", limit: i
 
 def collections(conn, pk: str, cols: list[str]) -> dict:
     """The landing page: each of the viewer's collections with what it holds, who wrote it and what it weighs."""
-    # ponytail: bytes are row data as stored (compressed, no indexes), summed per collection; no global DB figures
+    # ponytail: bytes are row data as stored (compressed, no indexes), summed per collection; no global DB figures.
+    # Sized column by column: a whole-row pg_column_size(e.*) fetches every out-of-line (TOAST) document
+    # and vector to build the row. Leaves out the tuple header and fixed-width columns, ~40 bytes a row.
     rows = _rows(conn, """
         SELECT c.slug, c.owner, coalesce((SELECT p.name FROM profiles p WHERE p.pubkey = c.owner), left(c.owner, 12)) AS owner_name,
                c.created_at, (SELECT count(*) FROM members m WHERE m.collection = c.slug) AS members,
                s.evidence, s.claims, s.links, s.contradictions, s.contributors, s.last_at, s.bytes,
-               (SELECT coalesce(sum(pg_column_size(v.*)), 0) FROM embeddings v JOIN events e ON e.id = v.event_id
+               (SELECT coalesce(sum(pg_column_size(v.vector)), 0) FROM embeddings v JOIN events e ON e.id = v.event_id
                  WHERE e.collection = c.slug) AS vector_bytes
         FROM collections c, LATERAL (
           SELECT count(*) FILTER (WHERE e.kind = 4701) AS evidence, count(*) FILTER (WHERE e.kind = 4702) AS claims,
                  count(*) FILTER (WHERE e.kind = 4703) AS links, count(*) FILTER (WHERE e.kind = 4704) AS contradictions,
                  count(DISTINCT e.pubkey) AS contributors, max(e.received_at) AS last_at,
-                 coalesce(sum(pg_column_size(e.*)), 0) AS bytes
+                 coalesce(sum(pg_column_size(e.id) + pg_column_size(e.pubkey) + pg_column_size(e.sig)
+                              + pg_column_size(e.tags) + pg_column_size(e.content) + pg_column_size(e.collection)), 0) AS bytes
           FROM events e WHERE e.collection = c.slug) s
         WHERE c.slug = ANY(%s) ORDER BY c.created_at, c.slug""", (cols,))
     return {"collections": rows, "can_create": L.is_approved(conn, pk)}

@@ -37,7 +37,7 @@ In one 2019 trial, DAO supplementation reduced symptom scores in adults with low
 REAL_EMBED = L.embed
 
 
-def fake_embed(texts, query=False, pubkey=None, collection=None):
+def fake_embed(texts, query=False, pubkey=None, collection=None, conn=None):
     out = []
     for t in texts:
         v = [0.0] * L.EMBED_DIM
@@ -253,12 +253,15 @@ def embed_calls() -> None:
         assert len(REAL_EMBED(["a claim"], pubkey=PK[BOB], collection="smoke")) == 1
         L.EMBED_URL = "http://localhost:11434/v1"
         REAL_EMBED(["a query"], query=True, pubkey=PK[OWNER], collection="smoke")
+        with L.connect() as conn, conn.transaction():  # logged on the caller's connection, inside its transaction
+            REAL_EMBED(["another"], pubkey=PK[BOB], collection="smoke", conn=conn)
     finally:
         L.httpx.post, L.EMBED_URL = post, url
     with L.connect() as conn:
         rows = conn.execute("SELECT pubkey, collection, model, tokens, cost_usd FROM embed_calls ORDER BY id").fetchall()
     assert [(r["pubkey"], r["collection"], r["tokens"], float(r["cost_usd"])) for r in rows] == [
-        (PK[BOB], "smoke", 1_000_000, L.EMBED_PRICE_PER_MTOK), (PK[OWNER], "smoke", 1_000_000, 0.0)], rows
+        (PK[BOB], "smoke", 1_000_000, L.EMBED_PRICE_PER_MTOK), (PK[OWNER], "smoke", 1_000_000, 0.0),
+        (PK[BOB], "smoke", 1_000_000, 0.0)], rows
 
 
 def server(ids) -> None:

@@ -19,6 +19,8 @@ import time
 from contextvars import ContextVar
 from typing import Any
 
+import anyio
+import anyio.to_thread
 import httpx
 import psycopg
 from mcp.server.mcpserver import MCPServer
@@ -48,6 +50,9 @@ Full guide, with signing examples in Python and JS: GET /docs.md (or /docs) on t
 """
 
 _who: ContextVar[dict | None] = ContextVar("who", default=None)  # the verified caller, for mcp_calls
+# Telemetry's own worker threads, so a finished call never queues for one behind the tools and
+# sync routes that share anyio's default 40. ponytail: 4, raise it if rows drop under normal load.
+_LOG_THREADS = anyio.CapacityLimiter(4)
 
 
 async def _log_calls(ctx, call_next):
@@ -70,10 +75,16 @@ async def _log_calls(ctx, call_next):
     finally:
         params = ctx.params or {}
         tool = params.get("name") if ctx.method == "tools/call" else None
+        ms = int((time.monotonic() - started) * 1000)
+
+        def log():
+            with L.connect(timeout=L.TELEMETRY_WAIT) as conn:
+                L.log_call(conn, ctx.method, tool, who.get("pubkey"), who.get("collection"), ok, error, ms)
+        # In a worker thread, so a busy pool never blocks the event loop; shielded, so a
+        # cancelled call is still logged.
         try:
-            with L.connect() as conn:
-                L.log_call(conn, ctx.method, tool, who.get("pubkey"), who.get("collection"), ok, error,
-                           int((time.monotonic() - started) * 1000))
+            with anyio.CancelScope(shield=True):
+                await anyio.to_thread.run_sync(log, limiter=_LOG_THREADS)
         except Exception as err:
             print(f"mcp_calls logging failed: {err}", file=sys.stderr)
 
