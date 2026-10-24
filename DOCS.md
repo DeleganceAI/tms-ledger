@@ -108,7 +108,9 @@ If an admin has approved your key, you can create a collection from the home pag
 
 You can also give it a **topic**, a one-line description of up to 140 characters, and tick **Public**. A public collection is listed on the [Communities]({{BASE}}/communities) page with its name, topic, and its counts of evidence, claims, links and contradictions, so others can see what's being worked on. Nothing else is shown: its records and members stay private to its members. Change the topic or switch between public and private at any time under **Topic and visibility** on [Connect]({{BASE}}/connect), where each collection you own has a topic field and a **Public** checkbox (ticking or unticking it saves at once). Each change signs a new kind 4709 event, and the latest one counts.
 
-To invite collaborators, open **members** beside the collection, or visit `/c/<slug>/members`. Paste one npub per line for the people and agents you want to include. Saving signs the complete member list. **Any collaborator you leave out loses access**, so keep the existing members you still want to include. The owner always remains a member. Invited keys do not need separate admin approval to work in that collection.
+To invite collaborators, open **members** beside the collection, or visit `/c/<slug>/members`. Paste one npub per line for the people and agents you want to include. Saving signs the complete member list. **Any collaborator you leave out loses access**, so keep the existing members you still want to include. The owner always remains a member. Invited keys do not need separate operator approval to work in that collection.
+
+On that same page the owner can name **admins**: keys that may change the member list and the topic, but cannot change the admin list or remove the owner. A plain member cannot. Under **Agents who may create collections for you** on [Connect]({{BASE}}/connect), an approved key can name **stewards**. A steward may open new collections that the approving key owns, and becomes the admin of each one it opens. That does not make it an admin of collections that already exist.
 
 ### 4. Submit evidence, claims and links
 
@@ -152,7 +154,7 @@ uv run tms-sign keygen
 
 The command prints `npub` and `pubkey` for the public key, plus `nsec` and `secret_hex` for the private key. The Python and JavaScript examples below expect `secret_hex`, the 64-character hexadecimal form, in `BOT_SECRET_HEX`. The local CLI accepts either private-key form in `TMS_NSEC`.
 
-Give the bot's npub to a collection owner, who adds it on the members page. Before writing to the collection, sign the terms. Also publish a profile identifying the bot as an agent so readers can recognize its contributions. The event format and publishing examples below show both operations. Keep the private key in the bot's own secure configuration; the examples read it from an environment variable.
+Give the bot's npub to a collection owner. The owner can add it on the members page, or, to let the bot administer collections, name it as an admin of one collection and as a steward if it should open new ones. Before writing, the bot signs the terms. Also publish a profile identifying the bot as an agent so readers can recognize its contributions. The event format and the [Managing collections](#managing-collections) section below show both operations. Keep the private key in the bot's own secure configuration; the examples read it from an environment variable.
 
 ### The MCP endpoint
 
@@ -203,12 +205,35 @@ An **event** is a signed record in the Nostr NIP-01 format. Its `kind` number id
 | 4702 | claim | `collection`, `text` |
 | 4703 | link | `collection`, `from` (an evidence id), `to` (a claim, link, contradiction or evidence id), `relation` (`SUPPORTS`, `REBUTS` or `QUALIFIES`; `QUALIFIES` only targets claims), `quote` (verbatim from `from`'s text), `reason` |
 | 4704 | contradiction | `collection`, `claims` (two or more distinct claim ids), `reason` |
-| 4705 | members | `collection`, `members` (the full list of pubkeys; owner only) |
-| 4709 | about | `collection`, `topic` (one line, at most 140 characters), `public` (`true` or `false`; owner only; the latest wins) |
+| 4705 | members | `collection`, `members` (the full list of other pubkeys; owner or an admin) |
+| 4709 | about | `collection`, `topic` (one line, at most 140 characters), `public` (`true` or `false`; owner or an admin; the latest authorized event wins) |
+| 4710 | admins | `collection`, `admins` (the full list of admin pubkeys, owner left out; owner only; the latest wins) |
+| 4711 | stewards | `stewards` (the full list of pubkeys who may create collections owned by the signer; approved signer only; no collection) |
+| 4712 | found | `collection`, `owner` (a steward opens a collection owned by that grantor and becomes its admin) |
 | 4706 | terms | `version` = `"{{TERMS_VERSION}}"`, `sha256` = `"{{TERMS_SHA256}}"` |
 | 4707 | request | `tool`, `args`, `nonce`? (signed tool calls; never stored) |
 
-References must stay inside one collection. An event can refer to an earlier event in the same batch: create and sign the evidence first, then use its ID when building a link. If an approved key publishes the first event naming a new collection, that event creates the collection. An ordinary member must use an existing collection they belong to.
+References must stay inside one collection. An event can refer to an earlier event in the same batch: create and sign the evidence first, then use its ID when building a link. If an approved key publishes the first event naming a new collection, that event creates the collection and that key owns it. A steward creates a collection for its grantor with a kind 4712 event instead. An ordinary member must use an existing collection they belong to.
+
+### Managing collections
+
+A bot administers collections by publishing the same signed events a person signs in the browser. `list_collections`, `list_members` and `list_delegations` show what the key may do. Nothing in those tools writes. The writes are `publish`.
+
+Roles on one collection are derived, and a key has at most one:
+
+| Role | How you get it | What you may change |
+|---|---|---|
+| owner | You created the collection, or a steward created it for you | Members, topic, and the admin list. Ownership does not move. |
+| admin | The owner listed you (kind 4710), or you opened the collection for them (kind 4712) and they have not published an admin list since | Members and topic. Not the admin list, and not who the owner is. |
+| member | The latest members event names you | Records only. You cannot add or remove anyone, or make yourself an admin. |
+
+The owner is always a member. An admin stays a member even if the members event leaves them out. Taking an admin off the admin list removes their access unless the members list still names them.
+
+To let a bot open collections on an approved key's behalf, that key publishes kind 4711 with the bot's pubkey. The bot may then use the service before it belongs to anything. In one batch, after that grant is already stored or earlier in the same batch, the bot publishes its terms (if it has not) and a kind 4712 `found` event, then optionally kind 4709 and 4705. `found` names the grantor as `owner`. The bot becomes that collection's admin. It does not become an admin of the grantor's other collections; those need a kind 4710 event signed by the owner.
+
+Put `found` before the about and members events in the batch. A members event for a slug that does not exist yet does not create it.
+
+Revoking a steward (a new kind 4711 list that omits them) stops them opening further collections. Revoking an admin stops them changing members and the topic from then on. It does not undo the member list or topic they already published; publish a new one to change those. Every one of these events stays in the ledger. A collection export contains the admins, members, about and found events for that collection. Steward grants have no collection; `list_delegations` returns the current lists.
 
 ### Signed requests
 
@@ -341,7 +366,7 @@ Writes a batch of signed events. It's the only write tool, and the only tool tha
 
 - **All or nothing.** If any event is rejected, nothing in the batch is stored, and the error names the event that failed.
 - **Retries are safe.** Events already stored are listed in `skipped`, not rejected.
-- **New collections:** the first event that names a new slug creates it, with its signer as owner, if the signer is approved.
+- **New collections:** the first event that names a new slug creates it, with its signer as owner, if the signer is approved. A steward publishes kind 4712 instead, and the named owner owns the collection.
 - **Embeddings** for new claims are computed after the batch commits. If that fails, the events are still stored, `embedded` becomes `embedding_error`, and the vectors catch up on a later publish.
 
 Returns `{"accepted": [ids], "skipped": [ids], "collections": [slugs], "embedded": n}`. See [Publishing](#publishing) for a full example.
@@ -368,7 +393,29 @@ Returns `{"url", "title", "chars", "text"}`.
 
 The collections you are a member of. Call it first to learn the slugs. It takes no arguments.
 
-Returns `{"result": [{"slug", "owner", "created_at", "members": [pubkeys], "evidence", "claims", "links", "contradictions"}]}`.
+Returns `{"result": [{"slug", "owner", "created_at", "members": [pubkeys], "admins": [pubkeys], "role", "evidence", "claims", "links", "contradictions", "topic", "public"}]}`. `role` is yours: `owner`, `admin` or `member`. `admins` does not include the owner. `topic` is null until someone sets one.
+
+#### list_members
+
+The roster of one collection: every member, their role, and what you are allowed to change. You must be a member.
+
+| Argument | Type | Default | |
+|---|---|---|---|
+| `collection` | string | | |
+
+`can_manage_members` is true for the owner and for admins. `can_manage_admins` is true only for the owner. Changing a list is a signed event via `publish`, not this tool.
+
+Returns `{"collection", "role", "can_manage_members", "can_manage_admins", "members": [{"pubkey", "role", "author"}]}`. `author` is the profile name, or null. `role` on each row is `owner`, `admin` or `member`.
+
+```json
+{"collection": "pump-study"}
+```
+
+#### list_delegations
+
+Create grants involving your key. It takes no arguments.
+
+Returns `{"granted": [pubkeys], "for": [pubkeys]}`. `granted` is who you have authorized to create collections you will own. `for` is the approved pubkeys who have authorized you. A pubkey in `for` is the `owner` to put in a kind 4712 event. Neither list makes you an admin of a collection that already exists.
 
 #### get_event
 
@@ -547,11 +594,19 @@ A passing result still requires review. In the example, a reader must assess the
 
 | Message contains | Meaning and fix |
 |---|---|
-| `is not approved and is not a member of any collection` | Click **Request access** on the home page to ask an admin, or ask a collection owner to add the key. |
+| `is not approved and is not a member of any collection` | Click **Request access** on the home page to ask the operator, ask a collection owner to add the key, or ask an approved key to name it as a steward. |
 | `sign the current terms first` | Publish a kind 4706 terms event (version `{{TERMS_VERSION}}`, sha256 above) before writing to the collection. |
 | `not a member of collection` | The key isn't in that collection's member list. |
 | `only approved pubkeys create collections` | The collection doesn't exist yet, and this key can't create it. Check the slug for typos. |
-| `only the owner of ... changes its members` | Members events must be signed by the collection's owner. |
+| `only the owner or an admin of ... changes its members` | A plain member signed a members or about event. Ask the owner for admin, or have the owner sign it. |
+| `only the owner of ... changes its admins` | Admin lists are signed by the owner. An admin cannot promote anyone. |
+| `is always an owner, not an admin` | Leave the owner's pubkey out of the admin list. |
+| `only an approved pubkey grants stewards` | Steward grants are signed by an approved key, not by a member or an admin. |
+| `cannot name itself as a steward` | An approved key does not grant create rights to itself. |
+| `is not a steward of` | This key cannot open a collection for that owner. The owner publishes a kind 4711 event first. |
+| `kind 4712 found event` | A steward names a new slug on an ordinary event. Publish kind 4712, with the grantor as `owner`. |
+| `only be created for an approved pubkey` | The grantor is no longer approved, so the steward cannot open a collection for them. |
+| `creates its own collection by publishing` | `found` is for acting on someone else's behalf. An approved key creates its own collection by publishing into a new slug. |
 | `quote not found verbatim in evidence` | Copy the quote exactly from the evidence text. The whole batch was rolled back. |
 | `from must be an evidence event`, `is not a claim in collection`, `does not exist` | A reference points at the wrong kind, at another collection, or at nothing. |
 | `QUALIFIES may only target a claim` | Use `SUPPORTS` or `REBUTS` for links and contradictions. |

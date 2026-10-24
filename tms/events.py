@@ -25,6 +25,9 @@ RELATIONS = ("SUPPORTS", "REBUTS", "QUALIFIES")
 
 PROFILE, EVIDENCE, CLAIM, LINK, CONTRADICTION, MEMBERS, TERMS, REQUEST, SNAPSHOT, ABOUT = (
     0, 4701, 4702, 4703, 4704, 4705, 4706, 4707, 4708, 4709)
+# 4710 admins: per-collection managers. 4711 stewards: account-level create grant.
+# 4712 found: a steward opens a collection owned by the grantor.
+ADMINS, STEWARDS, FOUND = 4710, 4711, 4712
 TOPIC_MAX = 140  # characters in a collection's public topic line
 
 
@@ -58,6 +61,10 @@ def _pubkeys(v):
     return isinstance(v, list) and all(map(_id, v))
 
 
+def _distinct_pubkeys(v):  # admin and steward lists: no duplicates, so a role can't be listed twice
+    return _pubkeys(v) and len(set(v)) == len(v)
+
+
 def _relation(v):
     return v in RELATIONS
 
@@ -89,6 +96,12 @@ KINDS = {
                     "quote": _text, "reason": _text}, {}),
     CONTRADICTION: ("contradiction", {"collection": _slug, "claims": _ids, "reason": _text}, {}),
     MEMBERS: ("members", {"collection": _slug, "members": _pubkeys}, {}),
+    # owner only, latest wins: who may change members and about. The owner is never in this list.
+    ADMINS: ("admins", {"collection": _slug, "admins": _distinct_pubkeys}, {}),
+    # approved signer only, no collection, latest per signer wins: who may create collections they own
+    STEWARDS: ("stewards", {"stewards": _distinct_pubkeys}, {}),
+    # a steward opens a collection owned by the grantor named in `owner`; the signer becomes its admin
+    FOUND: ("found", {"collection": _slug, "owner": _id}, {}),
     TERMS: ("terms", {"version": _text, "sha256": _id}, {}),
     # nonce: any string, so two identical calls signed in the same second get different ids
     REQUEST: ("request", {"tool": _text, "args": _object}, {"nonce": _opt_text}),

@@ -90,8 +90,94 @@ BEGIN
         'members = owner + latest owner-signed list; non-owner lists are ignored';
     ASSERT (SELECT array_agg(pubkey) FROM members WHERE collection = 'other') = ARRAY[pg_temp.ev_id('owner')],
         'a new collection has only its owner';
+    ASSERT (SELECT role FROM collection_roster WHERE collection = 'check' AND pubkey = pg_temp.ev_id('owner')) = 'owner',
+        'the owner role is owner, even when an earlier members list names other keys';
+    ASSERT NOT is_collection_admin('check', pg_temp.ev_id('agent'), clock_timestamp()),
+        'a pubkey on the members list is not an admin';
 END;
 $$;
+
+-- Admins: only an owner-signed list counts. An admin's members event counts from then on;
+-- a later list from someone who was not an admin does not. Revoking admin does not rewrite it.
+SELECT pg_temp.ev('admins1', 4710, 'owner', jsonb_build_object('collection', 'check',
+    'admins', jsonb_build_array(pg_temp.ev_id('agent'))));
+SELECT pg_temp.ev('m-admin', 4705, 'agent', jsonb_build_object('collection', 'check',
+    'members', jsonb_build_array(pg_temp.ev_id('pal'))));
+SELECT pg_temp.ev('m-stranger', 4705, 'intruder', jsonb_build_object('collection', 'check',
+    'members', jsonb_build_array(pg_temp.ev_id('intruder'))));
+SELECT pg_temp.ev('admins-forged', 4710, 'agent', jsonb_build_object('collection', 'check',
+    'admins', jsonb_build_array(pg_temp.ev_id('intruder'))));
+DO $$
+BEGIN
+    ASSERT (SELECT array_agg(pubkey ORDER BY pubkey) FROM collection_admins WHERE collection = 'check')
+            = ARRAY[pg_temp.ev_id('agent')],
+        'admins = latest owner-signed list; a non-owner list is ignored';
+    ASSERT (SELECT array_agg(pubkey ORDER BY pubkey) FROM members WHERE collection = 'check') =
+           (SELECT array_agg(p ORDER BY p) FROM unnest(ARRAY[pg_temp.ev_id('owner'), pg_temp.ev_id('agent'), pg_temp.ev_id('pal')]) p),
+        'members = owner + admins + latest list signed by an admin at that time';
+    ASSERT (SELECT role FROM collection_roster WHERE collection = 'check' AND pubkey = pg_temp.ev_id('agent')) = 'admin',
+        'an admin listed again as a member is still just an admin';
+END;
+$$;
+SELECT pg_temp.ev('admins-empty', 4710, 'owner', jsonb_build_object('collection', 'check',
+    'admins', '[]'::jsonb));
+DO $$
+BEGIN
+    ASSERT NOT EXISTS (SELECT 1 FROM collection_admins WHERE collection = 'check'),
+        'an empty admins list revokes every admin';
+    ASSERT (SELECT array_agg(pubkey ORDER BY pubkey) FROM members WHERE collection = 'check') =
+           (SELECT array_agg(p ORDER BY p) FROM unnest(ARRAY[pg_temp.ev_id('owner'), pg_temp.ev_id('pal')]) p),
+        'revoking admin drops them unless the members list still names them; the list they signed stays';
+    ASSERT NOT is_collection_admin('check', pg_temp.ev_id('agent'), clock_timestamp()),
+        'a revoked admin is not an admin now';
+    ASSERT is_collection_admin('check', pg_temp.ev_id('agent'),
+           (SELECT received_at FROM events WHERE id = pg_temp.ev_id('m-admin'))),
+        'they were an admin when their members event was received';
+END;
+$$;
+
+-- Stewards and found: the signer of a found event is admin until the owner signs an admins event.
+-- A found event whose owner does not match the collection is ignored.
+SELECT pg_temp.ev('stewards1', 4711, 'owner', jsonb_build_object(
+    'stewards', jsonb_build_array(pg_temp.ev_id('agent'))));
+INSERT INTO collections (slug, owner) VALUES ('founded', pg_temp.ev_id('owner')), ('mismatch', pg_temp.ev_id('owner'));
+SELECT pg_temp.ev('found1', 4712, 'agent', jsonb_build_object(
+    'collection', 'founded', 'owner', pg_temp.ev_id('owner')));
+SELECT pg_temp.ev('found-bad', 4712, 'intruder', jsonb_build_object(
+    'collection', 'mismatch', 'owner', pg_temp.ev_id('intruder')));
+SELECT pg_temp.ev('about-forged', 4709, 'intruder', jsonb_build_object(
+    'collection', 'founded', 'topic', 'nope', 'public', false));
+SELECT pg_temp.ev('about-admin', 4709, 'agent', jsonb_build_object(
+    'collection', 'founded', 'topic', 'yes', 'public', true));
+DO $$
+BEGIN
+    ASSERT (SELECT array_agg(steward) FROM stewards WHERE grantor = pg_temp.ev_id('owner'))
+            = ARRAY[pg_temp.ev_id('agent')],
+        'stewards are the latest list that grantor signed';
+    ASSERT (SELECT array_agg(pubkey ORDER BY pubkey) FROM members WHERE collection = 'founded') =
+           (SELECT array_agg(p ORDER BY p) FROM unnest(ARRAY[pg_temp.ev_id('owner'), pg_temp.ev_id('agent')]) p),
+        'the founder is an admin, and the named owner is the owner';
+    ASSERT (SELECT role FROM collection_roster WHERE collection = 'founded' AND pubkey = pg_temp.ev_id('agent')) = 'admin',
+        'founder role is admin';
+    ASSERT (SELECT array_agg(pubkey) FROM members WHERE collection = 'mismatch') = ARRAY[pg_temp.ev_id('owner')],
+        'a found event for a different owner grants nothing';
+    ASSERT (SELECT topic FROM collection_about WHERE collection = 'founded') = 'yes',
+        'about signed by an admin counts; one signed by a stranger does not';
+END;
+$$;
+SELECT pg_temp.ev('admins-founded', 4710, 'owner', jsonb_build_object(
+    'collection', 'founded', 'admins', '[]'::jsonb));
+DO $$
+BEGIN
+    ASSERT NOT EXISTS (SELECT 1 FROM collection_admins WHERE collection = 'founded'),
+        'the owner''s first admins event replaces the founder, even when the list is empty';
+    ASSERT (SELECT pubkey FROM members WHERE collection = 'founded') = pg_temp.ev_id('owner'),
+        'a replaced founder who is not on the members list loses access';
+    ASSERT (SELECT topic FROM collection_about WHERE collection = 'founded') = 'yes',
+        'an about event stays in force after its signer is replaced as admin';
+END;
+$$;
+SELECT pg_temp.expect_error($sql$ SELECT pg_temp.ev('bad', 4713, 'owner', '{"collection": "check"}') $sql$, '23514');
 
 -- Profiles: latest wins, every version kept.
 -- Profiles keep their signed tags; no other kind may carry any.

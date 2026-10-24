@@ -37,11 +37,14 @@ Not borrowed: tags (`e`, `p`, `t`), NIP-09 deletion, replaceable/addressable kin
 
 Every collection is **private**. Only its members can read, write or download it.
 
-A pubkey can use the service at all only if the operator has approved it (`TMS_APPROVED`), or it is a member of at least one collection. An owner can add any pubkey to their collection without operator approval. Only approved pubkeys can create collections. Everyone else gets nothing beyond the tool list.
+A pubkey can use the service at all only if the operator has approved it (`TMS_APPROVED`), or it is a member of at least one collection, or an approved pubkey has named it as a steward (below). An owner can add any pubkey to their collection without operator approval. Only approved pubkeys can create collections they themselves own. A steward can create collections owned by the pubkey that granted them. Everyone else gets nothing beyond the tool list.
 
-- A collection is a free slug (`^[a-z0-9][a-z0-9_-]*$`). The first accepted event that names a new slug creates it, if its signer is approved. That event's signer becomes the collection's **owner** and its only member. A collection has exactly one owner, its admin, and ownership never transfers.
-- The owner changes membership with a `members` event (section 4). The latest one, by `received_at`, is the member list. The owner is always a member.
-- Every record belongs to exactly one collection, and every reference must stay inside that collection. That way, reading one collection can never reveal records from another.
+- A collection is a free slug (`^[a-z0-9][a-z0-9_-]*$`). The first accepted event that names a new slug creates it, if its signer is approved. That event's signer becomes the collection's **owner** and its only member. A collection has exactly one owner, and ownership never transfers.
+- Three roles, and a key holds at most one of them. **Owner** is the pubkey stored when the collection is created. **Admin** may change the member list and the topic. **Member** may read and write records and may not change who else is here. The owner is always a member. An admin is always a member, whether or not the member list names them. A member cannot become an admin or an owner by anything it signs itself.
+- The owner names admins with an `admins` event (section 4). The latest one the owner signed, by `received_at`, is the whole admin set. Until the owner has signed one, the steward who opened the collection with a `found` event is its admin. An `admins` event replaces that founder, including when the list is empty.
+- The owner, or an admin at that moment, changes membership with a `members` event. The latest such event, by `received_at`, is the member list. An event signed by anyone else does not count, including one signed by an admin after they were revoked. Revoking an admin does not rewrite the list they already signed; it only stops them signing another. The owner is unioned in, so a members event cannot remove the owner.
+- An approved pubkey names **stewards** with a `stewards` event (no collection). The latest one that pubkey signed is the set of keys that may open new collections **owned by the grantor**. A steward is not thereby a member or an admin of collections that already exist. Opening one is a `found` event: the collection's owner is the grantor, and the signer becomes its admin. A key cannot name itself as a steward, and a steward cannot name further stewards.
+- Every record belongs to exactly one collection, except profiles, terms, snapshots and stewards grants, and every reference must stay inside that collection. That way, reading one collection can never reveal records from another.
 - Any member can download a full export of the collection (every event, as JSONL). Each line verifies on its own.
 - Before their first write, each user signs the current terms (section 4): they have the right to upload everything they upload.
 
@@ -61,6 +64,9 @@ Kind numbers stay within 0–65535, because common Nostr libraries reject larger
 | 4707 | request | `tool`, `args`, `nonce`? | no |
 | 4708 | snapshot | `date`, `cid`, `sha256`, `count`, `last_received_at` | yes |
 | 4709 | about | `collection`, `topic`, `public` | yes |
+| 4710 | admins | `collection`, `admins` | yes |
+| 4711 | stewards | `stewards` | yes |
+| 4712 | found | `collection`, `owner` | yes |
 
 Fields marked `?` are optional. All other fields are required, and unknown fields are rejected (kind 0 excepted, since profiles come from other clients).
 
@@ -87,7 +93,16 @@ Linking to a link or to a contradiction is how you dispute it. That replaces del
 An authored assertion that two or more claims cannot all hold together. Any two of them may be compatible on their own. `claims` lists at least two distinct claim IDs, and the membership is fixed when the event is created; a different set of claims needs a new contradiction. It can't be derived from links: a claim with both SUPPORTS and REBUTS links is merely contested, and readers can compute that with a query.
 
 ### members (4705)
-Signed by the collection's owner. `members` is the complete list of pubkeys allowed to read and write. Any other signer is rejected.
+Signed by the collection's owner, or by a pubkey that is an admin of that collection when the server receives the event. `members` is the complete list of other pubkeys allowed to read and write. The owner is always a member, and so is every current admin, even if this list leaves them out. Any other signer is rejected. The latest event that was authorized when it was received is the list; a later event from a revoked admin is ignored, and the list they signed earlier stays until a current owner or admin publishes a new one.
+
+### admins (4710)
+Signed by the collection's owner only. `admins` is the complete list of pubkeys who may change members and about. It must not include the owner: the owner is not an admin, and the two roles do not overlap. Duplicates are rejected. The latest owner-signed event is the whole set, and an empty list means there are no admins. An admin cannot sign this event, so an admin cannot promote anyone, including itself. If the owner has never signed one, the steward who published the collection's `found` event is the admin instead; the first `admins` event replaces that founder.
+
+### stewards (4711)
+Signed by an approved pubkey. There is no collection. `stewards` is the complete list of pubkeys who may create collections owned by the signer. The signer cannot name itself. Duplicates are rejected. The latest event from that signer is the whole set; an empty list revokes every steward. A steward is allowed to use the service even before it belongs to a collection, but only while the grantor is still approved. A member or an admin who is not themselves approved cannot sign this event, so the grant cannot be passed on.
+
+### found (4712)
+Signed by a steward. `owner` is the approved pubkey that named the signer as a steward, and `collection` is a slug that does not exist yet. The collection's owner is `owner`, not the signer. The signer becomes the collection's admin (and therefore a member) until the owner publishes an `admins` event. A key does not use `found` to create a collection it will own; an approved key does that by publishing any other event that names a new slug.
 
 ### terms (4706)
 A user's acceptance of the terms in [TERMS.md](TERMS.md). `version` names the document, and `sha256` is the hash of its exact text, so the signature commits to what was accepted. The server rejects writes from a key that hasn't signed the current version.
@@ -104,7 +119,7 @@ A signed tool call. `tool` names the MCP tool (or `login` for the browser), and 
 Requests are not stored in the ledger.
 
 ### about (4709)
-Signed by the collection's owner. `topic` is a one-line description, at most 140 characters. `public` (true or false) says whether the public [Communities](/communities) page may show the collection's name, topic, and its counts of evidence, claims, links and contradictions. Its records, members and everything else stay private either way. The latest one, by `received_at`, is in effect.
+Signed by the collection's owner, or by a pubkey that is an admin when the server receives the event. `topic` is a one-line description, at most 140 characters. `public` (true or false) says whether the public [Communities](/communities) page may show the collection's name, topic, and its counts of evidence, claims, links and contradictions. Its records, members and everything else stay private either way. The latest event that was authorized when it was received is in effect. Revoking the signer does not by itself revert the topic.
 
 ### snapshot (4708)
 Signed by the server's own key after each daily backup upload to Filecoin. The backup is the whole ledger, encrypted with a server-held key. It's for disaster recovery; members get their own copies from the export. `cid` and `sha256` identify the encrypted file, `count` is the number of events in it, and `last_received_at` marks where it ends. This gives a signed, dated history of what the ledger held.
@@ -115,7 +130,7 @@ The server accepts an event only if:
 
 1. Recomputing the `id` matches, and `sig` verifies for `pubkey`.
 2. `kind` is a stored kind from section 4, and `content` parses to an object with exactly that kind's fields. Required strings are non-blank.
-3. The signer is approved or a member of some collection. For `profile` and `terms` events, that is enough. For every other kind, the signer must also have signed the current `terms`, and must be a member of the event's collection, or be approved and creating it.
+3. The signer is approved, a member of some collection, or a steward of a pubkey that is still approved. For `profile` and `terms` events, that is enough. A `stewards` event must be signed by an approved pubkey. A `found` event must be signed by a current steward of the named owner, and that owner must still be approved; it creates the collection. For every other kind, the signer must also have signed the current `terms`, and must be a member of the event's collection, or be approved and creating it. `admins` events must be signed by the owner. `members` and `about` events must be signed by the owner or by a current admin.
 4. Every referenced ID exists, either in the ledger or earlier in the same batch, has the kind the field requires, and belongs to the same collection.
 5. Link quotes appear in the `from` evidence text.
 6. `snapshot` events are signed by the server's key, and no other kind is.

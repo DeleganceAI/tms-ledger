@@ -17,7 +17,7 @@ The server enforces exactly two mechanical things beyond structure: a link's quo
 | Path | What |
 |---|---|
 | [EVENTS.md](EVENTS.md), [TERMS.md](TERMS.md) | Event kinds, acceptance rules, access; the one upload-rights clause users sign. |
-| [db/init.sql](db/init.sql) | `events` (the only signed table), views `evidence`, `claims`, `links`, `contradictions`, `contradiction_claims`, `profiles`, `members`; `collections`, `embeddings`, `auth_seen`, `mcp_calls`. Reference and quote triggers, append-only. |
+| [db/init.sql](db/init.sql) | `events` (the only signed table), views `evidence`, `claims`, `links`, `contradictions`, `contradiction_claims`, `profiles`, `members`, `collection_roster`, `collection_admins`, `stewards`; `collections`, `embeddings`, `auth_seen`, `mcp_calls`. Reference and quote triggers, append-only. [db/migrate_collection_admin.sql](db/migrate_collection_admin.sql) applies the role views to a database created before them. |
 | [db/verify.sql](db/verify.sql) | Database-side guards on unsigned stand-in events. Rolls back. |
 | [tms/events.py](tms/events.py) | NIP-01 IDs, BIP-340 signing (`coincurve`), per-kind content rules, the `tms-sign` CLI. |
 | [tms/ledger.py](tms/ledger.py) | `publish(events)`, member-scoped reads, retrieval, fetch, embeddings, proof check, the connection pool. |
@@ -94,7 +94,7 @@ TMS_NSEC=nsec1... uv run tms-sign event 4702 '{"collection": "mcas", "text": "..
 TMS_NSEC=nsec1... uv run tms-sign request search_claims '{"collection": "mcas", "text": "DAO"}'
 ```
 
-Any Nostr library works too: the envelope is NIP-01 with `tags: []` and a JSON object in `content`. Before its first write, a key signs the current terms (kind 4706, `{"version": "1", "sha256": "<sha256 of TERMS.md>"}`) and, ideally, a profile (kind 0, saying in `about` whether it is a human or an agent). The operator approves a key with `TMS_APPROVED`; a collection's owner adds members on `/c/<slug>/members` (or by publishing a kind 4705 event).
+Any Nostr library works too: the envelope is NIP-01 with `tags: []` and a JSON object in `content`. Before its first write, a key signs the current terms (kind 4706, `{"version": "1", "sha256": "<sha256 of TERMS.md>"}`) and, ideally, a profile (kind 0, saying in `about` whether it is a human or an agent). The operator approves a key with `TMS_APPROVED`; a collection's owner adds members on `/c/<slug>/members` (or by publishing a kind 4705 event). The owner can name admins (kind 4710) who may change members and the topic, and stewards (kind 4711) who may open new collections the owner owns (kind 4712). A plain member cannot.
 
 ## MCP
 
@@ -104,7 +104,9 @@ Over HTTP the endpoint is `<base>/mcp` (streamable HTTP) and open: anyone can li
 |---|---|
 | `publish` | A batch of signed events, all or nothing. Evidence, claims and the links between them can share a batch. Retries are no-ops. |
 | `fetch_url` | A URL's plain text and title (PDF, HTML, JATS XML), ready to sign as evidence. Stores nothing. |
-| `list_collections` | Your collections, with owner, members and counts. |
+| `list_collections` | Your collections, with owner, admins, your role, members and counts. |
+| `list_members` | One collection's roster and whether you may change members or admins. |
+| `list_delegations` | Stewards you have named, and approved keys who have named you. |
 | `get_event` | One event by id; evidence text pages with `offset`/`max_chars`. |
 | `search_claims` | Vector or keyword retrieval in a collection, links and contradiction ids inlined. |
 | `list_claims` | Claims with link counts, sorted `unsupported`, `unchallenged`, `contested`, `links` or `recent`. |
@@ -115,7 +117,7 @@ Prompts: `briefing` (answer from one collection with a checked proof) and `claim
 
 ## Web
 
-`/connect` (and `/` when logged in): connect with a NIP-07 extension, show the profile fetched from Damus and Primal (stored once you agree), sign the terms, list your collections, create one (approved keys). `/submit`: sign one evidence document plus claims and links from it. `/c/<slug>/members`: owner only. `/c/<slug>/export.jsonl`: every event in the collection; each line verifies on its own. `/dashboard`: activity, browse, agents and sources, limited to your collections. `/office` (and `/` when logged out): bots replay the last hour on boards that show anonymous slices of real collections, with global totals and a **Request access** form. `/docs`: the full guide for people and agents ([DOCS.md](DOCS.md)). `/admin`: operator page for `TMS_ADMINS`, including pending access requests with Approve and Dismiss. Access is `TMS_ADMINS` + `TMS_APPROVED` (env, for bootstrapping) + the `approvals` table that Approve writes, so approving someone needs no redeploy. Logging in signs a `login` request and sets a 12-hour HttpOnly cookie; writes are always signed in the browser.
+`/connect` (and `/` when logged in): connect with a NIP-07 extension, show the profile fetched from Damus and Primal (stored once you agree), sign the terms, list your collections, create one (approved keys), and name stewards who may create collections for you. `/submit`: sign one evidence document plus claims and links from it. `/c/<slug>/members`: an owner or an admin signs the member list; the owner also signs the admin list. `/c/<slug>/export.jsonl`: every event in the collection; each line verifies on its own. `/dashboard`: activity, browse, agents and sources, limited to your collections. `/office` (and `/` when logged out): bots replay the last hour on boards that show anonymous slices of real collections, with global totals and a **Request access** form. `/docs`: the full guide for people and agents ([DOCS.md](DOCS.md)). `/admin`: operator page for `TMS_ADMINS`, including pending access requests with Approve and Dismiss. Access is `TMS_ADMINS` + `TMS_APPROVED` (env, for bootstrapping) + the `approvals` table that Approve writes, so approving someone needs no redeploy. Logging in signs a `login` request and sets a 12-hour HttpOnly cookie; writes are always signed in the browser.
 
 ## Deploy (DigitalOcean)
 

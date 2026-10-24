@@ -57,7 +57,11 @@ td.n{font-family:var(--mono);text-align:right}.actions{display:flex;gap:8px;flex
     <div id="newCol" hidden style="margin-top:12px"><div class="grid2"><label>New collection<input id="newSlug" placeholder="new-collection-slug"></label>
       <label>Topic (one line, up to 140 characters)<input id="newTopic" maxlength="140" placeholder="What this collection is about"></label></div>
       <label class="check"><input type="checkbox" id="newPublic"> Public: show its name, topic and record counts on Communities (its records stay private)</label>
-      <div class="actions"><button id="newBtn" class="ghost">Create collection</button><span id="newMsg"></span></div></div></section>
+      <div class="actions"><button id="newBtn" class="ghost">Create collection</button><span id="newMsg"></span></div></div>
+    <div id="stewardsBox" hidden style="margin-top:16px"><h2>Agents who may create collections for you</h2>
+      <p class="muted" style="margin-top:0">One npub or hex pubkey per line. This is the full list: anyone left out can no longer create collections owned by you. Opening a collection makes that agent its admin. It does not make them an admin of collections you already have — do that on the collection's members page.</p>
+      <textarea id="sList" placeholder="npub1…"></textarea>
+      <div class="actions"><button id="sSave" class="ghost">Sign steward list</button><span id="sMsg"></span></div></div></section>
   <section id="submit" hidden><h2>Submit evidence</h2>
     <div class="grid2"><label>Collection<select id="sCol"></select></label>
       <label>URL<div style="display:flex;gap:6px"><input id="sUrl" placeholder="https://..."><button id="fetchBtn" class="ghost">Fetch</button></div></label>
@@ -75,7 +79,10 @@ td.n{font-family:var(--mono);text-align:right}.actions{display:flex;gap:8px;flex
     <p class="muted" style="margin-top:0">Collections whose owners chose to show them. You see each one's name, topic and record counts; the records themselves stay private to its members. To join one, ask its owner.</p>
     <div id="cList" class="cgrid"></div></section>
   <section id="members" hidden><h2>Members of <span id="mSlug"></span></h2><table id="mTable"></table>
-    <label style="margin-top:12px">Members besides you, one npub or hex pubkey per line (the full list: anyone left out is removed)<textarea id="mList"></textarea></label>
+    <div id="adminBox" hidden><label style="margin-top:12px">Admins, one npub or hex pubkey per line (the full list; the owner is never an admin)<textarea id="admList" placeholder="npub1…"></textarea></label>
+      <p class="muted" style="margin:6px 0 0">Admins can change members and the topic. They cannot change this list. Someone removed here keeps access only if they are still on the member list below.</p>
+      <div class="actions"><button id="admSave" class="ghost">Sign admin list</button><span id="admMsg"></span></div></div>
+    <label style="margin-top:12px">Members besides the owner, one npub or hex pubkey per line (the full list: anyone left out is removed). The owner always stays. Admins stay members even if left off this list.<textarea id="mList"></textarea></label>
     <div class="actions"><button id="mSave">Sign members list</button><a id="mExport" href="#">Download export (JSONL)</a><span id="mMsg"></span></div></section>
 </main>
 <script>
@@ -164,12 +171,14 @@ function renderHome() {
   $('home').hidden = false
   const cs = ME.collections
   $('collections').innerHTML = cs.length ? `<table><tr><th>Collection</th><th>Members</th><th>Evidence</th><th>Claims</th><th>Links</th><th>Contra.</th><th></th></tr>${cs.map(c => `
-    <tr><td><b>${esc(c.slug)}</b>${c.owner === ME.pubkey ? ' <span class="muted">(owner)</span>' : ''}${c.public ? ' <span class="pubtag">public</span>' : ''}${c.topic ? `<div class="muted">${esc(c.topic)}</div>` : ''}</td><td class="n">${c.members.length}</td>
+    <tr><td><b>${esc(c.slug)}</b>${c.role === 'owner' ? ' <span class="muted">(owner)</span>' : c.role === 'admin' ? ' <span class="muted">(admin)</span>' : ''}${c.public ? ' <span class="pubtag">public</span>' : ''}${c.topic ? `<div class="muted">${esc(c.topic)}</div>` : ''}</td><td class="n">${c.members.length}</td>
     <td class="n">${c.evidence}</td><td class="n">${c.claims}</td><td class="n">${c.links}</td><td class="n">${c.contradictions}</td>
-    <td>${c.owner === ME.pubkey ? `<a href="/c/${esc(c.slug)}/members">members</a> · ` : ''}<a href="/c/${esc(c.slug)}/export.jsonl">export</a></td></tr>`).join('')}</table>`
+    <td>${c.role === 'owner' || c.role === 'admin' ? `<a href="/c/${esc(c.slug)}/members">members</a> · ` : ''}<a href="/c/${esc(c.slug)}/export.jsonl">export</a></td></tr>`).join('')}</table>`
     : '<p class="muted">You are not a member of any collection yet.</p>'
-  renderAbout(cs.filter(c => c.owner === ME.pubkey))
+  renderAbout(cs.filter(c => c.role === 'owner'))
   $('newCol').hidden = !ME.approved
+  $('stewardsBox').hidden = !ME.approved
+  if (ME.approved) $('sList').value = (ME.stewards || []).map(s => s.npub).join('\n')
   if (ME.approved && location.hash === '#new') { $('newCol').scrollIntoView({block: 'center'}); $('newSlug').focus() }  // from the dashboard's + card
 }
 
@@ -205,6 +214,12 @@ $('newBtn').onclick = async () => {  // an empty members list names the collecti
     }
     await publish(batch); await refresh()
   } catch (e) { say('newMsg', e.message, 'err') }
+}
+$('sSave').onclick = async () => {
+  try {
+    const stewards = [...new Set($('sList').value.split(/[\s,]+/).filter(Boolean).map(toHex))]
+    await publish([await sign(4711, {stewards})]); say('sMsg', 'Saved.', 'ok'); await refresh()
+  } catch (e) { say('sMsg', e.message, 'err') }
 }
 
 $('termsBtn').onclick = async () => {
@@ -322,9 +337,12 @@ async function renderMembers(slug) {
   $('members').hidden = false; $('mSlug').textContent = slug; $('mExport').href = `/c/${encodeURIComponent(slug)}/export.jsonl`
   try {
     const d = await api(`/api/c/${encodeURIComponent(slug)}`)
+    const roleLabel = m => m.role === 'owner' ? ' (owner)' : m.role === 'admin' ? ' (admin)' : ''
     $('mTable').innerHTML = '<tr><th>Name</th><th>npub</th></tr>' + d.members.map(m =>
-      `<tr><td>${esc(m.name || '—')}${m.pubkey === d.owner ? ' <span class="muted">(owner)</span>' : ''}<div class="muted">${esc(m.about || '')}</div></td><td class="mono">${esc(m.npub)}</td></tr>`).join('')
-    $('mList').value = d.members.filter(m => m.pubkey !== d.owner).map(m => m.npub).join('\n')
+      `<tr><td>${esc(m.name || '—')}${roleLabel(m)}<div class="muted">${esc(m.about || '')}</div></td><td class="mono">${esc(m.npub)}</td></tr>`).join('')
+    $('mList').value = d.members.filter(m => m.role === 'member').map(m => m.npub).join('\n')
+    $('adminBox').hidden = d.caller_role !== 'owner'
+    if (d.caller_role === 'owner') $('admList').value = d.members.filter(m => m.role === 'admin').map(m => m.npub).join('\n')
     $('aboutBox').hidden = false; $('aTopic').value = d.topic || ''; $('aPublic').checked = d.public
   } catch (e) { say('mMsg', e.message, 'err') }
   $('aSave').onclick = async () => {
@@ -333,6 +351,12 @@ async function renderMembers(slug) {
       if (!topic) throw new Error('write a topic first')
       await publish([await sign(4709, {collection: slug, topic, public: $('aPublic').checked})]); say('aMsg', 'Saved.', 'ok')
     } catch (e) { say('aMsg', e.message, 'err') }
+  }
+  $('admSave').onclick = async () => {
+    try {
+      const admins = [...new Set($('admList').value.split(/[\s,]+/).filter(Boolean).map(toHex))]
+      await publish([await sign(4710, {collection: slug, admins})]); say('admMsg', 'Saved.', 'ok'); renderMembers(slug)
+    } catch (e) { say('admMsg', e.message, 'err') }
   }
   $('mSave').onclick = async () => {
     try {

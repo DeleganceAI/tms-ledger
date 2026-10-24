@@ -100,6 +100,7 @@ def main() -> None:
     recreate()
     with L.connect() as conn:
         ids = ledger(conn)
+        delegation(conn)
     embed_calls()
     server(ids)
     print("PASS: smoke")
@@ -194,6 +195,7 @@ def ledger(conn) -> list[str]:
     rejects(lambda: pub([sign(BOB, E.MEMBERS, {"collection": "smoke", "members": []})]), "only the owner")
     mine = L.list_collections(conn, PK[BOB])
     assert [c["slug"] for c in mine] == ["smoke"] and set(mine[0]["members"]) == {PK[OWNER], PK[BOB]}, mine
+    assert mine[0]["role"] == "member" and mine[0]["admins"] == [], mine[0]
 
     # Reads, scoped to the caller's collections.
     hits = L.search_claims(conn, PK[BOB], "smoke", "what causes histamine intolerance?", "vector", 5)
@@ -285,6 +287,141 @@ def embed_calls() -> None:
         (PK[BOB], "smoke", 1_000_000, 0.0)], rows
 
 
+def delegation(conn) -> None:
+    """An owner can hand a key create rights and, per collection, admin rights. A plain member cannot
+    grant either, add or remove anyone, or promote itself. Revoking admin stops future edits only."""
+    from starlette.testclient import TestClient
+
+    from tms import server as S
+    from tms import web as W
+
+    agent = hashlib.sha256(b"delegate-agent").hexdigest()
+    pal = hashlib.sha256(b"delegate-pal").hexdigest()
+    pk_agent, pk_pal = E.pubkey_of(agent), E.pubkey_of(pal)
+    pub = lambda evs: L.publish(conn, evs)  # noqa: E731
+
+    rejects(lambda: pub([sign(agent, E.PROFILE, {"name": "Agent"})]), "is not approved")
+    assert not L.allowed(conn, pk_agent) and L.list_collections(conn, pk_agent) == []
+
+    # A plain member cannot grant create rights, name admins, or open a collection.
+    rejects(lambda: pub([sign(BOB, E.STEWARDS, {"stewards": [pk_agent]})]), "only an approved pubkey")
+    rejects(lambda: pub([sign(BOB, E.ADMINS, {"collection": "smoke", "admins": [pk_agent]})]), "only the owner")
+    rejects(lambda: pub([sign(BOB, E.FOUND, {"collection": "bob-col", "owner": PK[OWNER]})]), "not a steward")
+    rejects(lambda: pub([sign(OWNER, E.STEWARDS, {"stewards": [PK[OWNER]]})]), "cannot name itself")
+    rejects(lambda: pub([sign(OWNER, E.ADMINS, {"collection": "smoke", "admins": [PK[OWNER]]})]), "always an owner")
+    rejects(lambda: pub([sign(OWNER, E.ADMINS, {"collection": "smoke", "admins": [pk_agent, pk_agent]})]), "'admins'")
+    rejects(lambda: pub([sign(OWNER, E.STEWARDS, {"stewards": [pk_agent, pk_agent]})]), "'stewards'")
+
+    pub([sign(OWNER, E.STEWARDS, {"stewards": [pk_agent]})])
+    assert L.allowed(conn, pk_agent)
+    assert L.list_delegations(conn, PK[OWNER]) == {"granted": [pk_agent], "for": []}
+    assert L.list_delegations(conn, pk_agent) == {"granted": [], "for": [PK[OWNER]]}
+    pub([sign(agent, E.PROFILE, {"name": "Agent", "about": "agent"}), terms(agent)])
+    rejects(lambda: pub([sign(agent, E.CLAIM, {"collection": "agent-owned", "text": "no"})]), "kind 4712")
+    rejects(lambda: pub([sign(agent, E.FOUND, {"collection": "nope", "owner": PK[OUTSIDER]})]), "not a steward")
+    rejects(lambda: pub([sign(agent, E.FOUND, {"collection": "nope", "owner": pk_agent})]), "creates its own collection")
+    rejects(lambda: pub([sign(OUTSIDER, E.FOUND, {"collection": "nope", "owner": PK[OWNER]})]), "not a steward")
+    rejects(lambda: pub([sign(agent, E.MEMBERS, {"collection": "too-soon", "members": []}),
+                         sign(agent, E.FOUND, {"collection": "too-soon", "owner": PK[OWNER]})]), "kind 4712")
+    assert conn.execute("SELECT 1 FROM collections WHERE slug = 'too-soon'").fetchone() is None
+
+    pub([sign(agent, E.FOUND, {"collection": "delegated", "owner": PK[OWNER]})])
+    assert conn.execute("SELECT owner FROM collections WHERE slug = 'delegated'").fetchone()["owner"] == PK[OWNER]
+    opened = L.list_members(conn, pk_agent, "delegated")
+    assert opened["role"] == "admin" and opened["can_manage_members"] and not opened["can_manage_admins"]
+    assert {m["pubkey"]: m["role"] for m in opened["members"]} == {PK[OWNER]: "owner", pk_agent: "admin"}
+
+    pub([sign(agent, E.ABOUT, {"collection": "delegated", "topic": "Delegated work", "public": False})])
+    assert conn.execute("SELECT topic, public FROM collection_about WHERE collection = 'delegated'").fetchone()["topic"] == "Delegated work"
+    pub([sign(agent, E.MEMBERS, {"collection": "delegated", "members": [pk_pal]})])
+    pub([terms(pal), sign(pal, E.PROFILE, {"name": "Pal"})])
+    pal_view = L.list_members(conn, pk_pal, "delegated")
+    assert pal_view["role"] == "member" and not pal_view["can_manage_members"] and not pal_view["can_manage_admins"]
+    rejects(lambda: pub([sign(pal, E.MEMBERS, {"collection": "delegated", "members": [pk_pal]})]), "only the owner or an admin")
+    rejects(lambda: pub([sign(pal, E.ABOUT, {"collection": "delegated", "topic": "Hijack", "public": True})]), "only the owner or an admin")
+    rejects(lambda: pub([sign(pal, E.ADMINS, {"collection": "delegated", "admins": [pk_pal]})]), "only the owner")
+    rejects(lambda: pub([sign(pal, E.STEWARDS, {"stewards": [pk_agent]})]), "only an approved pubkey")
+    rejects(lambda: pub([sign(pal, E.CLAIM, {"collection": "pal-col", "text": "x"})]), "only approved pubkeys create")
+    # The agent can remove the member. That key cannot write itself back in, and the owner stays.
+    pub([sign(agent, E.MEMBERS, {"collection": "delegated", "members": []})])
+    assert PK[OWNER] in {r["pubkey"] for r in conn.execute("SELECT pubkey FROM members WHERE collection = 'delegated'")}
+    rejects(lambda: pub([sign(pal, E.CLAIM, {"collection": "delegated", "text": "back"})]), "is not approved")
+    rejects(lambda: pub([sign(pal, E.MEMBERS, {"collection": "delegated", "members": [pk_pal]})]), "is not approved")
+    # created_at must differ: an identical event signed in the same second is the same id and a no-op.
+    pub([sign(agent, E.MEMBERS, {"collection": "delegated", "members": [pk_pal]}, created_at=int(time.time()) + 5)])
+    # An admin cannot widen the admin set, on this collection or any other.
+    rejects(lambda: pub([sign(agent, E.ADMINS, {"collection": "delegated", "admins": [pk_agent, pk_pal]})]), "only the owner")
+    rejects(lambda: pub([sign(agent, E.ADMINS, {"collection": "smoke", "admins": [pk_agent]})]), "not a member")
+
+    pub([sign(OWNER, E.ADMINS, {"collection": "delegated", "admins": [pk_agent]})])
+    assert L.collection_role(conn, pk_agent, "delegated") == "admin"
+    # Revoking admin does not rewrite the members list the admin already signed. The agent was not
+    # on that list, so it loses access; the member it added stays, and still cannot manage.
+    pub([sign(OWNER, E.ADMINS, {"collection": "delegated", "admins": []})])
+    assert L.collection_role(conn, pk_agent, "delegated") is None
+    assert L.collection_role(conn, pk_pal, "delegated") == "member"
+    assert conn.execute("SELECT topic FROM collection_about WHERE collection = 'delegated'").fetchone()["topic"] == "Delegated work"
+    rejects(lambda: pub([sign(agent, E.MEMBERS, {"collection": "delegated", "members": [pk_agent]})]), "not a member")
+    rejects(lambda: pub([sign(agent, E.ABOUT, {"collection": "delegated", "topic": "Still mine", "public": False})]), "not a member")
+    rejects(lambda: pub([sign(pal, E.MEMBERS, {"collection": "delegated", "members": []})]), "only the owner or an admin")
+    pub([sign(OWNER, E.MEMBERS, {"collection": "delegated", "members": [pk_pal, pk_agent]})])
+    assert L.collection_role(conn, pk_agent, "delegated") == "member"
+    rejects(lambda: pub([sign(agent, E.ABOUT, {"collection": "delegated", "topic": "Nope", "public": False})]), "only the owner or an admin")
+
+    pub([sign(OWNER, E.STEWARDS, {"stewards": []})])
+    assert L.list_delegations(conn, pk_agent)["for"] == []
+    rejects(lambda: pub([sign(agent, E.FOUND, {"collection": "second", "owner": PK[OWNER]})]), "not a steward")
+    assert L.allowed(conn, pk_agent), "membership, not the grant, is what still lets the agent in"
+
+    pub([sign(OUTSIDER, E.STEWARDS, {"stewards": [pk_agent]})])
+    assert L.list_delegations(conn, pk_agent)["for"] == [PK[OUTSIDER]]
+    L.APPROVED.discard(PK[OUTSIDER])
+    try:
+        rejects(lambda: pub([sign(agent, E.FOUND, {"collection": "outsider-bot", "owner": PK[OUTSIDER]})]), "approved pubkey")
+        assert L.list_delegations(conn, pk_agent)["for"] == []
+    finally:
+        L.APPROVED.add(PK[OUTSIDER])
+    pub([sign(OUTSIDER, E.STEWARDS, {"stewards": []})])
+
+    # The grant and the new collection can share a batch, found before the events that configure it.
+    pub([sign(OWNER, E.STEWARDS, {"stewards": [pk_agent]}, created_at=int(time.time()) + 10),
+         sign(agent, E.FOUND, {"collection": "batched", "owner": PK[OWNER]}),
+         sign(agent, E.ABOUT, {"collection": "batched", "topic": "Opened together", "public": False}),
+         sign(agent, E.MEMBERS, {"collection": "batched", "members": [pk_pal]})])
+    mine = {c["slug"]: c for c in L.list_collections(conn, pk_agent)}
+    assert mine["delegated"]["role"] == "member" and mine["delegated"]["admins"] == []
+    assert mine["batched"]["role"] == "admin" and mine["batched"]["admins"] == [pk_agent]
+    assert {PK[OWNER], pk_agent, pk_pal} <= set(mine["batched"]["members"])
+    assert conn.execute("SELECT owner FROM collections WHERE slug = 'batched'").fetchone()["owner"] == PK[OWNER]
+    # A key that is not yet allowed can be granted, sign the terms, and open a collection in one batch.
+    newbie = hashlib.sha256(b"delegate-newbie").hexdigest()
+    pk_new = E.pubkey_of(newbie)
+    rejects(lambda: pub([terms(newbie)]), "is not approved")
+    pub([sign(OWNER, E.STEWARDS, {"stewards": [pk_agent, pk_new]}), terms(newbie),
+         sign(newbie, E.FOUND, {"collection": "newbie-col", "owner": PK[OWNER]})])
+    assert L.collection_role(conn, pk_new, "newbie-col") == "admin"
+    assert conn.execute("SELECT owner FROM collections WHERE slug = 'newbie-col'").fetchone()["owner"] == PK[OWNER]
+    assert sorted(L.list_delegations(conn, PK[OWNER])["granted"]) == sorted([pk_agent, pk_new])
+
+    S.LOCAL_SECRET = None
+    with TestClient(S.http_app()) as client:
+        client.cookies.set(W.COOKIE, W.make_cookie(pk_agent))
+        assert client.get("/c/batched/members").status_code == 200
+        assert client.get("/c/delegated/members").status_code == 403
+        denied = client.post("/api/publish", json={"events": [sign(agent, E.ADMINS, {
+            "collection": "batched", "admins": [pk_pal]})]})
+        assert denied.status_code == 403 and "only the owner" in denied.json()["error"], denied.text
+        client.cookies.set(W.COOKIE, W.make_cookie(pk_pal))
+        assert client.get("/c/delegated/members").status_code == 403
+        assert client.get("/c/batched/members").status_code == 403
+        client.cookies.set(W.COOKIE, W.make_cookie(PK[OWNER]))
+        body = client.get("/api/c/batched").json()
+        assert body["caller_role"] == "owner"
+        assert {m["pubkey"]: m["role"] for m in body["members"]} == {
+            PK[OWNER]: "owner", pk_agent: "admin", pk_pal: "member"}
+        client.cookies.clear()
+
+
 def server(ids) -> None:
     """The MCP endpoint over HTTP, in process: signed requests, replay and staleness, login."""
     from starlette.testclient import TestClient
@@ -311,7 +448,8 @@ def server(ids) -> None:
         r = client.post("/mcp", headers={"Accept": "application/json, text/event-stream"},
                         json={"jsonrpc": "2.0", "id": 0, "method": "tools/list"})
         tools = {t["name"] for t in r.json()["result"]["tools"]}  # the tool list is open to anyone
-        assert {"publish", "fetch_url", "search_claims", "get_event", "check_proof"} <= tools, tools
+        assert {"publish", "fetch_url", "search_claims", "get_event", "check_proof",
+                "list_members", "list_delegations"} <= tools, tools
 
         ok = req(BOB, "search_claims", {"collection": "smoke", "text": "histamine DAO", "method": "keyword"})
         assert call("search_claims", {"request": ok})["items"], "a signed request works"
@@ -343,6 +481,13 @@ def server(ids) -> None:
         got = call("get_event", {"request": req(BOB, "get_event", {"id": ids[0]})})
         assert got["kind_name"] == "claim", got
         assert [c["slug"] for c in call("list_collections", {"request": req(BOB, "list_collections")})] == ["smoke"]
+        mem = call("list_members", {"request": req(BOB, "list_members", {"collection": "smoke"})})
+        assert mem["role"] == "member" and mem["can_manage_members"] is False and mem["can_manage_admins"] is False
+        assert {m["pubkey"]: m["role"] for m in mem["members"]} == {PK[OWNER]: "owner", PK[BOB]: "member"}
+        rejects(lambda: call("list_members", {"request": req(BOB, "list_members", {"collection": "outside"})}),
+                "not a member")
+        assert call("list_delegations", {"request": req(BOB, "list_delegations")}) == {"granted": [], "for": []}
+        rejects(lambda: call("list_delegations", {"request": req(STRANGER, "list_delegations")}), "is not approved")
         res = call("publish", {"events": [sign(BOB, E.CLAIM, {"collection": "smoke", "text": "Published over HTTP."})]})
         assert len(res["accepted"]) == 1, res
 
@@ -380,7 +525,7 @@ def server(ids) -> None:
         # Dashboard: scoped to the viewer's collections.
         assert client.get("/dashboard/api/collections").json()["can_create"], "an approved owner gets the + card"
         snap = client.get("/dashboard/api/snapshot").json()
-        assert {c["slug"] for c in snap["collections"]} == {"smoke", "other"}, snap["collections"]
+        assert {c["slug"] for c in snap["collections"]} == {"smoke", "other", "delegated", "batched", "newbie-col"}, snap["collections"]
         # Npubs tab: an admin sees every key and every collection it belongs to.
         n = client.get("/dashboard/api/npubs").json()
         byk = {x["pubkey"]: x for x in n["npubs"]}

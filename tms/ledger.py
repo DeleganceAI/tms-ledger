@@ -268,10 +268,18 @@ def is_approved(conn, pubkey: str) -> bool:
         "SELECT 1 FROM approvals WHERE pubkey = %s", (pubkey,)).fetchone() is not None
 
 
+def _approved_grantors(conn, pubkey: str) -> list[str]:
+    """Approved pubkeys whose latest stewards event names this key."""
+    return [r["grantor"] for r in conn.execute(
+        "SELECT grantor FROM stewards WHERE steward = %s ORDER BY grantor", (pubkey,))
+        if is_approved(conn, r["grantor"])]
+
+
 def allowed(conn, pubkey: str) -> bool:
-    """Approved, or a member of some collection (EVENTS.md section 3)."""
+    """Approved, a member of some collection, or a steward of an approved pubkey (EVENTS.md section 3)."""
     return is_approved(conn, pubkey) or conn.execute(
-        "SELECT 1 FROM members WHERE pubkey = %s LIMIT 1", (pubkey,)).fetchone() is not None
+        "SELECT 1 FROM members WHERE pubkey = %s LIMIT 1", (pubkey,)).fetchone() is not None or bool(
+        _approved_grantors(conn, pubkey))
 
 
 def require_allowed(conn, pubkey: str) -> None:
@@ -287,6 +295,18 @@ def require_member(conn, pubkey: str, collection: str) -> None:
         raise Denied(f"not a member of collection '{collection}'")
 
 
+def collection_role(conn, pubkey: str, collection: str) -> str | None:
+    """owner, admin, or member. None when the pubkey has no role on this collection."""
+    row = conn.execute("SELECT role FROM collection_roster WHERE collection = %s AND pubkey = %s",
+                       (collection, pubkey)).fetchone()
+    return row["role"] if row else None
+
+
+def _admin_now(conn, collection: str, pubkey: str) -> bool:
+    return bool(conn.execute("SELECT is_collection_admin(%s, %s, clock_timestamp()) AS ok",
+                             (collection, pubkey)).fetchone()["ok"])
+
+
 def signed_terms(conn, pubkey: str) -> bool:
     return conn.execute("""SELECT 1 FROM events WHERE kind = 4706 AND pubkey = %s
                              AND content::jsonb ->> 'version' = %s AND content::jsonb ->> 'sha256' = %s LIMIT 1""",
@@ -296,16 +316,37 @@ def signed_terms(conn, pubkey: str) -> bool:
 def account(conn, pubkey: str) -> dict:
     """What the web pages need to know about a signer."""
     profile = _clean(conn.execute("SELECT * FROM profiles WHERE pubkey = %s", (pubkey,)).fetchone())
+    stewards = [_clean(r) | {"npub": E.bech32_encode("npub", r["pubkey"])} for r in conn.execute(
+        """SELECT s.steward AS pubkey, p.name FROM stewards s LEFT JOIN profiles p ON p.pubkey = s.steward
+           WHERE s.grantor = %s ORDER BY s.steward""", (pubkey,))]
     return {"pubkey": pubkey, "npub": E.bech32_encode("npub", pubkey), "approved": is_approved(conn, pubkey),
             "allowed": allowed(conn, pubkey), "terms_signed": signed_terms(conn, pubkey), "terms": TERMS,
-            "profile": profile, "collections": list_collections(conn, pubkey)}
+            "profile": profile, "collections": list_collections(conn, pubkey), "stewards": stewards}
 
 
 # ------------------------------------------------------------------ publish
 
+def _authorize_found(conn, ev: dict, data: dict) -> str:
+    """A steward opens a collection owned by the approved pubkey who granted them. The signer
+    becomes its admin once this event is stored, not the owner."""
+    pk, owner, col = ev["pubkey"], data["owner"], data["collection"]
+    if owner == pk:
+        raise Denied(f"{ev['id']}: found names the owner you are acting for; an approved key creates "
+                     f"its own collection by publishing into a new slug")
+    if not is_approved(conn, owner):
+        raise Denied(f"{ev['id']}: a collection can only be created for an approved pubkey")
+    if conn.execute("SELECT 1 FROM stewards WHERE grantor = %s AND steward = %s", (owner, pk)).fetchone() is None:
+        raise Denied(f"{ev['id']}: {pk} is not a steward of {owner}")
+    if conn.execute("SELECT 1 FROM collections WHERE slug = %s", (col,)).fetchone() is not None:
+        raise Denied(f"{ev['id']}: collection '{col}' already exists")
+    conn.execute("INSERT INTO collections (slug, owner) VALUES (%s, %s)", (col, owner))
+    return col
+
+
 def _authorize(conn, ev: dict, data: dict) -> str | None:
-    """Acceptance rule 3. Creates the collection when an approved signer names a new slug.
-    Returns the event's collection (None for profiles, terms and snapshots)."""
+    """Acceptance rule 3. Creates the collection when an approved signer names a new slug, or
+    when a steward publishes a found event for an approved grantor. Returns the event's
+    collection (None for profiles, terms, snapshots and stewards)."""
     pk, kind = ev["pubkey"], ev["kind"]
     if kind == E.SNAPSHOT:
         return None  # rule 6 already checked the server key
@@ -319,16 +360,33 @@ def _authorize(conn, ev: dict, data: dict) -> str | None:
     if not signed_terms(conn, pk):
         raise Denied(f"{ev['id']}: sign the current terms first (kind 4706, version {TERMS['version']}, "
                      f"sha256 {TERMS['sha256']})")
+    if kind == E.STEWARDS:
+        if not is_approved(conn, pk):
+            raise Denied(f"{ev['id']}: only an approved pubkey grants stewards")
+        if pk in data["stewards"]:
+            raise Denied(f"{ev['id']}: a key cannot name itself as a steward")
+        return None
+    if kind == E.FOUND:
+        return _authorize_found(conn, ev, data)
     col = data["collection"]
     row = conn.execute("SELECT owner FROM collections WHERE slug = %s", (col,)).fetchone()
     if row is None:
         if not is_approved(conn, pk):
+            if _approved_grantors(conn, pk):
+                raise Denied(f"{ev['id']}: collection '{col}' does not exist; a steward creates one with a "
+                             f"kind 4712 found event naming its owner")
             raise Denied(f"{ev['id']}: collection '{col}' does not exist, and only approved pubkeys create collections")
         conn.execute("INSERT INTO collections (slug, owner) VALUES (%s, %s) ON CONFLICT DO NOTHING", (col, pk))
         row = conn.execute("SELECT owner FROM collections WHERE slug = %s", (col,)).fetchone()
     require_member(conn, pk, col)
-    if kind in (E.MEMBERS, E.ABOUT) and row["owner"] != pk:
-        raise Denied(f"{ev['id']}: only the owner of '{col}' changes its {E.NAMES[kind]}")
+    if kind == E.ADMINS:
+        if row["owner"] != pk:
+            raise Denied(f"{ev['id']}: only the owner of '{col}' changes its admins")
+        if row["owner"] in data["admins"]:
+            raise Denied(f"{ev['id']}: the owner of '{col}' is always an owner, not an admin")
+        return col
+    if kind in (E.MEMBERS, E.ABOUT) and row["owner"] != pk and not _admin_now(conn, col, pk):
+        raise Denied(f"{ev['id']}: only the owner or an admin of '{col}' changes its {E.NAMES[kind]}")
     return col
 
 
@@ -383,6 +441,8 @@ def list_collections(conn, pubkey: str) -> list[dict]:
     return [_clean(r) for r in conn.execute(
         """SELECT c.slug, c.owner, c.created_at,
                   ARRAY(SELECT m.pubkey FROM members m WHERE m.collection = c.slug ORDER BY m.pubkey) AS members,
+                  ARRAY(SELECT a.pubkey FROM collection_admins a WHERE a.collection = c.slug ORDER BY a.pubkey) AS admins,
+                  (SELECT r.role FROM collection_roster r WHERE r.collection = c.slug AND r.pubkey = %s) AS role,
                   (SELECT count(*) FROM evidence WHERE collection = c.slug) AS evidence,
                   (SELECT count(*) FROM claims WHERE collection = c.slug) AS claims,
                   (SELECT count(*) FROM links WHERE collection = c.slug) AS links,
@@ -390,7 +450,29 @@ def list_collections(conn, pubkey: str) -> list[dict]:
                   a.topic, coalesce(a.public, false) AS public
            FROM collections c LEFT JOIN collection_about a ON a.collection = c.slug
            WHERE c.slug IN (SELECT collection FROM members WHERE pubkey = %s)
-           ORDER BY c.created_at, c.slug""", (pubkey,))]
+           ORDER BY c.created_at, c.slug""", (pubkey, pubkey))]
+
+
+def list_members(conn, pubkey: str, collection: str) -> dict:
+    """Roster of one collection. The caller must already be a member. Roles are derived."""
+    require_member(conn, pubkey, collection)
+    rows = [_clean(r) for r in conn.execute(
+        """SELECT r.pubkey, r.role, p.name AS author FROM collection_roster r
+           LEFT JOIN profiles p ON p.pubkey = r.pubkey WHERE r.collection = %s
+           ORDER BY CASE r.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, r.pubkey""",
+        (collection,))]
+    role = next(r["role"] for r in rows if r["pubkey"] == pubkey)
+    return {"collection": collection, "role": role,
+            "can_manage_members": role in ("owner", "admin"), "can_manage_admins": role == "owner",
+            "members": rows}
+
+
+def list_delegations(conn, pubkey: str) -> dict:
+    """Create grants involving this key. granted: stewards you named. for: approved grantors who named you."""
+    require_allowed(conn, pubkey)
+    granted = [r["steward"] for r in conn.execute(
+        "SELECT steward FROM stewards WHERE grantor = %s ORDER BY steward", (pubkey,))]
+    return {"granted": granted, "for": _approved_grantors(conn, pubkey)}
 
 
 def showcase(conn) -> list[dict]:

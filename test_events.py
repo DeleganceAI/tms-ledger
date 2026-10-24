@@ -60,7 +60,11 @@ def main() -> None:
         (E.sign(SK, E.CONTRADICTION, {"collection": "s", "claims": ["a" * 64, "a" * 64], "reason": "r"}), "'claims'"),
         (E.sign(SK, E.LINK, {"collection": "s", "from": "a" * 64, "to": "b" * 64, "relation": "CAUSES",
                              "quote": "q", "reason": "r"}), "'relation'"),
-        (E.sign(SK, 4710, {}), "not a TMS kind"),
+        (E.sign(SK, 4720, {}), "not a TMS kind"),
+        (E.sign(SK, E.ADMINS, {"collection": "s", "admins": ["aa"]}), "'admins'"),
+        (E.sign(SK, E.ADMINS, {"collection": "s", "admins": ["ab" * 32, "ab" * 32]}), "'admins'"),
+        (E.sign(SK, E.STEWARDS, {"stewards": ["not-a-key"]}), "'stewards'"),
+        (E.sign(SK, E.FOUND, {"collection": "s", "owner": "zz"}), "'owner'"),
     ]:
         try:
             E.verify(bad)
@@ -69,6 +73,11 @@ def main() -> None:
         else:
             raise AssertionError(f"accepted: {why}")
     assert E.verify(E.sign(SK, E.PROFILE, {"name": "n", "display_name": "extra fields allowed"}))
+    pk = "ab" * 32
+    assert E.verify(E.sign(SK, E.ADMINS, {"collection": "s", "admins": []}))["admins"] == []
+    assert E.verify(E.sign(SK, E.ADMINS, {"collection": "s", "admins": [pk]}))["admins"] == [pk]
+    assert E.verify(E.sign(SK, E.STEWARDS, {"stewards": [pk]}))["stewards"] == [pk]
+    assert E.verify(E.sign(SK, E.FOUND, {"collection": "s", "owner": pk}))["owner"] == pk
 
     # NIP-19: the published test vector, and a round trip
     npub = "npub10elfcs4fr0l0r8af98jlmgdh9c8tcxjvz9qkw038js35mp4dma8qzvjptg"

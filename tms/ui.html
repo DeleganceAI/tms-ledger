@@ -382,6 +382,8 @@ function renderRecord(r) {
   if (kind === 'link') h += `<p class="big q">“${esc(c.quote)}”</p>${kv('reason', esc(c.reason))}${kv('relation', `<b>${esc(c.relation)}</b> ${esc(r.target ? r.target.kind : '')} ${link(c.to)}`)}${kv('grounded in', link(c.from))}`;
   if (kind === 'evidence') h += `<p class="big">${esc(c.title || '(untitled)')}</p>${kv('url', c.url ? `<a class="ext" href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.url)}</a>` : '')}${kv('source', esc(c.source))}${kv('chars', esc(r.chars))}`;
   if (kind === 'members') h += `<p class="big">${esc((c.members || []).length)} members</p>` + (c.members || []).map(m => `<div class="li muted">${esc(m)}</div>`).join('');
+  if (kind === 'admins') h += `<p class="big">${esc((c.admins || []).length)} admins</p>` + (c.admins || []).map(m => `<div class="li muted">${esc(m)}</div>`).join('');
+  if (kind === 'found') h += `<p class="big">Opened for <span class="muted">${esc(c.owner)}</span></p>`;
   h += kv('id', `<span class="muted">${esc(r.id)}</span>`) + kv('author', `${esc(r.author)} <span class="muted">${esc(r.pubkey)}</span>`) + kv('collection', esc(r.collection))
     + kv('created', unix(r.created_at) + ' <span class="muted">(signer-claimed)</span>') + kv('received', `${esc(r.received_at)} <span class="muted">· ${ago(r.received_at)} ago</span>`);
   if (kind === 'link' && r.target) h += `<h3>Target</h3><div class="li">${link(r.target.id)} <span class="tag">${esc(r.target.kind)}</span> ${esc(r.target.summary || '')}</div>`;

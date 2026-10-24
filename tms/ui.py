@@ -35,6 +35,8 @@ SUMMARY = """CASE x.kind
     WHEN 4703 THEN (x.content::jsonb ->> 'relation') || ' ' || left(x.content::jsonb ->> 'to', 12) || ' · ' || left(x.content::jsonb ->> 'quote', 160)
     WHEN 4704 THEN left(x.content::jsonb ->> 'reason', 240)
     WHEN 4705 THEN jsonb_array_length(x.content::jsonb -> 'members') || ' members'
+    WHEN 4710 THEN jsonb_array_length(x.content::jsonb -> 'admins') || ' admins'
+    WHEN 4712 THEN 'opened for ' || left(x.content::jsonb ->> 'owner', 12)
   END AS summary"""
 
 
