@@ -116,6 +116,15 @@ def _error(err: Exception, status: int = 400) -> JSONResponse:
     return JSONResponse({"error": str(err)}, status_code=403 if isinstance(err, L.Denied) else status)
 
 
+async def db(fn, *args):
+    """fn(conn, *args) on a pooled connection, in a worker thread. Async handlers use this for every
+    query: waiting on a busy pool from the event loop would stall every request, MCP included."""
+    def run():
+        with L.connect() as conn:
+            return fn(conn, *args)
+    return await run_in_threadpool(run)
+
+
 def _account(conn, pubkey: str) -> dict:
     """What the pages need about the logged-in key. custodial: the server holds its key (email sign-in)."""
     email = conn.execute("SELECT email, nsec_enc IS NOT NULL AS held FROM email_accounts WHERE pubkey = %s", (pubkey,)).fetchone()
@@ -126,11 +135,11 @@ def _account(conn, pubkey: str) -> dict:
 async def login(request: Request) -> JSONResponse:
     """POST a request event signed with tool "login"; get a 12-hour HttpOnly cookie."""
     from .server import authenticate
+    def run(conn, ev):
+        pubkey, _ = authenticate(conn, ev, "login")
+        return pubkey, _account(conn, pubkey)
     try:
-        ev = await request.json()
-        with L.connect() as conn:
-            pubkey, _ = authenticate(conn, ev, "login")
-            acct = _account(conn, pubkey)
+        pubkey, acct = await db(run, await request.json())
     except ValueError as err:
         return _error(err)
     resp = JSONResponse(acct)
@@ -245,8 +254,7 @@ async def members_page(request: Request):
     pubkey, slug = cookie_pubkey(request), request.path_params["slug"]
     if pubkey is None:
         return HTMLResponse('<meta http-equiv="refresh" content="0;url=/">', status_code=401)
-    with L.connect() as conn:
-        row = conn.execute("SELECT owner FROM collections WHERE slug = %s", (slug,)).fetchone()
+    row = await db(lambda conn: conn.execute("SELECT owner FROM collections WHERE slug = %s", (slug,)).fetchone())
     if row is None or row["owner"] != pubkey:
         return PlainTextResponse(f"Only the owner of '{slug}' manages its members.", status_code=403)
     return await page(request)
@@ -256,8 +264,7 @@ async def me(request: Request) -> JSONResponse:
     pubkey = cookie_pubkey(request)
     if pubkey is None:
         return JSONResponse({"error": "not logged in"}, status_code=401)
-    with L.connect() as conn:
-        return JSONResponse(_account(conn, pubkey))
+    return JSONResponse(await db(_account, pubkey))
 
 
 async def collection(request: Request) -> JSONResponse:
@@ -265,14 +272,16 @@ async def collection(request: Request) -> JSONResponse:
     pubkey, slug = cookie_pubkey(request), request.path_params["slug"]
     if pubkey is None:
         return JSONResponse({"error": "not logged in"}, status_code=401)
+    def run(conn):
+        L.require_member(conn, pubkey, slug)
+        owner = conn.execute("SELECT owner FROM collections WHERE slug = %s", (slug,)).fetchone()["owner"]
+        members = [L._clean(r) for r in conn.execute(
+            """SELECT m.pubkey, p.name, p.about FROM members m LEFT JOIN profiles p ON p.pubkey = m.pubkey
+               WHERE m.collection = %s ORDER BY m.pubkey = %s DESC, p.name NULLS LAST, m.pubkey""", (slug, owner))]
+        about = conn.execute("SELECT topic, public FROM collection_about WHERE collection = %s", (slug,)).fetchone()
+        return owner, members, about
     try:
-        with L.connect() as conn:
-            L.require_member(conn, pubkey, slug)
-            owner = conn.execute("SELECT owner FROM collections WHERE slug = %s", (slug,)).fetchone()["owner"]
-            members = [L._clean(r) for r in conn.execute(
-                """SELECT m.pubkey, p.name, p.about FROM members m LEFT JOIN profiles p ON p.pubkey = m.pubkey
-                   WHERE m.collection = %s ORDER BY m.pubkey = %s DESC, p.name NULLS LAST, m.pubkey""", (slug, owner))]
-            about = conn.execute("SELECT topic, public FROM collection_about WHERE collection = %s", (slug,)).fetchone()
+        owner, members, about = await db(run)
     except ValueError as err:
         return _error(err)
     for m in members:
@@ -309,8 +318,7 @@ async def fetch(request: Request) -> JSONResponse:
         return JSONResponse({"error": "not logged in"}, status_code=401)
     url = request.query_params.get("url", "")
     try:
-        with L.connect() as conn:
-            L.require_allowed(conn, pubkey)
+        await db(L.require_allowed, pubkey)
         text, title = await run_in_threadpool(L.fetch_text, url)  # over HTTP, ALLOW_LOCAL is off: http(s) only
     except Exception as err:
         return _error(err)
@@ -321,11 +329,10 @@ async def export(request: Request):
     pubkey, slug = cookie_pubkey(request), request.path_params["slug"]
     if pubkey is None:
         return PlainTextResponse("log in first", status_code=401)
-    with L.connect() as conn:
-        try:
-            L.require_member(conn, pubkey, slug)
-        except ValueError as err:
-            return PlainTextResponse(str(err), status_code=403)
+    try:
+        await db(L.require_member, pubkey, slug)
+    except ValueError as err:
+        return PlainTextResponse(str(err), status_code=403)
 
     def lines():
         with L.connect() as conn:

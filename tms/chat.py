@@ -21,7 +21,7 @@ from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
 from . import ledger as L
-from .web import cookie_pubkey
+from .web import cookie_pubkey, db
 
 CHAT_URL = os.environ.get("CHAT_URL", "https://api.deepinfra.com/v1/openai").rstrip("/")
 CHAT_API_KEY = os.environ.get("CHAT_API_KEY") or L.EMBED_API_KEY  # one DeepInfra key for both
@@ -182,8 +182,7 @@ async def chat(request: Request):
     collection = body.get("collection") or ""
     try:
         messages = history(body.get("messages"))
-        with L.connect() as conn:
-            L.require_member(conn, pk, collection)
+        await db(L.require_member, pk, collection)
     except ValueError as err:
         return JSONResponse({"error": str(err)}, status_code=400 if not isinstance(err, L.Denied) else 403)
 
