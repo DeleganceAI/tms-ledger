@@ -17,12 +17,13 @@ import subprocess
 import sys
 import time
 from contextvars import ContextVar
-from typing import Any
+from typing import Annotated, Any
 
 import anyio
 import anyio.to_thread
 import httpx
 import psycopg
+from pydantic import Field
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
@@ -210,7 +211,7 @@ def get_event(request: dict | None = None, id: str = "", offset: int = 0, max_ch
 
 @signed(L.search_claims)
 def search_claims(request: dict | None = None, collection: str = "", text: str = "", method: str = "vector",
-                  limit: int = 10) -> dict[str, Any]:
+                  limit: Annotated[int, Field(ge=1, le=200, strict=True)] = 10) -> dict[str, Any]:
     """Retrieve claims in a collection by meaning (method='vector') or words (method='keyword').
     Each result inlines the links targeting it (relation, quote, grounding evidence) and the ids of
     contradictions it belongs to. Inlined quotes are cut to 300 chars here only. Ordering is a
@@ -219,32 +220,32 @@ def search_claims(request: dict | None = None, collection: str = "", text: str =
 
 @signed(L.list_claims)
 def list_claims(request: dict | None = None, collection: str = "", sort: str = "unsupported",
-                limit: int = 50, offset: int = 0) -> list[dict]:
+                limit: Annotated[int, Field(ge=1, le=200, strict=True)] = 50, offset: int = 0) -> list[dict]:
     """Claims in a collection with their link counts (supports, qualifies, rebuts) and how many
     contradictions they belong to. sort: 'unsupported' (fewest links first), 'unchallenged'
     (supported, never rebutted or qualified), 'contested', 'links' (most), 'recent', 'oldest'. A
     worklist for follow-up research; counts are retrieval aids, not judgements. Page with offset;
-    to walk every claim use sort='oldest' and stop when fewer than limit come back."""
+    limit must be 1–200; to walk every claim use sort='oldest' and stop when fewer than limit come back."""
 
 
 @signed(L.get_links)
 def get_links(request: dict | None = None, collection: str = "", to_id: str = "", from_id: str = "",
-              relation: str = "", limit: int = 100, offset: int = 0) -> list[dict]:
+              relation: str = "", limit: Annotated[int, Field(ge=1, le=1000, strict=True)] = 100, offset: int = 0) -> list[dict]:
     """Links in a collection, oldest first, filtered by target (to_id), grounding evidence (from_id)
-    and/or relation. Page with offset; stop when fewer than limit come back."""
+    and/or relation. limit must be 1–1000. Page with offset; stop when fewer than limit come back."""
 
 
 @signed(L.list_evidence)
 def list_evidence(request: dict | None = None, collection: str = "", ungrounded_only: bool = False,
-                  source: str = "", limit: int = 50, offset: int = 0) -> list[dict]:
+                  source: str = "", limit: Annotated[int, Field(ge=1, le=500, strict=True)] = 50, offset: int = 0) -> list[dict]:
     """Evidence documents in a collection, oldest first, without their text. ungrounded_only=true
     returns documents no link cites yet, the worklist for a claims pass. source filters by substring.
-    Page with offset; stop when fewer than limit come back."""
+    limit must be 1–500. Page with offset; stop when fewer than limit come back."""
 
 
 @signed(L.search_contradictions)
 def search_contradictions(request: dict | None = None, collection: str = "", claim: str = "", text: str = "",
-                          limit: int = 20) -> list[dict]:
+                          limit: Annotated[int, Field(ge=1, le=200, strict=True)] = 20) -> list[dict]:
     """Contradictions in a collection, optionally those naming a claim id or matching words in the
     reason, each with its member claims and the links that target it. Whether one is open or
     resolved is the reader's conclusion."""

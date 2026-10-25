@@ -313,6 +313,21 @@ def server(ids) -> None:
         tools = {t["name"] for t in r.json()["result"]["tools"]}  # the tool list is open to anyone
         assert {"publish", "fetch_url", "search_claims", "get_event", "check_proof"} <= tools, tools
 
+        # Limits are advertised and enforced inside signed args too (#43).
+        schemas = {t["name"]: t["inputSchema"] for t in r.json()["result"]["tools"]}
+        for name, cap in (("list_evidence", 500), ("list_claims", 200), ("get_links", 1000),
+                          ("search_claims", 200), ("search_contradictions", 200)):
+            limit_schema = schemas[name]["properties"]["limit"]
+            assert limit_schema["minimum"] == 1 and limit_schema["maximum"] == cap, limit_schema
+            for bad in (0, -1, cap + 1, 1.5, True, "50"):
+                args = {"collection": "smoke", "limit": bad}
+                rejects(lambda: call(name, {"request": E.request(BOB, name, args)}),
+                        f"limit must be an integer between 1 and {cap}")
+            args = {"collection": "smoke", "limit": cap}
+            if name == "search_claims":
+                args.update(text="histamine", method="keyword")
+            assert call(name, {"request": E.request(BOB, name, args)})
+
         ok = req(BOB, "search_claims", {"collection": "smoke", "text": "histamine DAO", "method": "keyword"})
         assert call("search_claims", {"request": ok})["items"], "a signed request works"
         # A replayed request is rejected.
