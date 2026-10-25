@@ -346,6 +346,41 @@ def server(ids) -> None:
         res = call("publish", {"events": [sign(BOB, E.CLAIM, {"collection": "smoke", "text": "Published over HTTP."})]})
         assert len(res["accepted"]) == 1, res
 
+        # A provider 429 is actionable over MCP, without leaking its URL (#42).
+        from unittest.mock import patch
+        from datetime import datetime, timezone, timedelta
+        from email.utils import format_datetime
+        import httpx
+
+        upstream = httpx.Request("POST", "https://provider.invalid/embeddings")
+        future = format_datetime(datetime.now(timezone.utc) + timedelta(seconds=120), usegmt=True)
+        for hint, expected in (("90", 90), (None, 60), ("garbage", 60), ("-1", 60), ("0", 1),
+                               ("Wed, 21 Oct 2015 07:28:00 GMT", 1), (future, None)):
+            response = httpx.Response(429, request=upstream, headers={} if hint is None else {"Retry-After": hint})
+            with patch.object(L, "embed", REAL_EMBED), patch.object(L.httpx, "post", return_value=response) as post:
+                try:
+                    call("search_claims", {"request": E.request(BOB, "search_claims",
+                         {"collection": "smoke", "text": "histamine"})})
+                except ValueError as err:
+                    message = str(err)
+                    assert "429; retryable" in message and "fresh signed request" in message, message
+                    assert "provider.invalid" not in message and "https://" not in message, message
+                    delay = int(re.search(r"Retry after (\d+) seconds", message)[1])
+                    assert delay == expected if expected is not None else 115 <= delay <= 120, message
+                else:
+                    raise AssertionError("rate limit must fail explicitly")
+                assert post.call_count == 1, "do not sleep/retry while holding a database connection"
+                assert call("search_claims", {"request": E.request(BOB, "search_claims",
+                     {"collection": "smoke", "text": "histamine", "method": "keyword"})})["items"]
+                assert post.call_count == 1, "keyword search needs no embedding"
+        with patch.object(L.httpx, "post", return_value=httpx.Response(401, request=upstream)):
+            try:
+                REAL_EMBED(["test"])
+            except httpx.HTTPStatusError as err:
+                assert err.response.status_code == 401
+            else:
+                raise AssertionError("non-rate-limit failures must retain their status")
+
         # Browser login: a signed "login" request buys a 12-hour cookie; strangers get none.
         assert client.post("/login", json=req(STRANGER, "login")).status_code == 403
         r = client.post("/login", json=req(BOB, "login"))

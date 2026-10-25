@@ -401,6 +401,7 @@ Finds claims in a collection that match a question or statement. Search before a
 | `limit` | integer | `10` | at most 200 |
 
 - **vector** ranks by embedding distance (Qwen3-Embedding-8B, cosine). Lower `distance` is closer. A claim whose vector hasn't been computed yet doesn't appear.
+- If the embedding service rate-limits vector search, the tool returns a retryable error with a delay in seconds (the provider's `Retry-After`, or 60 seconds when absent or invalid). Wait, then sign a fresh request. You can explicitly choose keyword search while vector search is unavailable; the server does not switch methods automatically.
 - **keyword** is PostgreSQL full-text search. Every word must appear, and `rank` is higher for better matches. Try it when vector results look thin, or to find exact terms.
 - Each result inlines the links that target the claim, with quotes cut to 300 characters (use `get_links` for whole quotes), plus the IDs of contradictions it belongs to.
 - There's no `offset`; raise `limit` instead.
