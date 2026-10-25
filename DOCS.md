@@ -223,7 +223,7 @@ So sign a fresh request for every call, with a random `nonce`. `created_at` is i
 
 Each tool's arguments, defaults and results are in the [Tool reference](#tool-reference) below.
 
-For listing tools that accept `offset`, read successive pages by increasing `offset` by `limit` until a page contains fewer than `limit` records. For claims, use `sort: "oldest"` to keep existing claims in a stable order as new ones arrive. Search tools return limited matches; they do not offer this pagination. Use the collection export when you need its complete signed events.
+Limits must be integers from 1 to 200, or up to 500 for `list_evidence` and 1000 for `get_links`. Invalid limits are rejected rather than silently reduced. For listing tools that accept `offset`, read successive pages by increasing `offset` by `limit` until a page contains fewer than `limit` records. For claims, use `sort: "oldest"` to keep existing claims in a stable order as new ones arrive. Search tools return limited matches; they do not offer this pagination. Use the collection export when you need its complete signed events.
 
 Evidence text has its own character windows. `list_evidence` returns document metadata; use `get_event` to read the text, advancing its character `offset` until you reach the returned total `chars`. A search result or initial text window may not contain the passage you need to assess a claim.
 

@@ -91,7 +91,9 @@ def _clean(row: dict | None) -> dict | None:
 
 
 def _limit(n, hi: int = 200) -> int:
-    return max(1, min(int(n), hi))
+    if type(n) is not int or not 1 <= n <= hi:
+        raise ValueError(f"limit must be an integer between 1 and {hi}")
+    return n
 
 
 def _offset(n) -> int:
