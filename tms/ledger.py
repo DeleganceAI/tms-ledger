@@ -19,7 +19,9 @@ import sys
 import tempfile
 import threading
 from contextlib import nullcontext
-from datetime import datetime
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+from math import ceil
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -113,7 +115,22 @@ def embed(texts: list[str], query: bool = False, pubkey: str | None = None,
                    headers={"Authorization": f"Bearer {EMBED_API_KEY}"} if EMBED_API_KEY else {},
                    json={"model": EMBED_MODEL, "input": [(QUERY_PREFIX + t) if query else t for t in texts],
                          "encoding_format": "float"})
-    r.raise_for_status()
+    try:
+        r.raise_for_status()
+    except httpx.HTTPStatusError as err:
+        if r.status_code != 429:
+            raise
+        retry_after = r.headers.get("Retry-After", "")
+        try:
+            delay = int(retry_after) if retry_after.isascii() and retry_after.isdigit() else ceil(
+                (parsedate_to_datetime(retry_after) - datetime.now(timezone.utc)).total_seconds())
+            delay = max(1, delay)
+        except (ValueError, TypeError, OverflowError):
+            delay = 60  # No usable provider hint; suggest a delay without holding a database connection.
+        raise RuntimeError(
+            f"Embedding service rate limited (429; retryable). Retry after {delay} seconds with a fresh signed request. "
+            "For search_claims, method='keyword' remains available; it uses word matching instead of vector similarity."
+        ) from err
     body = r.json()
     usage = body.get("usage") or {}
     tokens = int(usage.get("total_tokens") or usage.get("prompt_tokens") or 0)
