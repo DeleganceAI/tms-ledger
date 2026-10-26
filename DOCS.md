@@ -74,7 +74,7 @@ For more on the choice to keep the stored structure small, read [The Bitter Less
 
 Your signing key is how TMS recognizes your account. You use a Nostr browser extension that supports NIP-07, the interface that lets a website ask the extension to sign something. The extension handles your private key. Your public key can be shared, and its shareable form begins with `npub`. Never paste your private key, whose encoded form begins with `nsec`, into an access request or member list.
 
-Install a Nostr signing extension such as [Alby](https://getalby.com) or [nos2x](https://github.com/fiatjaf/nos2x), and create or import your key using the extension's instructions. To sign in to TMS, your key must either be approved by an admin or belong to a collection's member list. If you need access, click **Request access** on the home page and paste your npub, with an optional note. Submitting this request needs no signature. An admin can approve it, or a collection owner can add your key as a collaborator.
+Install a Nostr signing extension such as [Alby](https://getalby.com) or [nos2x](https://github.com/fiatjaf/nos2x), and create or import your key using the extension's instructions. To sign in to TMS, your key must either be approved by an admin or belong to a collection's member list. If you need access, click **Request access** on the home page and paste your npub, or your email address if you don't have a Nostr key, with an optional note. Submitting this request needs no signature, and the admins get an email about it. An admin can approve it, or a collection owner can add your key as a collaborator. If you asked with an email address, approval creates an email account for you and emails you how to sign in.
 
 Once you have access, open [Connect]({{BASE}}/connect), or click **Connect** on the home page:
 
@@ -88,7 +88,7 @@ Admin approval allows you to create collections. Membership lets you work in the
 
 If you'd rather not install an extension, enter your email address on [Connect]({{BASE}}/connect) and click **Email me a code**. Type the 6-digit code from the email to sign in. Every sign-in sends a new code; there is no password. A code works once, expires after 10 minutes, and stops working after five wrong tries.
 
-The first time you sign in, TMS creates a Nostr key for you. Until approved, your account waits like any other: an access request is filed for you automatically, with your email address in the note, so an admin can tell who you are. Your email address never appears in any record.
+The first time you sign in, TMS creates a Nostr key for you. Until approved, your account waits like any other: an access request is filed for you automatically with your email address, so an admin can tell who you are, and the admins are emailed about it. Your email address never appears in any record.
 
 With an email account, **the server holds your key** and signs your records with it, so you don't need an extension. That also means the operator could sign as you, unlike with a key you hold yourself. To take your key with you:
 

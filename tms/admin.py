@@ -44,7 +44,7 @@ def report(conn, viewer: str) -> dict:
     cols = None if viewer in L.ADMINS else L.my_collections(conn, viewer)
     users = conn.execute(USERS_SQL, (sorted(L.APPROVED | L.ADMINS),)).fetchall()
     return {
-        "requests": conn.execute("""SELECT id, npub, note, at FROM access_requests
+        "requests": conn.execute("""SELECT id, npub, email, note, at FROM access_requests
             WHERE status = 'pending' ORDER BY at""").fetchall(),
         "approvals": conn.execute("""SELECT a.pubkey, a.at, p.name, (SELECT name FROM profiles q WHERE q.pubkey = a.approved_by) AS by_name,
               a.approved_by FROM approvals a LEFT JOIN profiles p ON p.pubkey = a.pubkey ORDER BY a.at DESC""").fetchall(),
@@ -84,6 +84,8 @@ def _usd(v) -> str:
 def _who(pubkey, name) -> str:
     if not pubkey:
         return "—"
+    if not E.HEX64.match(pubkey):  # not a key (a test or script wrote something else): show it as text
+        return escape(pubkey)
     label = escape(name) if name else escape(E.bech32_encode("npub", pubkey)[:16] + "…")
     return f'<span title="{escape(E.bech32_encode("npub", pubkey))}">{label}</span>'
 
@@ -103,8 +105,9 @@ button.ghost{{background:none;color:var(--accent)}}form.add{{display:block;margi
 </style></head><body><main>
 <h1>TMS admin</h1><p><a href="/">Home</a> · <a href="/dashboard">Dashboard</a> · <a href="/communities">Communities</a> · <a href="/office">Office</a> · <a href="/docs">Docs</a> · <a href="https://github.com/DeleganceAI/tms-ledger" target="_blank" rel="noopener" title="Source on GitHub"><svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-2px;margin-right:4px"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>GitHub</a></p>
 <h2>Access requests ({len(r["requests"])} pending)</h2>
-{_table(["npub", "Note", "Asked", ""],
-        [[f'<span class="mono">{escape(q["npub"])}</span>', f'<span class="note">{escape(q["note"] or "")}</span>', when(q["at"]),
+{_table(["npub or email", "Note", "Asked", ""],
+        [['<br>'.join(f'<span class="mono">{escape(x)}</span>' for x in (q["npub"], q["email"]) if x),
+          f'<span class="note">{escape(q["note"] or "")}</span>', when(q["at"]),
           f'<form method="post" action="/admin/requests/{q["id"]}/approve"><button>Approve</button></form> '
           f'<form method="post" action="/admin/requests/{q["id"]}/dismiss"><button class="ghost">Dismiss</button></form>']
          for q in r["requests"]])}
@@ -192,14 +195,25 @@ def decide(request: Request):
             return PlainTextResponse("Not Found", status_code=404)
     if not _same_origin(request):
         return PlainTextResponse("cross-site request refused", status_code=403)
+    from . import email_login as EL
     rid, action = int(request.path_params["id"]), request.path_params["action"]
     status = {"approve": "approved", "dismiss": "dismissed"}[action]
     with L.connect() as conn, conn.transaction():
-        row = conn.execute("""UPDATE access_requests SET status = %s, decided_by = %s, decided_at = now()
-                              WHERE id = %s AND status = 'pending' RETURNING npub""", (status, pubkey, rid)).fetchone()
+        row = conn.execute("SELECT npub, email FROM access_requests WHERE id = %s AND status = 'pending' FOR UPDATE", (rid,)).fetchone()
         if row and action == "approve":
-            conn.execute("INSERT INTO approvals (pubkey, approved_by) VALUES (%s, %s) ON CONFLICT DO NOTHING",
-                         (E.pubkey_hex(row["npub"]), pubkey))
+            if row["npub"]:
+                key = E.pubkey_hex(row["npub"])
+            elif EL.configured():  # an email request: create the account and the key we hold for it
+                key = EL.ensure_account(conn, row["email"])["pubkey"]
+            else:
+                return PlainTextResponse("Email sign-in isn't configured (RESEND_API_KEY, TMS_KEY_SECRET), so an email "
+                                         "request can't be approved yet.", status_code=503)
+            conn.execute("INSERT INTO approvals (pubkey, approved_by) VALUES (%s, %s) ON CONFLICT DO NOTHING", (key, pubkey))
+        if row:
+            conn.execute("UPDATE access_requests SET status = %s, decided_by = %s, decided_at = now() WHERE id = %s",
+                         (status, pubkey, rid))
+    if row and action == "approve" and row["email"]:
+        EL.notify_approved(str(request.base_url).rstrip("/"), row["email"])
     return RedirectResponse("/admin", status_code=303)
 
 

@@ -195,29 +195,35 @@ def _rate_limited(ip: str) -> bool:
 
 
 async def access_request(request: Request) -> JSONResponse:
-    """Unsigned on purpose: the visitor may not have a Nostr extension yet. An admin decides in /admin."""
+    """Unsigned on purpose: the visitor may not have a Nostr extension yet. They give an npub, or an
+    email address if they have no key. The admins get an email; an admin decides in /admin."""
+    from . import email_login as EL
     if _rate_limited(_client_ip(request)):
         return JSONResponse({"error": "too many requests from this address; try again later"}, status_code=429)
     try:
         body = await request.json()
-        npub = E.bech32_encode("npub", E.pubkey_hex(str(body.get("npub", ""))))
+        contact = str(body.get("contact") or body.get("npub") or "").strip()
         note = str(body.get("note") or "").strip()
+        npub, email = (None, EL._email(contact)) if "@" in contact else (E.bech32_encode("npub", E.pubkey_hex(contact)), None)
     except (ValueError, TypeError, AttributeError):
-        return JSONResponse({"error": "enter an npub (npub1...) or a 64-character hex pubkey"}, status_code=400)
+        return JSONResponse({"error": "enter an npub (npub1...), a 64-character hex pubkey, or an email address"}, status_code=400)
     if len(note) > 500:
         return JSONResponse({"error": "the note is limited to 500 characters"}, status_code=400)
 
-    def store() -> bool:
+    def store() -> str:
         with L.connect() as conn:
             if conn.execute("SELECT count(*) AS n FROM access_requests WHERE status = 'pending'").fetchone()["n"] >= MAX_PENDING:
-                return False
-            conn.execute("""INSERT INTO access_requests (npub, note) VALUES (%s, %s)
-                            ON CONFLICT (npub) WHERE status = 'pending' DO NOTHING""", (npub, note or None))
-            return True
-    if not await run_in_threadpool(store):
+                return "full"
+            conflict = "(npub) WHERE status = 'pending'" if npub else "(email) WHERE status = 'pending' AND npub IS NULL"
+            new = conn.execute(f"""INSERT INTO access_requests (npub, email, note) VALUES (%s, %s, %s)
+                                  ON CONFLICT {conflict} DO NOTHING RETURNING id""", (npub, email, note or None)).fetchone()
+        if new:  # only a new request emails the admins, so repeats can't spam them
+            EL.notify_request(str(request.base_url).rstrip("/"), npub, email, note)
+        return "ok"
+    if await run_in_threadpool(store) == "full":
         return JSONResponse({"error": "too many requests are waiting; try again later"}, status_code=429)
     # The same answer whether or not this key already had a request waiting: the reply says nothing about anyone.
-    return JSONResponse({"status": "pending", "npub": npub}, status_code=201)
+    return JSONResponse({"status": "pending", "npub": npub, "email": email}, status_code=201)
 
 
 async def office(request: Request) -> HTMLResponse:

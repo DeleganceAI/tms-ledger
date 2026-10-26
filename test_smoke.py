@@ -526,6 +526,7 @@ def server(ids) -> None:
     fetch_stub()
     chat_agent()
     email_signin()
+    request_notifications()
     showcase()
 
     with L.connect() as conn:
@@ -629,6 +630,52 @@ def showcase() -> None:
         assert client.get("/showcase.json").json()["collections"] == [], "the latest about wins"
 
 
+def request_notifications() -> None:
+    """Access requests take an npub or an email, email the admins, and approving an email request
+    creates its account and emails the person."""
+    from starlette.testclient import TestClient
+
+    from tms import email_login as EL
+    from tms import server as S
+    from tms import web as W
+    mail = []
+    EL.send = lambda to, subject, text: mail.append((to, subject, text))
+    EL.KEY_SECRET, EL.RESEND_API_KEY, EL.NOTIFY = "smoke-key-secret", "test", ["admin@example.org"]
+    L.ADMINS = {PK[OWNER]}
+    newkey = E.bech32_encode("npub", E.pubkey_of(hashlib.sha256(b"requester").hexdigest()))
+    with TestClient(S.http_app()) as client:
+        W._recent.clear()
+        ask = lambda contact, note="": client.post("/api/access-request", json={"contact": contact, "note": note})  # noqa: E731
+        assert ask("neither", "x").status_code == 400
+        assert ask(newkey, "Biologist").status_code == 201
+        assert mail[-1][0] == "admin@example.org" and newkey in mail[-1][2] and "Biologist" in mail[-1][2] and "/admin" in mail[-1][2]
+        r = ask("Cal@Example.com", "No Nostr key yet")
+        assert r.status_code == 201 and r.json()["email"] == "cal@example.com" and r.json()["npub"] is None
+        assert mail[-1][0] == "admin@example.org" and "cal@example.com" in mail[-1][2]
+        n = len(mail)
+        assert ask("cal@example.com").status_code == 201 and len(mail) == n, "a repeat request doesn't email the admins again"
+        with L.connect() as conn:
+            assert conn.execute("SELECT count(*) AS n FROM access_requests WHERE email = 'cal@example.com' AND status = 'pending'").fetchone()["n"] == 1
+            rid = conn.execute("SELECT id FROM access_requests WHERE email = 'cal@example.com' AND status = 'pending'").fetchone()["id"]
+        page = None
+        client.cookies.set(W.COOKIE, W.make_cookie(PK[OWNER]))
+        page = client.get("/admin").text
+        assert "cal@example.com" in page and newkey in page
+        assert client.post(f"/admin/requests/{rid}/approve", follow_redirects=False).status_code == 303
+        with L.connect() as conn:
+            cal = conn.execute("SELECT pubkey, nsec_enc FROM email_accounts WHERE email = 'cal@example.com'").fetchone()
+            assert cal and cal["nsec_enc"] and L.is_approved(conn, cal["pubkey"]), "approval created an approved email account"
+        assert mail[-1][0] == "cal@example.com" and "/connect" in mail[-1][2], "the requester is told how to sign in"
+        client.cookies.clear()
+        W._recent.clear()
+        mail.clear()
+        client.post("/api/email/start", json={"email": "cal@example.com"})
+        code = re.search(r"\b(\d{6})\b", mail[-1][2]).group(1)
+        me = client.post("/api/email/verify", json={"email": "cal@example.com", "code": code}).json()
+        assert me["pubkey"] == cal["pubkey"] and me["custodial"], "and can sign in straight away"
+        client.cookies.clear()
+
+
 def email_signin() -> None:
     """Email sign-in: codes, a held key that signs for the account, export, and forgetting it."""
     import re as _re
@@ -639,7 +686,7 @@ def email_signin() -> None:
     from tms import server as S
     from tms import web as W
     sent = []
-    EL.send = lambda to, subject, text: sent.append((to, _re.search(r"\b(\d{6})\b", text).group(1)))
+    EL.send = lambda to, subject, text: sent.append((to, (_re.search(r"\b(\d{6})\b", text) or _re.search("", "")).group(1) if "code" in text else text))
     EL.KEY_SECRET, EL.RESEND_API_KEY = "smoke-key-secret", "test"
     code = lambda: sent[-1][1]  # noqa: E731
     with TestClient(S.http_app()) as client:
@@ -652,7 +699,7 @@ def email_signin() -> None:
         assert r.status_code == 403 and "waiting for an admin" in r.json()["error"], r.text  # new, not yet approved
         with L.connect() as conn:
             pk = conn.execute("SELECT pubkey FROM email_accounts WHERE email = 'ann@example.com'").fetchone()["pubkey"]
-            assert conn.execute("SELECT note FROM access_requests WHERE npub = %s", (E.bech32_encode("npub", pk),)).fetchone()["note"].endswith("ann@example.com")
+            assert conn.execute("SELECT email FROM access_requests WHERE npub = %s", (E.bech32_encode("npub", pk),)).fetchone()["email"] == "ann@example.com"
             conn.execute("INSERT INTO approvals (pubkey, approved_by) VALUES (%s, 'smoke')", (pk,))
             assert not conn.execute("SELECT 1 FROM events WHERE content LIKE '%%ann@example.com%%'").fetchone(), "the email never reaches a record"
         client.post("/api/email/start", json={"email": "ann@example.com"})

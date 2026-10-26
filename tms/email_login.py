@@ -32,6 +32,8 @@ RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 EMAIL_FROM = os.environ.get("TMS_EMAIL_FROM", "TMS ledger <login@delegance.ai>")
 KEY_SECRET = os.environ.get("TMS_KEY_SECRET", "")
 DEV_PRINT = os.environ.get("TMS_EMAIL_DEV") == "1"  # local only: print codes instead of emailing them
+# who hears about new access requests; defaults to the site's contact address
+NOTIFY = [a.strip() for a in (os.environ.get("TMS_NOTIFY_EMAIL") or W.CONTACT_EMAIL).split(",") if a.strip()]
 CODE_TTL = 600            # seconds a code stays valid
 CODES_PER_HOUR = 5        # codes per email address per hour
 MAX_ATTEMPTS = 5          # wrong guesses before a code is dead
@@ -120,6 +122,42 @@ def _email(raw) -> str:
     return email
 
 
+def ensure_account(conn, email: str) -> dict:
+    """The email account for this address, creating it and its held key on first use."""
+    sk = PrivateKey()
+    pubkey = E.pubkey_of(sk.secret)
+    conn.execute("""INSERT INTO email_accounts (email, pubkey, nsec_enc) VALUES (%s, %s, %s)
+                    ON CONFLICT (email) DO NOTHING""", (email, pubkey, seal(sk.secret, pubkey)))
+    return conn.execute("SELECT * FROM email_accounts WHERE email = %s", (email,)).fetchone()
+
+
+def notify_request(base: str, npub: str | None, email: str | None, note: str | None) -> None:
+    """Tell the admins a request arrived. Best effort: a failed email never fails the request."""
+    if not NOTIFY or not (RESEND_API_KEY or DEV_PRINT):
+        return
+    who = " / ".join(x for x in (npub, email) if x)
+    try:
+        for to in NOTIFY:
+            send(to, f"TMS access request: {email or npub[:20] + '…'}",
+                 f"Someone asked for access to the TMS ledger.\n\n{'npub:  ' + npub + chr(10) if npub else ''}"
+                 f"{'email: ' + email + chr(10) if email else ''}note:  {note or '(none)'}\n\n"
+                 f"Approve or dismiss it at {base}/admin")
+    except Exception as err:
+        print(f"access request notification failed for {who}: {err}", file=sys.stderr)
+
+
+def notify_approved(base: str, email: str) -> None:
+    """Tell an email requester they're in. Best effort."""
+    if not (RESEND_API_KEY or DEV_PRINT):
+        return
+    try:
+        send(email, "You're approved for the TMS ledger",
+             f"Your access request was approved.\n\nSign in at {base}/connect: under \"Or sign in with email\", enter "
+             f"{email} and we'll email you a one-time code. There's no password.")
+    except Exception as err:
+        print(f"approval email to {email} failed: {err}", file=sys.stderr)
+
+
 def account_for(conn, pubkey: str) -> dict | None:
     return conn.execute("SELECT * FROM email_accounts WHERE pubkey = %s", (pubkey,)).fetchone()
 
@@ -179,19 +217,17 @@ async def verify(request: Request) -> JSONResponse:
         def run():
             with L.connect() as conn:  # autocommit: a wrong guess's attempt count sticks
                 redeem(conn, email, "login", code)
-                sk = PrivateKey()
-                pubkey = E.pubkey_of(sk.secret)
-                conn.execute("""INSERT INTO email_accounts (email, pubkey, nsec_enc) VALUES (%s, %s, %s)
-                                ON CONFLICT (email) DO NOTHING""", (email, pubkey, seal(sk.secret, pubkey)))
-                acct = conn.execute("SELECT * FROM email_accounts WHERE email = %s", (email,)).fetchone()
+                acct = ensure_account(conn, email)
                 if acct["nsec_enc"] is None:
                     raise Refused("this account now signs with its own key: connect with your Nostr extension instead", 409)
                 pubkey = acct["pubkey"]
                 if not L.allowed(conn, pubkey):
                     npub = E.bech32_encode("npub", pubkey)
-                    conn.execute("""INSERT INTO access_requests (npub, note) SELECT %s, %s
-                                    WHERE NOT EXISTS (SELECT 1 FROM access_requests WHERE npub = %s AND status = 'pending')""",
-                                 (npub, f"Signed up by email: {email}", npub))
+                    new = conn.execute("""INSERT INTO access_requests (npub, email, note) SELECT %s, %s, %s
+                                          WHERE NOT EXISTS (SELECT 1 FROM access_requests WHERE npub = %s AND status = 'pending')
+                                          RETURNING id""", (npub, email, "Signed up by email", npub)).fetchone()
+                    if new:
+                        notify_request(str(request.base_url).rstrip("/"), npub, email, "Signed up by email")
                     raise Refused(f"your account is created and waiting for an admin to approve it ({npub})", 403)
                 return pubkey, W._account(conn, pubkey)
         pubkey, acct = await run_in_threadpool(run)
