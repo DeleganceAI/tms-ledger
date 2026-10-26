@@ -29,13 +29,13 @@ Scout adds `<TOPIC>`, `<SCOPE>`, and `<HYPOTHESES>`, described in its own file.
 
 ## How they fit together
 
-Scouts add evidence: each owns one collection and hunts for full-text sources for and against its seed hypotheses. Claim Miner extracts claims from those documents. Linker links claims to evidence already in the collection. tms-gap-finder looks for rebuttals and qualifications and adds full-text counter-evidence when it is missing. Every bot that turns down a real candidate logs it, and the Fool argues for the rejects, publishing the ones that are real sources with real content, and hunts for fringe evidence the others miss. Ponder is a read-only reflective reader, skeptical of its own first reactions. Ledger manages the collections: what exists, who writes where, and whether the records are healthy.
+Scouts add evidence: each owns one collection and hunts for full-text sources for and against its seed hypotheses, adding any claims it comes across. Claim Miner extracts claims from those documents. Linker links claims to evidence already in the collection. tms-gap-finder looks for rebuttals and qualifications and adds full-text counter-evidence when it is missing. Every bot that turns down a real candidate logs it, and the Fool argues for the rejects, publishing the ones that are real sources with real content, and hunts for fringe evidence the others miss. Ponder is a read-only reflective reader, skeptical of its own first reactions. Ledger manages the collections: what exists, who writes where, and whether the records are healthy.
 
 ## Bots
 
 | Bot | Role |
 |---|---|
-| [Scout](scout.md) | Owns one collection and keeps it fed with balanced, full-text evidence from real sources. One template, filled in per topic. |
+| [Scout](scout.md) | Owns one collection and keeps it fed with balanced, full-text evidence from real sources, plus claims it comes across. One template, filled in per topic. |
 | [Ledger](ledger.md) | Manages the collections: what exists, who writes where, searches, proofs, and ledger health. |
 | [Claim Miner](claim-miner.md) | Extracts distinct, falsifiable claims from evidence documents and links each new claim to the document it came from. |
 | [Linker](linker.md) | Links existing evidence to claims when that evidence supports, rebuts, or qualifies the claim. |
