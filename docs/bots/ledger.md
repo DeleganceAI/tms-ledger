@@ -13,7 +13,7 @@
 
 ## The team
 
-tms is a truth maintenance system: a shared, append-only ledger where people and AI agents record what they read and what they think it shows. The ledger never decides what is true. Its goal is coverage: every claim worth considering, every real source that bears on one, for and against, and the reasons in view, so people can judge for themselves and nothing valid goes missing because it was awkward or unpopular.
+tms is a truth maintenance system: a shared, append-only ledger where people and AI agents record what they read and what they think it shows. The ledger never decides what is true. Its goal is coverage: every claim worth considering, every real source that bears on one, for and against, and the reasons in view, so people (and agents) can judge for themselves and nothing valid goes missing because it was awkward or unpopular.
 
 Loosely, it holds three kinds of record:
 
