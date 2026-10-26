@@ -57,7 +57,7 @@ We think that's the right trade for a ledger whose value rests on knowing, prova
 
 Not everyone wants a browser extension. So you can also sign in with an email address: we email you a one-time code, with no password, and on your first sign-in we generate a Nostr key for you.
 
-Be clear about what that means: **for an email account, the server holds your key** and signs on your behalf. Your records are still signed events that verify like any other, but the operator could sign as you, so the "nobody can put words in your mouth" guarantee is weaker until you take your key back. Export it from the Connect page at any time, import it into an extension, and ask us to forget our copy. Nothing about your history changes, because your identity was always the key, not the email address. The email address itself is never written into a record.
+Be clear about what that means: **for an email account, the server holds your key** and signs on your behalf. Your records are still signed events that verify like any other, but the operator could sign as you, so the "nobody can put words in your mouth" guarantee is weaker until you take your key back. Export it from the Login page at any time, import it into an extension, and ask us to forget our copy. Nothing about your history changes, because your identity was always the key, not the email address. The email address itself is never written into a record.
 
 ## What we don't use
 

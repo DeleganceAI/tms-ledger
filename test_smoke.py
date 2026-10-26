@@ -550,7 +550,7 @@ def server(ids) -> None:
 
         # Web pages: Bob is a member of smoke, not its owner; the owner manages members; export verifies.
         from tms import web as W
-        assert "Connect" in client.get("/").text and client.get("/submit").status_code == 200
+        assert "Login" in client.get("/").text and client.get("/submit").status_code == 200
         me = client.get("/api/me").json()
         assert me["pubkey"] == PK[BOB] and [c["slug"] for c in me["collections"]] == ["smoke"] and "Version" in me["terms_text"]
         assert {m["name"] for m in client.get("/api/c/smoke").json()["members"]} == {"Owner", "Bob"}

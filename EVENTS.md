@@ -145,7 +145,7 @@ Embeddings are derived by the server and are not part of any event.
 ## 6. Login and reading
 
 - **MCP:** the endpoint is open, so anyone can list the tools, and there's no shared token. `publish(events)` needs nothing extra, because every event in the batch is already signed. Every other tool takes a single `request` argument (kind 4707), signed fresh for each call. This works with any MCP client, because it's just a tool argument.
-- **Browser:** "Connect" calls `getPublicKey()`, fetches and shows the user's profile, then signs a `request` with `tool: "login"`. The server returns a signed HttpOnly cookie, valid for 12 hours, so the extension doesn't prompt on every page. Writes are still signed batches.
+- **Browser:** "Log in" calls `getPublicKey()`, fetches and shows the user's profile, then signs a `request` with `tool: "login"`. The server returns a signed HttpOnly cookie, valid for 12 hours, so the extension doesn't prompt on every page. Writes are still signed batches.
 - Every read is scoped to the collections the signer is a member of.
 
 ## 7. Migration

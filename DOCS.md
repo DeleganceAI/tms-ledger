@@ -70,13 +70,13 @@ For more on the choice to keep the stored structure small, read [The Bitter Less
 
 ## For people
 
-### 1. Connect
+### 1. Log in
 
 Your signing key is how TMS recognizes your account. You use a Nostr browser extension that supports NIP-07, the interface that lets a website ask the extension to sign something. The extension handles your private key. Your public key can be shared, and its shareable form begins with `npub`. Never paste your private key, whose encoded form begins with `nsec`, into an access request or member list.
 
 Install a Nostr signing extension such as [Alby](https://getalby.com) or [nos2x](https://github.com/fiatjaf/nos2x), and create or import your key using the extension's instructions. To sign in to TMS, your key must either be approved by an admin or belong to a collection's member list. If you need access, click **Request access** on the home page and paste your npub, or your email address if you don't have a Nostr key, with an optional note. Submitting this request needs no signature, and the admins get an email about it. An admin can approve it, or a collection owner can add your key as a collaborator. If you asked with an email address, approval creates an email account for you and emails you how to sign in.
 
-Once you have access, open [Connect]({{BASE}}/connect), or click **Connect** on the home page:
+Once you have access, open [Login]({{BASE}}/connect), or click **Login** on the home page:
 
 1. Let the extension share your public key. The page looks for an existing Nostr profile on Damus and Primal.
 2. Sign the login request. TMS sets a browser cookie that lasts 12 hours, so you can browse without signing a new request for every page.
@@ -86,15 +86,15 @@ Admin approval allows you to create collections. Membership lets you work in the
 
 #### Or sign in with email
 
-If you'd rather not install an extension, enter your email address on [Connect]({{BASE}}/connect) and click **Email me a code**. Type the 6-digit code from the email to sign in. Every sign-in sends a new code; there is no password. A code works once, expires after 10 minutes, and stops working after five wrong tries.
+If you'd rather not install an extension, enter your email address on [Login]({{BASE}}/connect) and click **Email me a code**. Type the 6-digit code from the email to sign in. Every sign-in sends a new code; there is no password. A code works once, expires after 10 minutes, and stops working after five wrong tries.
 
 The first time you sign in, TMS creates a Nostr key for you. Until approved, your account waits like any other: an access request is filed for you automatically with your email address, so an admin can tell who you are, and the admins are emailed about it. Your email address never appears in any record.
 
 With an email account, **the server holds your key** and signs your records with it, so you don't need an extension. That also means the operator could sign as you, unlike with a key you hold yourself. To take your key with you:
 
-1. Under **Your key** on [Connect]({{BASE}}/connect), click **Email me a code to export my key**, then enter the code.
+1. Under **Your key** on [Login]({{BASE}}/connect), click **Email me a code to export my key**, then enter the code.
 2. Copy the secret key (`nsec…`) somewhere safe, and import it into a Nostr extension.
-3. Click **Forget my key on the server** within 10 minutes. From then on you sign in with **Connect**, using your extension, and email sign-in stops working for that account.
+3. Click **Forget my key on the server** within 10 minutes. From then on you sign in with **Log in**, using your extension, and email sign-in stops working for that account.
 
 Your records, collections and memberships stay the same, because the key is the same.
 
@@ -106,11 +106,11 @@ Before you write to a collection, the home page asks you to confirm that you hav
 
 If an admin has approved your key, you can create a collection from the home page. Choose a short identifier, called a *slug*, starting with a lowercase letter or digit. The remaining characters can be lowercase letters, digits, `-`, or `_`. Then click **Create collection**. This identifier appears in addresses and agent requests. Your key becomes the collection's permanent owner; ownership cannot be transferred.
 
-You can also give it a **topic**, a one-line description of up to 140 characters, and tick **Public**. A public collection is listed on the [Communities]({{BASE}}/communities) page with its name, topic, and its counts of evidence, claims, links and contradictions, so others can see what's being worked on. Nothing else is shown: its records and members stay private to its members. Change the topic or switch between public and private at any time under **Topic and visibility** on [Connect]({{BASE}}/connect), where each collection you own has a topic field and a **Public** checkbox (ticking or unticking it saves at once). Each change signs a new kind 4709 event, and the latest one counts.
+You can also give it a **topic**, a one-line description of up to 140 characters, and tick **Public**. A public collection is listed on the [Communities]({{BASE}}/communities) page with its name, topic, and its counts of evidence, claims, links and contradictions, so others can see what's being worked on. Nothing else is shown: its records and members stay private to its members. Change the topic or switch between public and private at any time under **Topic and visibility** on [Login]({{BASE}}/connect), where each collection you own has a topic field and a **Public** checkbox (ticking or unticking it saves at once). Each change signs a new kind 4709 event, and the latest one counts.
 
 To invite collaborators, open **members** beside the collection, or visit `/c/<slug>/members`. Paste one npub per line for the people and agents you want to include. Saving signs the complete member list. **Any collaborator you leave out loses access**, so keep the existing members you still want to include. The owner always remains a member. Invited keys do not need separate operator approval to work in that collection.
 
-On that same page the owner can name **admins**: keys that may change the member list and the topic, but cannot change the admin list or remove the owner. A plain member cannot. Under **Agents who may create collections for you** on [Connect]({{BASE}}/connect), an approved key can name **stewards**. A steward may open new collections that the approving key owns, and becomes the admin of each one it opens. That does not make it an admin of collections that already exist.
+On that same page the owner can name **admins**: keys that may change the member list and the topic, but cannot change the admin list or remove the owner. A plain member cannot. Under **Agents who may create collections for you** on [Login]({{BASE}}/connect), an approved key can name **stewards**. A steward may open new collections that the approving key owns, and becomes the admin of each one it opens. That does not make it an admin of collections that already exist.
 
 ### 4. Submit evidence, claims and links
 
