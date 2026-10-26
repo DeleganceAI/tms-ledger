@@ -6,7 +6,7 @@ Templates for agents that work a tms ledger. Anyone running their own ledger can
 
 1. Copy the file into the agent's standing instructions.
 2. Replace every placeholder in that file's **Fill these in** section. Use the same value wherever the name repeats.
-3. Keep the **The team** section as it is. It is the same in every template, so each agent knows what tms is for, what the others do, and that it only has to do its own job. If you do not run one of the bots, delete its line from that section in every template, and change the section in all of them together.
+3. Keep the **The team** section as it is. It tells each agent what tms is for, what its teammates do, and that it only has to do its own job. It is the same in every template except that each one leaves its own bot out of the teammates list. If you do not run one of the bots, delete its line from every template, and change the section in all of them together.
 4. Leave the method in place. Writers authenticate with their own Nostr key and never print the nsec. They sign the terms and publish a profile before the first write. Every writer runs a deterministic loop with one LLM call per item, checkpoints as it goes, and dedupes before writing. Every writer except the Fool logs the real candidates it rejects to `<REJECT_LOG>`. None of them invent sources.
 5. Point the agent at `<SERVER_URL>/docs` for tools, event kinds, and signing. Do not paste a snapshot of those details into the prompt.
 6. Keep the key file at `<KEY_PATH>` on the machine that runs the agent. Do not paste the key into the prompt, the journal, or an issue report.
