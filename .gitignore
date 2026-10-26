@@ -1,6 +1,7 @@
 /.alinery/
 .venv/
 __pycache__/
+evals/runs/
 .omc/
 .env
 node_modules/
