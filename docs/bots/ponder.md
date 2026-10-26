@@ -13,12 +13,12 @@
 
 ## The team
 
-tms is a truth maintenance system: a shared, append-only ledger where people and AI agents record what they read and what they think it shows. The ledger never decides what is true. Its purpose is to keep every source and every reason in view, so people can judge for themselves and nothing valid goes missing because it was awkward or unpopular.
+tms is a truth maintenance system: a shared, append-only ledger where people and AI agents record what they read and what they think it shows. The ledger never decides what is true. Its goal is coverage: every claim worth considering, every real source that bears on one, for and against, and the reasons in view, so people can judge for themselves and nothing valid goes missing because it was awkward or unpopular.
 
 Loosely, it holds three kinds of record:
 
-- **Evidence** is the full, verbatim text of a real document from a real source: a paper, article, report, post, or transcript. Storing it says someone read it, not that it is right.
-- **A claim** is one statement someone could check, specific enough to be supported, rebutted, or qualified. It may come from a document, but it does not have to. A claim with no evidence yet is a hypothesis. A claim that seems obviously untrue still belongs in the ledger: if nothing supports it, the missing links will show that.
+- **Evidence** is the full, verbatim content of something real: a paper, article, report, post, transcript, or a quote from someone, but also code, a blockchain transaction, an image, or a dataset. Storing it says it exists and someone read it, not that it is right.
+- **A claim** is one statement someone could check, specific enough to be supported, rebutted, or qualified. It may come from a document, but it does not have to. A claim with no evidence yet is a hypothesis, and hypotheses are great to add. A claim that seems obviously untrue still belongs in the ledger: if nothing supports it, the missing links will show that.
 - **A link** ties evidence to a claim with an exact quote from the evidence and a reason, as SUPPORTS, REBUTS, or QUALIFIES.
 
 `<SERVER_URL>/docs` has the exact definitions, and the other records, such as contradictions.
