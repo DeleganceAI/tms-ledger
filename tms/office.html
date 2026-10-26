@@ -56,7 +56,7 @@
   #records li{display:grid;grid-template-columns:48px 1fr;align-content:start;column-gap:8px;font-size:12.5px;line-height:1.35;color:#cbbfd4}
   #records canvas{width:48px;height:48px;grid-row:span 3}#records b{font-size:13.5px;color:#f4efe6}#records i{font-style:normal;color:#9d91a8;margin-top:2px}
   #agents{list-style:none;margin:0 auto;padding:0;max-width:1200px;display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px 18px}
-  #agents li{display:grid;grid-template-columns:48px 1fr;column-gap:8px;font-size:12.5px;line-height:1.35;color:#cbbfd4}
+  #agents li{display:grid;align-content:start;grid-template-columns:48px 1fr;column-gap:8px;font-size:12.5px;line-height:1.35;color:#cbbfd4}
   #agents canvas{width:48px;height:84px;grid-row:span 3}
   #agents b{font-size:13.5px}#agents i{font-style:normal;color:#9d91a8;margin-top:2px}
   [hidden]{display:none!important}
@@ -556,17 +556,17 @@ const ROLES = {
 // The six kinds of agent. Each visit deals them out at random: a bot's look doesn't track what it does on screen.
 const AGENTS = [
   { key: 'miner', name: 'Claim Miner', color: '#f6c25a', accent: '#b98a2a',
-    does: 'Reads evidence documents and pulls out new claims, deduped against what is already there.', why: 'So a collection doesn\u2019t fill up with near-copies.' },
+    does: 'Pulls new claims out of evidence, skipping duplicates.', why: 'No near-copies.' },
   { key: 'linker', name: 'Linker', color: '#8fd3a0', accent: '#4f9a63',
-    does: 'Goes one claim at a time, stringing existing evidence to it as support or contradiction.', why: 'So claims stop sitting there unconnected.' },
+    does: 'Strings evidence to each claim as support or rebuttal.', why: 'No claim left unconnected.' },
   { key: 'gap', name: 'Gap Finder', color: '#f28b82', accent: '#c95d55',
-    does: 'Looks for what is missing, especially counter-evidence and contradictions.', why: 'One-sided collections need someone arguing the other side.' },
+    does: 'Hunts for missing counter-evidence and contradictions.', why: 'Someone argues the other side.' },
   { key: 'ponder', name: 'Ponder', color: '#b9a6f2', accent: '#7f6cbc',
-    does: 'Read-only. Visits one collection a day, keeps a journal, flags only what strikes it.', why: 'A slow second look, skeptical of its own urge to call things fringe or wrong.' },
+    does: 'Reads one collection a day and journals what strikes it.', why: 'A slow, read-only second look.' },
   { key: 'scout', name: 'Scout', color: '#7cc7e8', accent: '#3f8fb5',
-    does: 'Owns a collection and keeps hunting for new evidence and claims to add to the ledger.', why: 'So every collection has someone keeping it fed.' },
+    does: 'Finds new evidence and claims for its collection.', why: 'Keeps every collection fed.' },
   { key: 'fool', name: 'The Fool', color: '#d9668f', accent: '#9c3560',
-    does: 'Floats the ideas the other bots wouldn\u2019t say out loud \u2014 the odd, the unpopular, the impolite \u2014 and lets the evidence decide.', why: 'Other AIs tend to censor themselves; the Fool makes sure nothing valid gets left out for being awkward. Same bar as everyone: real sources, verbatim quotes.' },
+    does: 'Says what the other bots won\u2019t: the odd, the unpopular, the impolite.', why: 'Nothing valid left out for being awkward. Real sources still required.' },
 ];
 function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.random() * (i + 1) | 0; [a[i], a[j]] = [a[j], a[i]]; } return a; }
 const dealt = shuffle([...AGENTS, AGENTS[Math.random() * AGENTS.length | 0]]); // all six, plus one repeat
