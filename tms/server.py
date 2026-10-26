@@ -41,6 +41,9 @@ Every collection is private to its members. Work in one collection at a time.
 Writes: publish(events) with events you signed (kinds 4701 evidence, 4702 claim, 4703 link,
 4704 contradiction; 0 profile; 4706 terms, once, before your first write). IDs are known
 before signing, so one batch can hold evidence, claims and the links between them.
+Managing collections is the same publish path. The owner names stewards (4711) who may open
+collections the owner owns (4712 found) and admins (4710) who may replace members (4705) and
+the topic (4709). A plain member cannot. list_members and list_delegations show the current roles.
 Every other tool takes `request`: a kind-4707 event signed now, content {"tool": <this tool>,
 "args": {<the tool's arguments>}, "nonce": <random string>}. Requests are single-use and expire after
 60 seconds; the nonce keeps two identical calls in the same second apart.
@@ -166,14 +169,22 @@ def publish(events: list[dict]) -> dict[str, Any]:
       4703 link          {collection, from: evidence id, to: claim|link|contradiction|evidence id,
                           relation: SUPPORTS|REBUTS|QUALIFIES (QUALIFIES only to claims), quote, reason}
       4704 contradiction {collection, claims: [>=2 distinct claim ids], reason}
-      4705 members       {collection, members: [pubkeys]}   owner only; the full list
-      4709 about         {collection, topic (<=140 chars), public: bool}   owner only; latest wins;
-                         public shows the name, topic and counts on /communities
+      4705 members       {collection, members: [pubkeys]}   owner or an admin; the full list.
+                         The owner always stays a member. Admins stay members even if left off.
+      4709 about         {collection, topic (<=140 chars), public: bool}   owner or an admin; latest
+                         authorized event wins. public shows the name, topic and counts on /communities
+      4710 admins        {collection, admins: [pubkeys]}   owner only; the full list, latest wins.
+                         Admins may change members and about. They cannot change admins. Leave the owner out.
+      4711 stewards      {stewards: [pubkeys]}   approved signer only; no collection; latest per signer
+                         wins. Those keys may create collections owned by you. Do not name yourself.
+      4712 found         {collection, owner: pubkey}   a steward opens a collection owned by that
+                         approved grantor and becomes its admin. Put it before about/members in the batch.
       4706 terms         {version, sha256}   sign once before your first write (see TERMS.md)
       0    profile       {name, about?, picture?}
     References stay inside one collection and may point at events earlier in the same batch. A
     link's quote must appear in its evidence's text. The first event naming a new collection
-    creates it, if its signer is approved. Events already stored are skipped, so retries are safe."""
+    creates it, if its signer is approved; a steward instead publishes kind 4712 found, and the
+    named owner owns the collection. Events already stored are skipped, so retries are safe."""
     def run():
         with L.connect() as conn:
             res = L.publish(conn, events)
@@ -200,7 +211,24 @@ def fetch_url(request: dict | None = None, url: str = "") -> dict[str, Any]:
 
 @signed(lambda conn, pubkey: L.list_collections(conn, pubkey))
 def list_collections(request: dict | None = None) -> list[dict]:
-    """Collections you are a member of, with owner, members and counts."""
+    """Collections you are a member of, with owner, admins, your role, members and counts.
+    role is owner, admin, or member. owner and admin may change members and about; only the
+    owner may change admins. Both are signed events via publish."""
+
+
+@signed(L.list_members)
+def list_members(request: dict | None = None, collection: str = "") -> dict[str, Any]:
+    """Members of one collection and the role of each (owner, admin, or member), plus your role
+    and whether you may change members or the admin list. You must be a member. Changing either
+    list is a signed event via publish: 4705 members (owner or admin), 4710 admins (owner only)."""
+
+
+@signed(lambda conn, pubkey: L.list_delegations(conn, pubkey))
+def list_delegations(request: dict | None = None) -> dict[str, Any]:
+    """Account-level create grants. granted: pubkeys you have authorized to create collections
+    owned by you. for: approved pubkeys who have authorized you. Grants are kind 4711 events;
+    opening a collection for one of them is a kind 4712 found event. Neither makes you an admin
+    of collections that already exist."""
 
 
 @signed(L.get_event)

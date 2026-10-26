@@ -38,7 +38,8 @@ CODE_TTL = 600            # seconds a code stays valid
 CODES_PER_HOUR = 5        # codes per email address per hour
 MAX_ATTEMPTS = 5          # wrong guesses before a code is dead
 EXPORT_GRACE = 600        # seconds after an export during which "forget my key" needs no new code
-SIGNABLE = {E.PROFILE, E.EVIDENCE, E.CLAIM, E.LINK, E.CONTRADICTION, E.MEMBERS, E.TERMS}
+SIGNABLE = {E.PROFILE, E.EVIDENCE, E.CLAIM, E.LINK, E.CONTRADICTION, E.MEMBERS, E.TERMS,
+            E.ABOUT, E.ADMINS, E.STEWARDS, E.FOUND}
 EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 

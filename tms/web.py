@@ -4,7 +4,7 @@
     /connect                connect, profile, terms, your collections
     /submit                 sign and publish evidence, claims and links
     /office                 ambient animation; no ledger data
-    /c/<slug>/members       owner only: sign a new members list
+    /c/<slug>/members       owner or admin: sign a new members list; the owner also signs admins
     /c/<slug>/export.jsonl  members: every event in the collection, one signed event per line
 
 Pages are one static file (web.html); everything they show comes from the JSON routes, which
@@ -260,9 +260,9 @@ async def members_page(request: Request):
     pubkey, slug = cookie_pubkey(request), request.path_params["slug"]
     if pubkey is None:
         return HTMLResponse('<meta http-equiv="refresh" content="0;url=/">', status_code=401)
-    row = await db(lambda conn: conn.execute("SELECT owner FROM collections WHERE slug = %s", (slug,)).fetchone())
-    if row is None or row["owner"] != pubkey:
-        return PlainTextResponse(f"Only the owner of '{slug}' manages its members.", status_code=403)
+    role = await db(L.collection_role, pubkey, slug)
+    if role not in ("owner", "admin"):
+        return PlainTextResponse(f"Only an owner or admin of '{slug}' manages its members.", status_code=403)
     return await page(request)
 
 
@@ -282,17 +282,20 @@ async def collection(request: Request) -> JSONResponse:
         L.require_member(conn, pubkey, slug)
         owner = conn.execute("SELECT owner FROM collections WHERE slug = %s", (slug,)).fetchone()["owner"]
         members = [L._clean(r) for r in conn.execute(
-            """SELECT m.pubkey, p.name, p.about FROM members m LEFT JOIN profiles p ON p.pubkey = m.pubkey
-               WHERE m.collection = %s ORDER BY m.pubkey = %s DESC, p.name NULLS LAST, m.pubkey""", (slug, owner))]
+            """SELECT r.pubkey, r.role, p.name, p.about FROM collection_roster r
+               LEFT JOIN profiles p ON p.pubkey = r.pubkey
+               WHERE r.collection = %s
+               ORDER BY CASE r.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END,
+                        p.name NULLS LAST, r.pubkey""", (slug,))]
         about = conn.execute("SELECT topic, public FROM collection_about WHERE collection = %s", (slug,)).fetchone()
-        return owner, members, about
+        return owner, members, L.collection_role(conn, pubkey, slug), about
     try:
-        owner, members, about = await db(run)
+        owner, members, role, about = await db(run)
     except ValueError as err:
         return _error(err)
     for m in members:
         m["npub"] = E.bech32_encode("npub", m["pubkey"])
-    return JSONResponse({"slug": slug, "owner": owner, "members": members,
+    return JSONResponse({"slug": slug, "owner": owner, "caller_role": role, "members": members,
                          "topic": about["topic"] if about else None, "public": bool(about and about["public"])})
 
 

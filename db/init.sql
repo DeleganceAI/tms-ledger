@@ -22,13 +22,13 @@ CREATE TABLE events (
     id          text PRIMARY KEY CHECK (id ~ '^[0-9a-f]{64}$'),
     pubkey      text NOT NULL CHECK (pubkey ~ '^[0-9a-f]{64}$'),
     created_at  bigint NOT NULL,          -- claimed by the signer
-    kind        integer NOT NULL CHECK (kind IN (0, 4701, 4702, 4703, 4704, 4705, 4706, 4708, 4709)),
+    kind        integer NOT NULL CHECK (kind IN (0, 4701, 4702, 4703, 4704, 4705, 4706, 4708, 4709, 4710, 4711, 4712)),
     tags        jsonb NOT NULL DEFAULT '[]' CHECK (kind = 0 OR tags = '[]'::jsonb),
     content     text NOT NULL CHECK (jsonb_typeof(content::jsonb) = 'object'),
     sig         text NOT NULL CHECK (sig ~ '^[0-9a-f]{128}$'),
     received_at timestamptz NOT NULL DEFAULT clock_timestamp(),  -- orders the ledger
     collection  text REFERENCES collections(slug),
-    CONSTRAINT events_collection_by_kind CHECK ((collection IS NULL) = (kind IN (0, 4706, 4708))),
+    CONSTRAINT events_collection_by_kind CHECK ((collection IS NULL) = (kind IN (0, 4706, 4708, 4711))),
     CONSTRAINT events_collection_matches CHECK (collection IS NULL OR collection = content::jsonb ->> 'collection')
 );
 
@@ -67,22 +67,105 @@ CREATE VIEW profiles AS
            content::jsonb ->> 'picture' AS picture
     FROM events WHERE kind = 0 ORDER BY pubkey, received_at DESC, id;
 
--- Current membership: the owner, plus the latest owner-signed members list.
-CREATE VIEW members AS
-    SELECT slug AS collection, owner AS pubkey FROM collections
-    UNION
-    SELECT l.collection, m.pubkey
-    FROM (SELECT DISTINCT ON (e.collection) e.collection, e.content
-          FROM events e JOIN collections c ON c.slug = e.collection AND c.owner = e.pubkey
-          WHERE e.kind = 4705 ORDER BY e.collection, e.received_at DESC, e.id) l,
-         jsonb_array_elements_text(l.content::jsonb -> 'members') AS m(pubkey);
+-- True when pk was an admin of col at as_of: the latest owner-signed admins event at or
+-- before that time lists them, or, if the owner had not signed one yet, they signed the
+-- found event that opened the collection. The owner is never an admin; that role is separate.
+CREATE FUNCTION is_collection_admin(col text, pk text, as_of timestamptz) RETURNS boolean
+LANGUAGE sql STABLE SET search_path = public, pg_temp AS $$
+    SELECT CASE
+        WHEN EXISTS (
+            SELECT 1 FROM events e
+            JOIN collections c ON c.slug = e.collection AND c.owner = e.pubkey
+            WHERE e.kind = 4710 AND e.collection = col AND e.received_at <= as_of
+        ) THEN EXISTS (
+            SELECT 1 FROM (
+                SELECT e.content FROM events e
+                JOIN collections c ON c.slug = e.collection AND c.owner = e.pubkey
+                WHERE e.kind = 4710 AND e.collection = col AND e.received_at <= as_of
+                ORDER BY e.received_at DESC, e.id
+                LIMIT 1
+            ) latest
+            WHERE (latest.content::jsonb -> 'admins') ? pk
+              AND pk IS DISTINCT FROM (SELECT owner FROM collections WHERE slug = col)
+        )
+        ELSE EXISTS (
+            SELECT 1 FROM events e
+            JOIN collections c ON c.slug = e.collection AND c.owner = e.content::jsonb ->> 'owner'
+            WHERE e.kind = 4712 AND e.collection = col AND e.pubkey = pk
+              AND e.received_at <= as_of AND e.pubkey <> c.owner
+        )
+    END
+$$;
 
--- A collection's topic and visibility: the latest about event its owner signed.
+-- Current admins. An owner-signed admins event replaces the founder; until one exists, the
+-- steward who opened the collection is the admin. The owner is not in this set.
+CREATE VIEW collection_admins AS
+    SELECT DISTINCT l.collection, a.pubkey
+    FROM (
+        SELECT DISTINCT ON (e.collection) e.collection, e.content
+        FROM events e JOIN collections c ON c.slug = e.collection AND c.owner = e.pubkey
+        WHERE e.kind = 4710
+        ORDER BY e.collection, e.received_at DESC, e.id
+    ) l
+    JOIN collections c ON c.slug = l.collection
+    CROSS JOIN LATERAL jsonb_array_elements_text(l.content::jsonb -> 'admins') AS a(pubkey)
+    WHERE a.pubkey <> c.owner
+    UNION
+    SELECT e.collection, e.pubkey
+    FROM events e
+    JOIN collections c ON c.slug = e.collection AND c.owner = e.content::jsonb ->> 'owner'
+    WHERE e.kind = 4712 AND e.pubkey <> c.owner
+      AND NOT EXISTS (
+          SELECT 1 FROM events a
+          JOIN collections c2 ON c2.slug = a.collection AND c2.owner = a.pubkey
+          WHERE a.kind = 4710 AND a.collection = e.collection);
+
+-- One row per (collection, pubkey). Role is derived: owner, else admin, else member.
+-- A pubkey cannot hold two roles. Admins are members whether or not the members list names them.
+CREATE VIEW collection_roster AS
+    SELECT c.slug AS collection, c.owner AS pubkey, 'owner'::text AS role
+    FROM collections c
+    UNION ALL
+    SELECT a.collection, a.pubkey, 'admin'
+    FROM collection_admins a
+    UNION ALL
+    SELECT DISTINCT l.collection, m.pubkey, 'member'
+    FROM (
+        SELECT DISTINCT ON (e.collection) e.collection, e.content
+        FROM events e JOIN collections c ON c.slug = e.collection
+        WHERE e.kind = 4705
+          AND (e.pubkey = c.owner OR is_collection_admin(e.collection, e.pubkey, e.received_at))
+        ORDER BY e.collection, e.received_at DESC, e.id
+    ) l
+    JOIN collections c ON c.slug = l.collection
+    CROSS JOIN LATERAL jsonb_array_elements_text(l.content::jsonb -> 'members') AS m(pubkey)
+    WHERE m.pubkey <> c.owner
+      AND NOT EXISTS (
+          SELECT 1 FROM collection_admins a WHERE a.collection = l.collection AND a.pubkey = m.pubkey);
+
+-- Current membership: everyone on the roster. Same shape as before roles existed.
+CREATE VIEW members AS
+    SELECT collection, pubkey FROM collection_roster;
+
+-- Latest stewards event per grantor: pubkeys who may create collections that grantor owns.
+CREATE VIEW stewards AS
+    SELECT l.pubkey AS grantor, s.pubkey AS steward
+    FROM (
+        SELECT DISTINCT ON (pubkey) pubkey, content
+        FROM events WHERE kind = 4711
+        ORDER BY pubkey, received_at DESC, id
+    ) l
+    CROSS JOIN LATERAL jsonb_array_elements_text(l.content::jsonb -> 'stewards') AS s(pubkey);
+
+-- A collection's topic and visibility: the latest about event signed by its owner or by
+-- someone who was an admin at that moment. A later event from anyone else does not count.
 CREATE VIEW collection_about AS
     SELECT DISTINCT ON (e.collection) e.collection, e.content::jsonb ->> 'topic' AS topic,
            (e.content::jsonb ->> 'public')::boolean AS public, e.received_at
-    FROM events e JOIN collections c ON c.slug = e.collection AND c.owner = e.pubkey
-    WHERE e.kind = 4709 ORDER BY e.collection, e.received_at DESC, e.id;
+    FROM events e JOIN collections c ON c.slug = e.collection
+    WHERE e.kind = 4709
+      AND (e.pubkey = c.owner OR is_collection_admin(e.collection, e.pubkey, e.received_at))
+    ORDER BY e.collection, e.received_at DESC, e.id;
 
 -- Quote matching forgives case, whitespace, curly quotes, dashes, soft hyphens and fi/fl
 -- ligatures (common in pdftotext output). It checks that the citation exists, nothing more.
