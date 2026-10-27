@@ -4,6 +4,7 @@
     /connect                log in or sign up, profile, terms, your collections
     /submit                 sign and publish evidence, claims and links
     /office                 ambient animation; no ledger data
+    /favicon.*              the Paranoy icons in tms/brand
     /c/<slug>/members       owner or admin: sign a new members list; the owner also signs admins
     /c/<slug>/export.jsonl  members: every event in the collection, one signed event per line
 
@@ -25,7 +26,7 @@ from pathlib import Path
 import httpx
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
+from starlette.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from starlette.routing import Route
 
 from . import events as E
@@ -393,6 +394,8 @@ routes = [
     Route("/submit", page),
     Route("/communities", page),
     Route("/office", office),
+    *[Route("/" + f.name, lambda r, f=f: FileResponse(f, headers={"Cache-Control": "public, max-age=86400"}))
+      for f in Path(__file__).with_name("brand").iterdir()],  # favicon.svg, favicon.ico, apple-touch-icon.png
     Route("/c/{slug}/members", members_page),
     Route("/c/{slug}/export.jsonl", export),
     Route("/login", login, methods=["POST"]),
