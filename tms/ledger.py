@@ -629,14 +629,31 @@ def list_collections(conn, pubkey: str) -> list[dict]:
            ORDER BY c.created_at, c.slug""", (principal, pubkey))]
 
 
+def collection_bots(conn, collection: str) -> dict[str, dict]:
+    """For each person on the roster with an account: their Ledger and the agents they picked for
+    this collection, with profile names. View only; people manage their own on the Login page."""
+    name = lambda k: (conn.execute("SELECT name FROM profiles WHERE pubkey = %s", (k,)).fetchone() or {}).get("name")  # noqa: E731
+    out: dict[str, dict] = {}
+    for r in conn.execute("""SELECT r.pubkey, a.ledger FROM collection_roster r JOIN accounts a ON a.human = r.pubkey
+                             WHERE r.collection = %s""", (collection,)):
+        out[r["pubkey"]] = {"ledger": r["ledger"] and {"pubkey": r["ledger"], "name": name(r["ledger"])}, "agents": []}
+    for r in conn.execute("SELECT person, agent FROM collection_agents WHERE collection = %s ORDER BY agent", (collection,)):
+        out.setdefault(r["person"], {"ledger": None, "agents": []})["agents"].append({"pubkey": r["agent"], "name": name(r["agent"])})
+    return out
+
+
 def list_members(conn, pubkey: str, collection: str) -> dict:
-    """Roster of one collection. The caller must already be a member. Roles are derived."""
+    """Roster of one collection. The caller must already be a member. Roles are derived. Each person
+    also lists their Ledger and the agents they picked for this collection (ledger, agents)."""
     require_member(conn, pubkey, collection)
     rows = [_clean(r) for r in conn.execute(
         """SELECT r.pubkey, r.role, p.name AS author FROM collection_roster r
            LEFT JOIN profiles p ON p.pubkey = r.pubkey WHERE r.collection = %s
            ORDER BY CASE r.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, r.pubkey""",
         (collection,))]
+    bots = collection_bots(conn, collection)
+    for r in rows:
+        r.update(bots.get(r["pubkey"], {"ledger": None, "agents": []}))
     principal = ledger_human(conn, pubkey) or pubkey  # a Ledger has its human's role; an agent has none
     role = next((r["role"] for r in rows if r["pubkey"] == principal), "agent")
     return {"collection": collection, "role": role,

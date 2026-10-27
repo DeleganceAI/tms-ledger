@@ -303,6 +303,9 @@ async def collection(request: Request) -> JSONResponse:
                WHERE r.collection = %s
                ORDER BY CASE r.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END,
                         p.name NULLS LAST, r.pubkey""", (slug,))]
+        bots = L.collection_bots(conn, slug)
+        for m in members:
+            m.update(bots.get(m["pubkey"], {"ledger": None, "agents": []}))
         about = conn.execute("SELECT topic, public FROM collection_about WHERE collection = %s", (slug,)).fetchone()
         return owner, members, L.acting_role(conn, pubkey, slug), about
     try:

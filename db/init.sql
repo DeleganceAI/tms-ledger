@@ -68,16 +68,19 @@ CREATE VIEW profiles AS
     FROM events WHERE kind = 0 ORDER BY pubkey, received_at DESC, id;
 
 -- The human whose Ledger pk was at as_of, or NULL (ACCOUNTS.md). Only a human changes its
--- Ledger, so the human's own account events (those whose ledger is not the signer) decide it.
--- ponytail: rescans account events per call; a derived table if account events ever number many.
+-- Ledger, so the human's own account events (those whose ledger is not the signer) decide it:
+-- find the events that named pk as the Ledger, and keep one the human had not replaced by as_of.
+-- Both lookups use indexes (events_account_ledger_idx, events_account_idx), so the cost does not
+-- grow with the ledger or the number of accounts.
 CREATE FUNCTION ledger_human(pk text, as_of timestamptz) RETURNS text
 LANGUAGE sql STABLE SET search_path = public, pg_temp AS $$
-    SELECT l.pubkey FROM (
-        SELECT DISTINCT ON (e.pubkey) e.pubkey, e.content FROM events e
-        WHERE e.kind = 4713 AND e.received_at <= as_of AND (e.content::jsonb ->> 'ledger') IS DISTINCT FROM e.pubkey
-        ORDER BY e.pubkey, e.received_at DESC, e.id
-    ) l
-    WHERE l.content::jsonb ->> 'ledger' = pk
+    SELECT n.pubkey FROM events n
+    WHERE n.kind = 4713 AND n.content::jsonb ->> 'ledger' = pk AND n.pubkey <> pk AND n.received_at <= as_of
+      AND NOT EXISTS (
+          SELECT 1 FROM events later
+          WHERE later.kind = 4713 AND later.pubkey = n.pubkey AND later.received_at <= as_of
+            AND (later.content::jsonb ->> 'ledger') IS DISTINCT FROM later.pubkey
+            AND (later.received_at > n.received_at OR (later.received_at = n.received_at AND later.id < n.id)))
     LIMIT 1
 $$;
 
@@ -166,11 +169,16 @@ CREATE VIEW collection_roster AS
 
 -- Accounts (ACCOUNTS.md): the latest account event for each human, signed by the human or by
 -- its Ledger at that moment. ledger is NULL when the account has none.
+-- ponytail: re-sorts every account event per read (about 10 ms at 3,000 accounts); a derived
+-- table kept up to date on publish if that ever shows up.
 CREATE VIEW accounts AS
     SELECT DISTINCT ON (a.human) a.human, a.content::jsonb ->> 'ledger' AS ledger,
            ARRAY(SELECT jsonb_array_elements_text(a.content::jsonb -> 'agents')) AS agents, a.received_at
-    FROM (SELECT acts_for(e.pubkey, e.received_at) AS human, e.content, e.received_at, e.id
+    FROM (SELECT CASE WHEN e.content::jsonb ->> 'ledger' = e.pubkey  -- signed by a Ledger
+                      THEN ledger_human(e.pubkey, e.received_at) ELSE e.pubkey END AS human,
+                 e.content, e.received_at, e.id
           FROM events e WHERE e.kind = 4713) a
+    WHERE a.human IS NOT NULL
     ORDER BY a.human, a.received_at DESC, a.id;
 
 -- The agents each person lets work in a collection: their latest collection agents event (signed
@@ -305,6 +313,8 @@ CREATE INDEX events_received_idx ON events (received_at, id);
 CREATE INDEX events_link_from_idx ON events ((content::jsonb ->> 'from')) WHERE kind = 4703;
 CREATE INDEX events_link_to_idx ON events ((content::jsonb ->> 'to')) WHERE kind = 4703;
 CREATE INDEX events_contradiction_claims_idx ON events USING gin ((content::jsonb -> 'claims')) WHERE kind = 4704;
+CREATE INDEX events_account_idx ON events (pubkey, received_at) WHERE kind = 4713;
+CREATE INDEX events_account_ledger_idx ON events ((content::jsonb ->> 'ledger')) WHERE kind = 4713;
 CREATE INDEX events_text_idx ON events USING gin (to_tsvector('simple', content::jsonb ->> 'text'))
     WHERE kind IN (4701, 4702);
 

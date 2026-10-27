@@ -415,8 +415,12 @@ async function renderMembers(slug) {
   try {
     const d = await api(`/api/c/${encodeURIComponent(slug)}`)
     const roleLabel = m => m.role === 'owner' ? ' (owner)' : m.role === 'admin' ? ' (admin)' : ''
+    // view only: each person's Ledger and the agents they picked for this collection
+    const who = b => esc(b.name || b.pubkey.slice(0, 12) + '…')
+    const bots = m => (m.ledger || m.agents?.length) ? `<div class="muted" style="font-size:12px">${[
+      m.ledger && `Ledger: ${who(m.ledger)}`, m.agents?.length && `Agents: ${m.agents.map(who).join(', ')}`].filter(Boolean).join(' · ')}</div>` : ''
     $('mTable').innerHTML = '<tr><th>Name</th><th>npub</th></tr>' + d.members.map(m =>
-      `<tr><td>${esc(m.name || '—')}${roleLabel(m)}<div class="muted">${esc(m.about || '')}</div></td><td class="mono">${esc(m.npub)}</td></tr>`).join('')
+      `<tr><td>${esc(m.name || '—')}${roleLabel(m)}<div class="muted">${esc(m.about || '')}</div>${bots(m)}</td><td class="mono">${esc(m.npub)}</td></tr>`).join('')
     $('mList').value = d.members.filter(m => m.role === 'member').map(m => m.npub).join('\n')
     $('adminBox').hidden = d.caller_role !== 'owner'
     if (d.caller_role === 'owner') $('admList').value = d.members.filter(m => m.role === 'admin').map(m => m.npub).join('\n')

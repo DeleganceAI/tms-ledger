@@ -477,6 +477,9 @@ def accounts(conn) -> None:
     pub(ev("b1", E.CLAIM, {"collection": "acct-col", "text": "Pal's agent's claim."}))
     roster = {r["pubkey"]: r["role"] for r in L.list_members(conn, pk["human"], "acct-col")["members"]}
     assert roster == {pk["human"]: "owner", pk["pal"]: "member"}, "the roster lists people, not their agents"
+    listed = {r["pubkey"]: r for r in L.list_members(conn, pk["human"], "acct-col")["members"]}
+    assert listed[pk["human"]]["ledger"]["pubkey"] == pk["ledger"] and [x["pubkey"] for x in listed[pk["human"]]["agents"]] == [pk["a1"]]
+    assert listed[pk["pal"]]["ledger"] is None and [x["pubkey"] for x in listed[pk["pal"]]["agents"]] == [pk["b1"]], "each person shows their bots"
     # Removing the person removes their agents. The owner stays whatever the Ledger signs.
     pub(ev("ledger", E.MEMBERS, {"collection": "acct-col", "members": []}))
     rejects(lambda: pub(ev("b1", E.CLAIM, {"collection": "acct-col", "text": "Gone."})), "not a member")
