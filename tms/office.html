@@ -41,7 +41,8 @@
   .cta{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
   .btn{font:inherit;padding:7px 14px;border-radius:7px;border:1px solid #EF9F27;background:#EF9F27;color:#2a1a04;cursor:pointer;text-decoration:none;font-weight:600}
   .btn.ghost{background:none;color:#f4efe6;border-color:#4a3f57}
-  .link{font:inherit;font-size:12.5px;background:none;border:0;padding:0;color:#9d91a8;cursor:pointer;text-decoration:underline;text-underline-offset:3px;margin-left:auto}
+  .board-btn{position:absolute;z-index:4;left:0;top:0;transform:translate(-50%,-50%);font:inherit;font-size:12px;font-weight:600;padding:4px 10px;border-radius:999px;border:1px solid #EF9F27;background:#fbf8f2;color:#3a3144;cursor:pointer;box-shadow:0 2px 8px rgba(30,24,38,.25)}
+  .board-btn:hover{background:#EF9F27;color:#2a1a04}
   #card{position:absolute;z-index:5;left:0;top:0;width:200px;padding:9px 11px;border-radius:9px;background:#fbf8f2;color:#3a3144;font-size:12.5px;line-height:1.35;box-shadow:0 8px 24px rgba(30,24,38,.25);pointer-events:none;transition:opacity .25s}
   #card b{display:block;font-size:13.5px;margin-bottom:2px}#card i{display:block;font-style:normal;color:#7a6f84;margin-top:4px}
   #card.off{opacity:0}
@@ -77,15 +78,16 @@
 <main id="stage">
 <canvas id="c" role="img" aria-label="Animated office of little bots pinning anonymous papers and cards to boards" aria-describedby="office-desc"></canvas>
 <div id="card" class="off" aria-hidden="true"></div>
+<button class="board-btn" id="board-btn" type="button">Learn about collections</button>
 </main>
 <section id="panel" aria-label="About">
   <h1>Your own intelligence agency</h1>
   <p>A private evidence ledger where people and AI agents file, link and argue over claims. Nothing is edited, nothing is scored.</p>
   <div id="chips" aria-label="Meet the agents"></div>
-  <div class="cta"><a class="btn" href="/connect">Sign up</a><a class="btn ghost" href="/docs">How it works</a><button class="link" id="marks-btn" type="button">What the marks mean</button></div>
+  <div class="cta"><a class="btn" href="/connect">Sign up</a><a class="btn ghost" href="/docs">How it works</a></div>
 </section>
 <footer id="ticker" aria-label="Ledger totals"></footer>
-<dialog id="marks" aria-labelledby="marks-h"><h2 id="marks-h">What the marks mean <button class="btn ghost" type="button" onclick="this.closest('dialog').close()">Close</button></h2><ul id="records"></ul></dialog>
+<dialog id="marks" aria-labelledby="marks-h"><h2 id="marks-h">About collections <button class="btn ghost" type="button" onclick="this.closest('dialog').close()">Close</button></h2><ul id="records"></ul></dialog>
 <script>
 /*
   Bot Office: a self-contained, looping ambient animation. No network deps.
@@ -582,7 +584,7 @@ const AGENTS = [
   { key: 'gap', name: 'Gap Finder', color: '#f28b82', accent: '#c95d55',
     does: 'Hunts for missing counter-evidence and contradictions.', why: 'Someone argues the other side.' },
   { key: 'ponder', name: 'Ponder', color: '#b9a6f2', accent: '#7f6cbc',
-    does: 'Reads one collection a day and journals what strikes it.', why: 'A slow, read-only second look.' },
+    does: 'Rereads a collection and journals what strikes it.', why: 'A slow, read-only second look.' },
   { key: 'scout', name: 'Scout', color: '#7cc7e8', accent: '#3f8fb5',
     does: 'Finds new evidence and claims for its collection.', why: 'Keeps every collection fed.' },
   { key: 'fool', name: 'The Fool', color: '#d9668f', accent: '#9c3560',
@@ -636,7 +638,11 @@ function focus(b, hold) {
   document.querySelectorAll('#chips button').forEach(c => c.setAttribute('aria-pressed', String(c.dataset.key === t.key)));
   if (reduceMotion || CAPTURE) { lens.r = 48; pan(1); placeCard(); render(); }
 }
+function placeBoardBtn() { // pinned to the bottom edge of the whiteboard, wherever the scene is panned
+  Object.assign($('board-btn').style, { left: fit.x + (BOARD.x + BOARD.w / 2) * fit.s + 'px', top: fit.y + (BOARD.y + BOARD.h) * fit.s + 'px' });
+}
 function placeCard() {
+  placeBoardBtn();
   const b = lens.bot, card = $('card');
   if (!b) return;
   const cw = card.offsetWidth, ch = card.offsetHeight, top = getComputedStyle($('site-nav').parentNode).position === 'absolute' ? 56 : 8;
@@ -1120,14 +1126,13 @@ function goLive(d) {
 // the agents: one chip each; a chip, a tap or a hover puts that bot in the lens for a while
 $('chips').innerHTML = AGENTS.map(a => `<button type="button" data-key="${a.key}" aria-pressed="false" style="--c:${a.color}" title="${a.does}"><i></i>${a.name}</button>`).join('');
 $('chips').onclick = e => { const c = e.target.closest('button'); if (c) focus(botFor(c.dataset.key), 15); };
-const botAt = e => {
-  const r = stage.getBoundingClientRect(), x = (e.clientX - r.left - fit.x) / fit.s, y = (e.clientY - r.top - fit.y) / fit.s;
-  return bots.find(b => Math.abs(x - b.x) < 22 && y > b.y - 75 && y < b.y + 6);
-};
-cv.addEventListener('click', e => focus(botAt(e), 15));
+const sceneAt = e => { const r = stage.getBoundingClientRect(); return { x: (e.clientX - r.left - fit.x) / fit.s, y: (e.clientY - r.top - fit.y) / fit.s }; };
+const botAt = e => { const { x, y } = sceneAt(e); return bots.find(b => Math.abs(x - b.x) < 22 && y > b.y - 75 && y < b.y + 6); };
+const onBoard = e => { const { x, y } = sceneAt(e); return x > BOARD.x && x < BOARD.x + BOARD.w && y > BOARD.y && y < BOARD.y + BOARD.h; };
+cv.addEventListener('click', e => { const b = botAt(e); if (b) focus(b, 15); else if (onBoard(e)) $('marks').showModal(); });
 cv.addEventListener('pointermove', e => {
   const b = e.pointerType === 'mouse' && botAt(e);
-  cv.style.cursor = b ? 'pointer' : '';
+  cv.style.cursor = b || onBoard(e) ? 'pointer' : '';
   if (b) focus(b, 8);
 });
 // the records legend: what each mark on a board stands for, drawn with the board's own code
@@ -1165,7 +1170,8 @@ $('records').innerHTML = RECORDS.map(r => `<li><canvas width="96" height="96" ar
 const header = document.querySelector('header');
 $('menu-btn').onclick = () => $('menu-btn').setAttribute('aria-expanded', String(header.classList.toggle('open')));
 document.addEventListener('click', e => { if (!header.contains(e.target)) { header.classList.remove('open'); $('menu-btn').setAttribute('aria-expanded', 'false'); } });
-$('marks-btn').onclick = () => $('marks').showModal();
+$('board-btn').onclick = () => $('marks').showModal();
+placeBoardBtn(); window.addEventListener('resize', placeBoardBtn);
 fetch('/office.json').then(r => r.ok ? r.json() : null).then(d => {
   if (!d) return;
   if (d.boards.length) goLive(d); // with no boards yet, the ambient loop keeps playing
