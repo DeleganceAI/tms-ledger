@@ -147,17 +147,25 @@ function toHex(s) {
   return out.map(b => b.toString(16).padStart(2, '0')).join('')
 }
 
-// Cloudflare Turnstile, shown only when signing up. With no site key configured there is no check.
+// Cloudflare Turnstile on sign-up and on every email code request. interaction-only: most people never
+// see it; it shows a challenge only when Cloudflare wants one. With no site key there is no check.
 const TS_KEY = '{{TURNSTILE_SITE_KEY}}'
 const tsToken = {}
 function botCheck(el) {
   if (!TS_KEY || TS_KEY.startsWith('{{') || $(el).dataset.on) return
   $(el).dataset.on = 1
-  const render = () => window.turnstile.render('#' + el, {sitekey: TS_KEY, callback: t => { tsToken[el] = t }})
+  const render = () => window.turnstile.render('#' + el, {sitekey: TS_KEY, appearance: 'interaction-only',
+    callback: t => { tsToken[el] = t }, 'expired-callback': () => { tsToken[el] = '' }})
   if (window.turnstile) return render()
   const s = document.createElement('script')
   s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'; s.onload = render
   document.head.append(s)
+}
+// The token for el, waiting up to 10 seconds for an invisible check to finish.
+async function checkToken(el) {
+  if (!TS_KEY || TS_KEY.startsWith('{{')) return ''
+  for (let i = 0; i < 40 && !tsToken[el]; i++) await new Promise(r => setTimeout(r, 250))
+  return tsToken[el] || ''
 }
 function resetCheck(el) { tsToken[el] = ''; if (window.turnstile && $(el).dataset.on) window.turnstile.reset('#' + el) }
 
@@ -305,16 +313,17 @@ $('signupBtn').onclick = async () => {
   try {
     say('connectMsg', 'Sign the sign-up request in your extension…')
     const event = await sign(4707, {tool: 'login', args: {}})
-    ME = await post('/api/signup', {event, turnstile: tsToken.signupCheck || ''})
+    ME = await post('/api/signup', {event, turnstile: await checkToken('signupCheck')})
     $('connect').hidden = true
     show(await relayProfile(ME.pubkey))
   } catch (e) { say('connectMsg', e.message, 'err'); resetCheck('signupCheck') }
 }
 
 $('eSend').onclick = async () => {
-  try { await post('/api/email/start', {email: $('eAddr').value, turnstile: tsToken.eCheck || ''}); $('eCodeRow').hidden = false; $('eCode').focus()
+  try { say('eMsg', 'Sending…'); await post('/api/email/start', {email: $('eAddr').value, turnstile: await checkToken('eCheck')}); $('eCodeRow').hidden = false; $('eCode').focus()
         say('eMsg', 'Check your inbox for a 6-digit code. It expires in 10 minutes.') }
-  catch (e) { say('eMsg', e.message, 'err'); if (e.data?.turnstile) { resetCheck('eCheck'); botCheck('eCheck') } }
+  catch (e) { say('eMsg', e.message, 'err') }
+  finally { resetCheck('eCheck') }  // tokens work once
 }
 $('eVerify').onclick = async () => {
   try { ME = await post('/api/email/verify', {email: $('eAddr').value, code: $('eCode').value}); $('connect').hidden = true; show(null) }
@@ -447,6 +456,6 @@ async function renderCommunities() {
 if (location.pathname === '/communities') {  // public: no login needed
   renderCommunities()
   api('/api/me').then(d => { ME = d; renderWho() }).catch(() => renderWho())
-} else api('/api/me').then(d => { ME = d; show(null) }).catch(() => { $('connect').hidden = false; renderWho() })
+} else api('/api/me').then(d => { ME = d; show(null) }).catch(() => { $('connect').hidden = false; renderWho(); botCheck('eCheck') })
 </script>
 <script src="/chat.js" defer></script></body></html>

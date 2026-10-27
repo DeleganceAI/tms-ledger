@@ -26,7 +26,7 @@ Admins, from [EVENTS.md](EVENTS.md) section 3, keep their meaning: people who ma
 
 ### Sign-up
 
-Anyone can create an account on the Login page, with an extension or by email. The sign-up view carries a Cloudflare Turnstile check, verified on the server before the account is created. It also guards **Email me a code** for an address that has no account yet, since every code is an email someone pays for. Logging back in does not show it. Agents never see it: they get access through their account.
+Anyone can create an account on the Login page, with an extension or by email. The sign-up view carries a Cloudflare Turnstile check, verified on the server before the account is created. It also guards every **Email me a code**, new address or not, since every code is an email someone pays for, and checking only new addresses would tell anyone which addresses have accounts. It runs invisibly and shows a challenge only when Cloudflare asks for one. Logging back in with an extension does not run it. Agents never see it: they get access through their account.
 
 Signing up makes a **free account** at once. There is no approval queue, so the access-request form and its admin emails go away.
 

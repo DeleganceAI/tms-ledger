@@ -159,8 +159,8 @@ def _same_site(request: Request) -> None:
 
 
 async def start(request: Request) -> JSONResponse:
-    """POST {email, turnstile?}: email a sign-in code. A new address is a sign-up, so it needs a
-    Turnstile token first; the refusal says so with "turnstile": true."""
+    """POST {email, turnstile}: email a sign-in code. Every request needs a Turnstile token, new
+    address or not, so the reply never says whether an address has an account."""
     try:
         if not configured():
             raise Refused("email sign-in is not configured", 503)
@@ -169,18 +169,14 @@ async def start(request: Request) -> JSONResponse:
             raise Refused("too many requests from this address; try again later", 429)
         body = await _body(request)
         email = _email(body.get("email"))
+        if not await run_in_threadpool(W.turnstile_ok, body.get("turnstile"), W._client_ip(request)):
+            return JSONResponse({"error": "the bot check didn't pass; wait a moment and try again",
+                                 "turnstile": True}, status_code=400)
 
         def run():
             with L.connect() as conn:
-                new = conn.execute("SELECT 1 FROM email_accounts WHERE email = %s", (email,)).fetchone() is None
-                # ponytail: this tells a caller whether an address has an account; Turnstile limits who asks
-                if new and not W.turnstile_ok(body.get("turnstile"), W._client_ip(request)):
-                    return False
                 issue(conn, email, "login")
-                return True
-        if not await run_in_threadpool(run):
-            return JSONResponse({"error": "new here? complete the bot check, then ask for the code again",
-                                 "turnstile": True}, status_code=400)
+        await run_in_threadpool(run)
     except (Refused, ValueError) as err:
         return _json_error(err)
     return JSONResponse({"sent": True})
