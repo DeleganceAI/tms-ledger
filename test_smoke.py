@@ -832,13 +832,16 @@ def email_signin() -> None:
             assert L.has_account(conn, pk) and not conn.execute("SELECT 1 FROM access_requests").fetchone()
             assert not conn.execute("SELECT 1 FROM events WHERE content LIKE '%%ann@example.com%%'").fetchone(), "the email never reaches a record"
         client.cookies.clear()
-        # With Turnstile on, a new address needs the check before a code goes out; an existing one doesn't.
+        # With Turnstile on, every code request needs the check, new address or not, so the reply
+        # never tells whether an address has an account.
         with turnstile_on():
             n = len(sent)
-            r = client.post("/api/email/start", json={"email": "dee@example.com"})
-            assert r.status_code == 400 and r.json()["turnstile"] and len(sent) == n, r.text
+            for addr in ("dee@example.com", "ann@example.com"):
+                r = client.post("/api/email/start", json={"email": addr})
+                assert r.status_code == 400 and r.json() == {"error": r.json()["error"], "turnstile": True} and len(sent) == n, r.text
+            W._recent.clear()  # five code requests per IP per hour; the refusals above used two
             assert client.post("/api/email/start", json={"email": "dee@example.com", "turnstile": "good"}).json() == {"sent": True}
-            assert client.post("/api/email/start", json={"email": "ann@example.com"}).json() == {"sent": True}
+            assert client.post("/api/email/start", json={"email": "ann@example.com", "turnstile": "good"}).json() == {"sent": True}
         W._recent.clear()
         client.post("/api/email/start", json={"email": "ann@example.com"})
         me = client.post("/api/email/verify", json={"email": "ann@example.com", "code": code()}).json()

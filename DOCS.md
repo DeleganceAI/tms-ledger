@@ -88,7 +88,7 @@ A **free account** can own one collection and write up to 10,000 evidence, claim
 
 If you'd rather not install an extension, enter your email address on [Login]({{BASE}}/connect) and click **Email me a code**. Type the 6-digit code from the email to sign in. Every sign-in sends a new code; there is no password. A code works once, expires after 10 minutes, and stops working after five wrong tries.
 
-A new address gets a quick bot check before the first code goes out. The first time you sign in, TMS creates a Nostr key for you, and the account is a free account at once. Your email address never appears in any record.
+Each code request runs a quick bot check, usually invisible. The first time you sign in, TMS creates a Nostr key for you, and the account is a free account at once. Your email address never appears in any record.
 
 With an email account, **the server holds your key** and signs your records with it, so you don't need an extension. That also means the operator could sign as you, unlike with a key you hold yourself. To take your key with you:
 
