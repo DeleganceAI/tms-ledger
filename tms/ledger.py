@@ -43,6 +43,11 @@ EMBED_PRICE_PER_MTOK = float(os.environ.get("EMBED_PRICE_PER_MTOK", "0.01"))  # 
 QUERY_PREFIX = "Instruct: Given a question or statement, retrieve claims relevant to it\nQuery: "
 APPROVED = {E.pubkey_hex(p) for p in re.split(r"[\s,]+", os.environ.get("TMS_APPROVED", "")) if p}
 ADMINS = {E.pubkey_hex(p) for p in re.split(r"[\s,]+", os.environ.get("TMS_ADMINS", "")) if p}  # site admins
+# Free accounts (ACCOUNTS.md "Limits"); an approved key has none. Tests lower these.
+FREE_COLLECTIONS = 1
+FREE_RECORDS = 10_000    # evidence, claims, links and contradictions together
+CONTACT = os.environ.get("TMS_CONTACT") or os.environ.get("TMS_CONTACT_EMAIL", "dustin@delegance.ai")
+LIMIT_MSG = f"You have reached the free-account limit. Please email {CONTACT} to increase your limits."
 SERVER_PUBKEY = E.pubkey_of(os.environ["TMS_SERVER_NSEC"]) if os.environ.get("TMS_SERVER_NSEC") else None
 TERMS_TEXT = (Path(__file__).resolve().parent.parent / "TERMS.md").read_bytes()
 TERMS = {"version": re.search(rb"Version (\S+)", TERMS_TEXT).group(1).decode(),
@@ -287,6 +292,12 @@ def is_approved(conn, pubkey: str) -> bool:
         "SELECT 1 FROM approvals WHERE pubkey = %s", (pubkey,)).fetchone() is not None
 
 
+def has_account(conn, pubkey: str) -> bool:
+    """Signed up on the Login page: with an extension (signups) or by email (email_accounts)."""
+    return conn.execute("""SELECT 1 FROM signups WHERE pubkey = %(p)s
+                           UNION ALL SELECT 1 FROM email_accounts WHERE pubkey = %(p)s""", {"p": pubkey}).fetchone() is not None
+
+
 def _approved_grantors(conn, pubkey: str) -> list[str]:
     """Approved pubkeys whose latest stewards event names this key."""
     return [r["grantor"] for r in conn.execute(
@@ -295,15 +306,16 @@ def _approved_grantors(conn, pubkey: str) -> list[str]:
 
 
 def allowed(conn, pubkey: str) -> bool:
-    """Approved, a member of some collection, or a steward of an approved pubkey (EVENTS.md section 3)."""
-    return is_approved(conn, pubkey) or conn.execute(
+    """Approved, signed up, a member of some collection, or a steward of an approved pubkey (EVENTS.md section 3)."""
+    return is_approved(conn, pubkey) or has_account(conn, pubkey) or conn.execute(
         "SELECT 1 FROM members WHERE pubkey = %s LIMIT 1", (pubkey,)).fetchone() is not None or bool(
         _approved_grantors(conn, pubkey))
 
 
 def require_allowed(conn, pubkey: str) -> None:
     if not allowed(conn, pubkey):
-        raise Denied(f"{pubkey} is not approved and is not a member of any collection")
+        raise Denied(f"{pubkey} has not signed up and is not a member of any collection; sign up on the Login page, "
+                     f"or ask a collection owner to add this key")
 
 
 def require_member(conn, pubkey: str, collection: str) -> None:
@@ -338,8 +350,9 @@ def account(conn, pubkey: str) -> dict:
     stewards = [_clean(r) | {"npub": E.bech32_encode("npub", r["pubkey"])} for r in conn.execute(
         """SELECT s.steward AS pubkey, p.name FROM stewards s LEFT JOIN profiles p ON p.pubkey = s.steward
            WHERE s.grantor = %s ORDER BY s.steward""", (pubkey,))]
-    return {"pubkey": pubkey, "npub": E.bech32_encode("npub", pubkey), "approved": is_approved(conn, pubkey),
-            "allowed": allowed(conn, pubkey), "terms_signed": signed_terms(conn, pubkey), "terms": TERMS,
+    approved = is_approved(conn, pubkey)
+    return {"pubkey": pubkey, "npub": E.bech32_encode("npub", pubkey), "approved": approved,
+            "allowed": allowed(conn, pubkey), "can_create": approved or has_account(conn, pubkey), "terms_signed": signed_terms(conn, pubkey), "terms": TERMS,
             "profile": profile, "collections": list_collections(conn, pubkey), "stewards": stewards}
 
 
@@ -391,10 +404,13 @@ def _authorize(conn, ev: dict, data: dict) -> str | None:
     row = conn.execute("SELECT owner FROM collections WHERE slug = %s", (col,)).fetchone()
     if row is None:
         if not is_approved(conn, pk):
-            if _approved_grantors(conn, pk):
-                raise Denied(f"{ev['id']}: collection '{col}' does not exist; a steward creates one with a "
-                             f"kind 4712 found event naming its owner")
-            raise Denied(f"{ev['id']}: collection '{col}' does not exist, and only approved pubkeys create collections")
+            if not has_account(conn, pk):
+                if _approved_grantors(conn, pk):
+                    raise Denied(f"{ev['id']}: collection '{col}' does not exist; a steward creates one with a "
+                                 f"kind 4712 found event naming its owner")
+                raise Denied(f"{ev['id']}: collection '{col}' does not exist, and only signed-up keys create collections")
+            if conn.execute("SELECT count(*) AS n FROM collections WHERE owner = %s", (pk,)).fetchone()["n"] >= FREE_COLLECTIONS:
+                raise Denied(LIMIT_MSG)
         conn.execute("INSERT INTO collections (slug, owner) VALUES (%s, %s) ON CONFLICT DO NOTHING", (col, pk))
         row = conn.execute("SELECT owner FROM collections WHERE slug = %s", (col,)).fetchone()
     require_member(conn, pk, col)
@@ -407,6 +423,46 @@ def _authorize(conn, ev: dict, data: dict) -> str | None:
     if kind in (E.MEMBERS, E.ABOUT) and row["owner"] != pk and not _admin_now(conn, col, pk):
         raise Denied(f"{ev['id']}: only the owner or an admin of '{col}' changes its {E.NAMES[kind]}")
     return col
+
+
+RECORDS = (E.EVIDENCE, E.CLAIM, E.LINK, E.CONTRADICTION)
+
+
+def _payer(conn, pk: str, col: str) -> str | None:
+    """Whose free-account limit a record counts against, or None when nobody's does: the signer's
+    own account, else (a plain member with no account) the collection owner's."""
+    if is_approved(conn, pk):
+        return None
+    if has_account(conn, pk):
+        return pk
+    owner = conn.execute("SELECT owner FROM collections WHERE slug = %s", (col,)).fetchone()["owner"]
+    return None if is_approved(conn, owner) else owner
+
+
+def _records(conn, payer: str) -> int:
+    """Records counted against payer: those it signed, plus those signed in its collections by keys
+    with no account and no approval."""
+    return conn.execute(
+        """SELECT count(*) AS n FROM events e WHERE e.kind IN (4701, 4702, 4703, 4704) AND (e.pubkey = %(p)s OR (
+               e.collection IN (SELECT slug FROM collections WHERE owner = %(p)s) AND e.pubkey <> ALL(%(env)s)
+               AND NOT EXISTS (SELECT 1 FROM signups s WHERE s.pubkey = e.pubkey)
+               AND NOT EXISTS (SELECT 1 FROM email_accounts a WHERE a.pubkey = e.pubkey)
+               AND NOT EXISTS (SELECT 1 FROM approvals a WHERE a.pubkey = e.pubkey)
+               AND NOT EXISTS (SELECT 1 FROM admins a WHERE a.pubkey = e.pubkey)))""",
+        {"p": payer, "env": sorted(APPROVED | ADMINS)}).fetchone()["n"]
+
+
+def _charge(conn, ev: dict, col: str, used: dict) -> None:
+    """Refuse a record past its payer's free limit. used caches counts for this batch.
+    ponytail: one count per payer per batch over the events table; a counter table if it gets slow."""
+    payer = _payer(conn, ev["pubkey"], col)
+    if payer is None:
+        return
+    if payer not in used:
+        used[payer] = _records(conn, payer)
+    if used[payer] >= FREE_RECORDS:
+        raise Denied(LIMIT_MSG)
+    used[payer] += 1
 
 
 def publish(conn, events: list) -> dict:
@@ -426,13 +482,15 @@ def publish(conn, events: list) -> dict:
         if len(ev["content"]) > MAX_CONTENT:
             raise E.Invalid(f"{ev['id']}: content is {len(ev['content'])} chars; cap is {MAX_CONTENT}")
         checked.append((ev, data))
-    accepted, skipped, collections = [], [], set()
+    accepted, skipped, collections, used = [], [], set(), {}
     with conn.transaction():
         for ev, data in checked:
             if conn.execute("SELECT 1 FROM events WHERE id = %s", (ev["id"],)).fetchone():
                 skipped.append(ev["id"])  # same ID, same signed bytes: a retry
                 continue
             col = _authorize(conn, ev, data)
+            if ev["kind"] in RECORDS:
+                _charge(conn, ev, col, used)
             conn.execute("""INSERT INTO events (id, pubkey, created_at, kind, tags, content, sig, collection)
                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
                          (ev["id"], ev["pubkey"], ev["created_at"], ev["kind"], Jsonb(ev["tags"]), ev["content"],

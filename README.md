@@ -70,14 +70,15 @@ Environment:
 | Variable | What |
 |---|---|
 | `DATABASE_URL` | Postgres URL (`TMS_DATABASE_URL` also read; default the local container). In the cloud, the PgBouncer pool. |
-| `TMS_APPROVED` | npubs or hex pubkeys the operator approves. Only they create collections. |
+| `TMS_APPROVED` | npubs or hex pubkeys the operator approves: no free-account limits, and they may name stewards. |
+| `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET` | Cloudflare Turnstile on sign-up (a new extension key, or a new email address). Unset, sign-up isn't checked for bots and the server logs a warning. |
+| `TMS_CONTACT` | Who the free-account limit message tells people to email (default `TMS_CONTACT_EMAIL`, then dustin@delegance.ai). |
 | `TMS_ADMINS` | Site admins: npubs or hex pubkeys that may open `/admin` and add or remove admins there (the `admins` table). Added admins can do everything else; everyone else gets a 404. |
 | `TMS_SECRET` | HMAC key for login cookies. Required over HTTP. |
 | `TMS_NSEC` | stdio only: your key; tool calls without a `request` are signed with it. |
 | `TMS_SERVER_NSEC` | The server's own key, which signs snapshot events and nothing else. |
 | `EMBED_URL`, `EMBED_MODEL`, `EMBED_API_KEY` | Default `http://localhost:11434/v1`, `qwen3-embedding:8b`. DeepInfra: `https://api.deepinfra.com/v1/openai`, `Qwen/Qwen3-Embedding-8B`. Must return 4096 dimensions. |
 | `RESEND_API_KEY`, `TMS_EMAIL_FROM`, `TMS_KEY_SECRET` | Email sign-in ([tms/email_login.py](tms/email_login.py)). Codes go out through Resend from `TMS_EMAIL_FROM` (default `TMS ledger <login@delegance.ai>`). `TMS_KEY_SECRET` encrypts the keys held for email accounts: **if it is lost, those keys are lost**, so back it up. Without both, email sign-in returns 503. `TMS_EMAIL_DEV=1` prints codes to the log instead of emailing them (local only). |
-| `TMS_NOTIFY_EMAIL` | Comma-separated addresses emailed about every new access request (through Resend). Defaults to `TMS_CONTACT_EMAIL`. |
 | `CHAT_MODEL`, `CHAT_URL`, `CHAT_API_KEY` | The admin chat popup. Default `deepseek-ai/DeepSeek-V4.1-Flash` on `https://api.deepinfra.com/v1/openai`; the key defaults to `EMBED_API_KEY`. `CHAT_PRICE_IN_PER_MTOK` / `CHAT_PRICE_OUT_PER_MTOK` (0.20 / 0.60 USD) price it on `/admin`. |
 | `EMBED_PRICE_PER_MTOK` | USD per million embedding tokens for the spend shown on `/admin` (default 0.01). Local endpoints are logged at $0. |
 
@@ -120,7 +121,7 @@ Prompts: `briefing` (answer from one collection with a checked proof) and `claim
 
 ## Web
 
-`/connect` (and `/` when logged in): connect with a NIP-07 extension, show the profile fetched from Damus and Primal (stored once you agree), sign the terms, list your collections, create one (approved keys), and name stewards who may create collections for you. `/submit`: sign one evidence document plus claims and links from it. `/c/<slug>/members`: an owner or an admin signs the member list; the owner also signs the admin list. `/c/<slug>/export.jsonl`: every event in the collection; each line verifies on its own. `/dashboard`: activity, browse, agents and sources, limited to your collections. `/office` (and `/` when logged out): bots replay the last hour on boards that show anonymous slices of real collections, with global totals and a **Request access** form. `/docs`: the full guide for people and agents ([DOCS.md](DOCS.md)). `/admin`: operator page for `TMS_ADMINS`, including pending access requests with Approve and Dismiss. Access is `TMS_ADMINS` + `TMS_APPROVED` (env, for bootstrapping) + the `approvals` table that Approve writes, so approving someone needs no redeploy. Logging in signs a `login` request and sets a 12-hour HttpOnly cookie; writes are always signed in the browser.
+`/connect` (and `/` when logged in): connect with a NIP-07 extension, show the profile fetched from Damus and Primal (stored once you agree), sign the terms, list your collections, sign up (Turnstile), create a collection (one for a free account), and name stewards who may create collections for you. `/submit`: sign one evidence document plus claims and links from it. `/c/<slug>/members`: an owner or an admin signs the member list; the owner also signs the admin list. `/c/<slug>/export.jsonl`: every event in the collection; each line verifies on its own. `/dashboard`: activity, browse, agents and sources, limited to your collections. `/office` (and `/` when logged out): bots replay the last hour on boards that show anonymous slices of real collections, with global totals and a **Sign up** link. `/docs`: the full guide for people and agents ([DOCS.md](DOCS.md)). `/admin`: operator page for `TMS_ADMINS`, including free accounts with **Lift limits**. No limits = `TMS_ADMINS` + `TMS_APPROVED` (env, for bootstrapping) + the `approvals` table that Lift limits writes, so it needs no redeploy. Logging in signs a `login` request and sets a 12-hour HttpOnly cookie; writes are always signed in the browser.
 
 ## Deploy (DigitalOcean)
 

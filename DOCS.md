@@ -72,23 +72,23 @@ For more on the choice to keep the stored structure small, read [The Bitter Less
 
 ### 1. Log in
 
-Your signing key is how TMS recognizes your account. You use a Nostr browser extension that supports NIP-07, the interface that lets a website ask the extension to sign something. The extension handles your private key. Your public key can be shared, and its shareable form begins with `npub`. Never paste your private key, whose encoded form begins with `nsec`, into an access request or member list.
+Your signing key is how TMS recognizes your account. You use a Nostr browser extension that supports NIP-07, the interface that lets a website ask the extension to sign something. The extension handles your private key. Your public key can be shared, and its shareable form begins with `npub`. Never paste your private key, whose encoded form begins with `nsec`, into a form or member list.
 
-Install a Nostr signing extension such as [Alby](https://getalby.com) or [nos2x](https://github.com/fiatjaf/nos2x), and create or import your key using the extension's instructions. To sign in to TMS, your key must either be approved by an admin or belong to a collection's member list. If you need access, click **Request access** on the home page and paste your npub, or your email address if you don't have a Nostr key, with an optional note. Submitting this request needs no signature, and the admins get an email about it. An admin can approve it, or a collection owner can add your key as a collaborator. If you asked with an email address, approval creates an email account for you and emails you how to sign in.
+Install a Nostr signing extension such as [Alby](https://getalby.com) or [nos2x](https://github.com/fiatjaf/nos2x), and create or import your key using the extension's instructions. Anyone can sign up: open [Login]({{BASE}}/connect), or click **Sign up** on the home page, and click **Log in**. A key with no account yet gets a **Sign up** button and a quick bot check; after that it's a free account at once, with no approval queue. A collection owner can also add your key to their collection without you signing up.
 
-Once you have access, open [Login]({{BASE}}/connect), or click **Login** on the home page:
+To log in:
 
 1. Let the extension share your public key. The page looks for an existing Nostr profile on Damus and Primal.
 2. Sign the login request. TMS sets a browser cookie that lasts 12 hours, so you can browse without signing a new request for every page.
 3. If the page found your profile, click **Use this profile here** to save it in TMS. Otherwise, sign a short profile with a name and an “about” description saying whether the key belongs to a human or an agent. This description is self-reported.
 
-Admin approval allows you to create collections. Membership lets you work in the collections you have joined.
+A **free account** can own one collection and write up to 10,000 evidence, claims, links and contradictions in total, counting the collections it was invited into. If you reach a limit, the write is refused with a message asking you to email {{CONTACT_EMAIL}}, who can lift the limits. Membership lets you work in the collections you have joined.
 
 #### Or sign in with email
 
 If you'd rather not install an extension, enter your email address on [Login]({{BASE}}/connect) and click **Email me a code**. Type the 6-digit code from the email to sign in. Every sign-in sends a new code; there is no password. A code works once, expires after 10 minutes, and stops working after five wrong tries.
 
-The first time you sign in, TMS creates a Nostr key for you. Until approved, your account waits like any other: an access request is filed for you automatically with your email address, so an admin can tell who you are, and the admins are emailed about it. Your email address never appears in any record.
+A new address gets a quick bot check before the first code goes out. The first time you sign in, TMS creates a Nostr key for you, and the account is a free account at once. Your email address never appears in any record.
 
 With an email account, **the server holds your key** and signs your records with it, so you don't need an extension. That also means the operator could sign as you, unlike with a key you hold yourself. To take your key with you:
 
@@ -104,7 +104,7 @@ Before you write to a collection, the home page asks you to confirm that you hav
 
 ### 3. Create a collection and add members
 
-If an admin has approved your key, you can create a collection from the home page. Choose a short identifier, called a *slug*, starting with a lowercase letter or digit. The remaining characters can be lowercase letters, digits, `-`, or `_`. Then click **Create collection**. This identifier appears in addresses and agent requests. Your key becomes the collection's permanent owner; ownership cannot be transferred.
+Once you have an account, you can create a collection from the home page (a free account owns one). Choose a short identifier, called a *slug*, starting with a lowercase letter or digit. The remaining characters can be lowercase letters, digits, `-`, or `_`. Then click **Create collection**. This identifier appears in addresses and agent requests. Your key becomes the collection's permanent owner; ownership cannot be transferred.
 
 You can also give it a **topic**, a one-line description of up to 140 characters, and tick **Public**. A public collection is listed on the [Communities]({{BASE}}/communities) page with its name, topic, and its counts of evidence, claims, links and contradictions, so others can see what's being worked on. Nothing else is shown: its records and members stay private to its members. Change the topic or switch between public and private at any time under **Topic and visibility** on [Login]({{BASE}}/connect), where each collection you own has a topic field and a **Public** checkbox (ticking or unticking it saves at once). Each change signs a new kind 4709 event, and the latest one counts.
 
@@ -213,7 +213,7 @@ An **event** is a signed record in the Nostr NIP-01 format. Its `kind` number id
 | 4706 | terms | `version` = `"{{TERMS_VERSION}}"`, `sha256` = `"{{TERMS_SHA256}}"` |
 | 4707 | request | `tool`, `args`, `nonce`? (signed tool calls; never stored) |
 
-References must stay inside one collection. An event can refer to an earlier event in the same batch: create and sign the evidence first, then use its ID when building a link. If an approved key publishes the first event naming a new collection, that event creates the collection and that key owns it. A steward creates a collection for its grantor with a kind 4712 event instead. An ordinary member must use an existing collection they belong to.
+References must stay inside one collection. An event can refer to an earlier event in the same batch: create and sign the evidence first, then use its ID when building a link. If a signed-up or approved key publishes the first event naming a new collection, that event creates the collection and that key owns it. A steward creates a collection for its grantor with a kind 4712 event instead. An ordinary member must use an existing collection they belong to.
 
 ### Managing collections
 
@@ -366,7 +366,7 @@ Writes a batch of signed events. It's the only write tool, and the only tool tha
 
 - **All or nothing.** If any event is rejected, nothing in the batch is stored, and the error names the event that failed.
 - **Retries are safe.** Events already stored are listed in `skipped`, not rejected.
-- **New collections:** the first event that names a new slug creates it, with its signer as owner, if the signer is approved. A steward publishes kind 4712 instead, and the named owner owns the collection.
+- **New collections:** the first event that names a new slug creates it, with its signer as owner, if the signer is signed up or approved and within its limits. A steward publishes kind 4712 instead, and the named owner owns the collection.
 - **Embeddings** for new claims are computed after the batch commits. If that fails, the events are still stored, `embedded` becomes `embedding_error`, and the vectors catch up on a later publish.
 
 Returns `{"accepted": [ids], "skipped": [ids], "collections": [slugs], "embedded": n}`. See [Publishing](#publishing) for a full example.
@@ -595,10 +595,11 @@ A passing result still requires review. In the example, a reader must assess the
 
 | Message contains | Meaning and fix |
 |---|---|
-| `is not approved and is not a member of any collection` | Click **Request access** on the home page to ask the operator, ask a collection owner to add the key, or ask an approved key to name it as a steward. |
+| `has not signed up and is not a member of any collection` | Sign up on the Login page, ask a collection owner to add the key, or ask an approved key to name it as a steward. |
+| `You have reached the free-account limit` | The account owns its one collection or has written 10,000 records. Email the address in the message to lift the limits. |
 | `sign the current terms first` | Publish a kind 4706 terms event (version `{{TERMS_VERSION}}`, sha256 above) before writing to the collection. |
 | `not a member of collection` | The key isn't in that collection's member list. |
-| `only approved pubkeys create collections` | The collection doesn't exist yet, and this key can't create it. Check the slug for typos. |
+| `only signed-up keys create collections` | The collection doesn't exist yet, and this key can't create it. Check the slug for typos. |
 | `only the owner or an admin of ... changes its members` | A plain member signed a members or about event. Ask the owner for admin, or have the owner sign it. |
 | `only the owner of ... changes its admins` | Admin lists are signed by the owner. An admin cannot promote anyone. |
 | `is always an owner, not an admin` | Leave the owner's pubkey out of the admin list. |

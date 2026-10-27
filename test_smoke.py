@@ -173,12 +173,12 @@ def ledger(conn) -> list[str]:
     assert [c["slug"] for c in L.list_collections(conn, PK[OUTSIDER])] == ["outside"]
 
     # An unapproved non-member gets nothing.
-    rejects(lambda: pub([sign(STRANGER, E.PROFILE, {"name": "Stranger"})]), "is not approved")
-    rejects(lambda: pub([terms(STRANGER)]), "is not approved")
+    rejects(lambda: pub([sign(STRANGER, E.PROFILE, {"name": "Stranger"})]), "has not signed up")
+    rejects(lambda: pub([terms(STRANGER)]), "has not signed up")
     assert not L.allowed(conn, PK[STRANGER]) and L.list_collections(conn, PK[STRANGER]) == []
 
     # A member added by an owner gets in without approval, but cannot create collections or change members.
-    rejects(lambda: pub([terms(BOB)]), "is not approved")
+    rejects(lambda: pub([terms(BOB)]), "has not signed up")
     rejects(lambda: pub([sign(OUTSIDER, E.MEMBERS, {"collection": "smoke", "members": [PK[OUTSIDER]]})]), "not a member")
     pub([sign(OWNER, E.MEMBERS, {"collection": "smoke", "members": [PK[BOB]]})])
     tagged = sign(BOB, E.PROFILE, '{"name":"Bob","about":"agent"}', tags=[["client", "Some Nostr app"], ["alt", "profile"]])
@@ -191,7 +191,7 @@ def ledger(conn) -> list[str]:
     assert dict(row) == tagged and E.verify(dict(row))["name"] == "Bob"
     b1 = sign(BOB, E.CLAIM, {"collection": "smoke", "text": "Bob adds a claim about DAO supplementation."})
     pub([b1])
-    rejects(lambda: pub([sign(BOB, E.CLAIM, {"collection": "bobs", "text": "new collection"})]), "only approved pubkeys create")
+    rejects(lambda: pub([sign(BOB, E.CLAIM, {"collection": "bobs", "text": "new collection"})]), "only signed-up keys create")
     rejects(lambda: pub([sign(BOB, E.MEMBERS, {"collection": "smoke", "members": []})]), "only the owner")
     mine = L.list_collections(conn, PK[BOB])
     assert [c["slug"] for c in mine] == ["smoke"] and set(mine[0]["members"]) == {PK[OWNER], PK[BOB]}, mine
@@ -300,7 +300,7 @@ def delegation(conn) -> None:
     pk_agent, pk_pal = E.pubkey_of(agent), E.pubkey_of(pal)
     pub = lambda evs: L.publish(conn, evs)  # noqa: E731
 
-    rejects(lambda: pub([sign(agent, E.PROFILE, {"name": "Agent"})]), "is not approved")
+    rejects(lambda: pub([sign(agent, E.PROFILE, {"name": "Agent"})]), "has not signed up")
     assert not L.allowed(conn, pk_agent) and L.list_collections(conn, pk_agent) == []
 
     # A plain member cannot grant create rights, name admins, or open a collection.
@@ -341,12 +341,12 @@ def delegation(conn) -> None:
     rejects(lambda: pub([sign(pal, E.ABOUT, {"collection": "delegated", "topic": "Hijack", "public": True})]), "only the owner or an admin")
     rejects(lambda: pub([sign(pal, E.ADMINS, {"collection": "delegated", "admins": [pk_pal]})]), "only the owner")
     rejects(lambda: pub([sign(pal, E.STEWARDS, {"stewards": [pk_agent]})]), "only an approved pubkey")
-    rejects(lambda: pub([sign(pal, E.CLAIM, {"collection": "pal-col", "text": "x"})]), "only approved pubkeys create")
+    rejects(lambda: pub([sign(pal, E.CLAIM, {"collection": "pal-col", "text": "x"})]), "only signed-up keys create")
     # The agent can remove the member. That key cannot write itself back in, and the owner stays.
     pub([sign(agent, E.MEMBERS, {"collection": "delegated", "members": []})])
     assert PK[OWNER] in {r["pubkey"] for r in conn.execute("SELECT pubkey FROM members WHERE collection = 'delegated'")}
-    rejects(lambda: pub([sign(pal, E.CLAIM, {"collection": "delegated", "text": "back"})]), "is not approved")
-    rejects(lambda: pub([sign(pal, E.MEMBERS, {"collection": "delegated", "members": [pk_pal]})]), "is not approved")
+    rejects(lambda: pub([sign(pal, E.CLAIM, {"collection": "delegated", "text": "back"})]), "has not signed up")
+    rejects(lambda: pub([sign(pal, E.MEMBERS, {"collection": "delegated", "members": [pk_pal]})]), "has not signed up")
     # created_at must differ: an identical event signed in the same second is the same id and a no-op.
     pub([sign(agent, E.MEMBERS, {"collection": "delegated", "members": [pk_pal]}, created_at=int(time.time()) + 5)])
     # An admin cannot widen the admin set, on this collection or any other.
@@ -396,7 +396,7 @@ def delegation(conn) -> None:
     # A key that is not yet allowed can be granted, sign the terms, and open a collection in one batch.
     newbie = hashlib.sha256(b"delegate-newbie").hexdigest()
     pk_new = E.pubkey_of(newbie)
-    rejects(lambda: pub([terms(newbie)]), "is not approved")
+    rejects(lambda: pub([terms(newbie)]), "has not signed up")
     pub([sign(OWNER, E.STEWARDS, {"stewards": [pk_agent, pk_new]}), terms(newbie),
          sign(newbie, E.FOUND, {"collection": "newbie-col", "owner": PK[OWNER]})])
     assert L.collection_role(conn, pk_new, "newbie-col") == "admin"
@@ -488,9 +488,9 @@ def server(ids) -> None:
         tampered = req(BOB, "list_collections")
         rejects(lambda: call("list_collections", {"request": dict(tampered, pubkey=PK[OWNER])}), "id does not match")
         # An unapproved non-member gets nothing beyond the tool list.
-        rejects(lambda: call("list_collections", {"request": req(STRANGER, "list_collections")}), "is not approved")
+        rejects(lambda: call("list_collections", {"request": req(STRANGER, "list_collections")}), "has not signed up")
         rejects(lambda: call("fetch_url", {"request": req(STRANGER, "fetch_url", {"url": "https://example.org"})}),
-                "is not approved")
+                "has not signed up")
         rejects(lambda: call("get_event", {"request": req(OUTSIDER, "get_event", {"id": ids[0]})}) or
                 (_ for _ in ()).throw(ValueError("hidden")), "hidden")
         got = call("get_event", {"request": req(BOB, "get_event", {"id": ids[0]})})
@@ -502,7 +502,7 @@ def server(ids) -> None:
         rejects(lambda: call("list_members", {"request": req(BOB, "list_members", {"collection": "outside"})}),
                 "not a member")
         assert call("list_delegations", {"request": req(BOB, "list_delegations")}) == {"granted": [], "for": []}
-        rejects(lambda: call("list_delegations", {"request": req(STRANGER, "list_delegations")}), "is not approved")
+        rejects(lambda: call("list_delegations", {"request": req(STRANGER, "list_delegations")}), "has not signed up")
         res = call("publish", {"events": [sign(BOB, E.CLAIM, {"collection": "smoke", "text": "Published over HTTP."})]})
         assert len(res["accepted"]) == 1, res
 
@@ -653,7 +653,7 @@ def server(ids) -> None:
         assert "smoke" not in office.text and ids[0] not in office.text
         landing = client.get("/")  # logged out: the office is the landing page
         assert landing.headers["cache-control"] == "private, no-store"
-        assert 'id="landing"' in landing.text and "Request access" in landing.text and client.get("/connect").status_code == 200
+        assert 'id="landing"' in landing.text and 'href="/connect">Sign up' in landing.text and client.get("/connect").status_code == 200
         assert "<title>TMS · Your personal intelligence agency</title>" in landing.text
         assert 'property="og:title" content="TMS · Your personal intelligence agency"' in landing.text
         assert 'name="description" content="Your personal intelligence agency. A private evidence ledger for people and AI agents."' in landing.text
@@ -665,13 +665,12 @@ def server(ids) -> None:
         assert st.status_code == 200 and st.headers["cache-control"] == "public, max-age=60" and 'id="ticker"' in office.text
         assert set(st.json()) == {"contributors", "collections", "claims", "evidence", "links", "contradictions"}
         assert all(type(v) is int for v in st.json().values()) and st.json() == r.json()["totals"]
-        access(client, W)
+        signup(client, W, S)
 
     office_data()
     fetch_stub()
     chat_agent()
     email_signin()
-    request_notifications()
     showcase()
 
     with L.connect() as conn:
@@ -681,63 +680,95 @@ def server(ids) -> None:
     assert any(not r["ok"] and r["pubkey"] is None for r in rows), "failed auth logs no pubkey"
 
 
-def access(client, W) -> None:
-    """Request access (unsigned, rate-limited, one pending request per npub); Approve in /admin
-    grants access with no restart; Dismiss doesn't; only admins can decide."""
-    visitor, other = hashlib.sha256(b"visitor").hexdigest(), hashlib.sha256(b"dismissed").hexdigest()
-    vpk, opk = E.pubkey_of(visitor), E.pubkey_of(other)
-    W._recent.clear()
-    client.cookies.clear()
-    ask = lambda key, note="", **kw: client.post("/api/access-request", json={"npub": key, "note": note}, **kw)  # noqa: E731
-    assert client.post("/login", json=E.request(visitor, "login")).status_code == 403
-    r = ask(E.bech32_encode("npub", vpk), "I read papers on histamine intolerance.")
-    assert r.status_code == 201 and r.json()["status"] == "pending", r.text
-    assert ask(vpk).status_code == 201, "a duplicate gets the same answer, so replies reveal nothing"
-    with L.connect() as conn:
-        assert conn.execute("SELECT count(*) AS n FROM access_requests WHERE npub = %s",
-                            (E.bech32_encode("npub", vpk),)).fetchone()["n"] == 1, "but only one request is stored"
-    assert ask(opk, "x" * 501).status_code == 400 and ask("npub1nope").status_code == 400
-    assert ask(opk).status_code == 201
-    # Five requests per address per hour: these five calls used it up.
-    sixth = E.pubkey_of(hashlib.sha256(b"sixth").hexdigest())
-    assert ask(sixth).status_code == 429
-    # A forged X-Forwarded-For doesn't help: the proxy's own (rightmost) entry is what counts.
-    W._recent.clear()
-    via = lambda forged: {"headers": {"X-Forwarded-For": f"{forged}, 203.0.113.7"}}  # noqa: E731
-    for i in range(5):
-        assert ask(E.pubkey_of(hashlib.sha256(f"spoof{i}".encode()).hexdigest()), **via(f"10.0.0.{i}")).status_code == 201
-    assert ask(sixth, **via("10.0.0.99")).status_code == 429
-    assert ask(sixth, headers={"X-Forwarded-For": "203.0.113.8"}).status_code == 201, "a different real address has its own limit"
-    W._recent.clear()
+class turnstile_on:
+    """Turnstile configured, with Cloudflare's siteverify faked: the token "good" passes."""
+    def __enter__(self):
+        import httpx
 
-    with L.connect() as conn:
-        reqs = {r["npub"]: r["id"] for r in conn.execute("SELECT id, npub FROM access_requests WHERE status = 'pending'")}
-    vid, oid = reqs[E.bech32_encode("npub", vpk)], reqs[E.bech32_encode("npub", opk)]
-    client.cookies.set(W.COOKIE, W.make_cookie(PK[OWNER]))  # OWNER is the admin
-    page = client.get("/admin").text
-    assert "Access requests (8 pending)" in page and "histamine intolerance" in page
-    assert client.post(f"/admin/requests/{vid}/approve", headers={"Origin": "https://evil.example"}).status_code == 403
-    r = client.post(f"/admin/requests/{vid}/approve", follow_redirects=False)
-    assert r.status_code == 303 and r.headers["location"] == "/admin"
-    assert client.post(f"/admin/requests/{oid}/dismiss", follow_redirects=False).status_code == 303
-    assert client.post(f"/admin/requests/{oid}/burn").status_code == 404
-    client.cookies.set(W.COOKIE, W.make_cookie(PK[BOB]))
-    assert client.post(f"/admin/requests/{vid}/approve").status_code == 404, "non-admins can't decide"
+        from tms import web as W
+        self.real, self.W, self.httpx = httpx.post, W, httpx
+
+        class R:
+            def __init__(self, ok):
+                self.ok = ok
+
+            def json(self):
+                return {"success": self.ok}
+
+        def fake(url, data=None, **kw):
+            assert url.endswith("/turnstile/v0/siteverify") and data["secret"] == "smoke-turnstile", (url, data)
+            return R(data["response"] == "good")
+        httpx.post, W.TURNSTILE_SECRET = fake, "smoke-turnstile"
+
+    def __exit__(self, *exc):
+        self.httpx.post, self.W.TURNSTILE_SECRET = self.real, ""
+
+
+def signup(client, W, S) -> None:
+    """Open sign-up (ACCOUNTS.md step 2): a new key passes Turnstile and has a free account at once.
+    A free account owns one collection and a capped number of records, plain members with no account
+    included; lifting its limits in /admin removes both, with no restart. Approved keys have none."""
+    visitor, helper = hashlib.sha256(b"visitor").hexdigest(), hashlib.sha256(b"helper").hexdigest()
+    vpk, hpk = E.pubkey_of(visitor), E.pubkey_of(helper)
+    client.cookies.clear()
+    login = lambda sk, ago=0: E.sign(sk, E.REQUEST, {"tool": "login", "args": {}}, created_at=int(time.time()) - ago)  # noqa: E731
+    assert client.post("/login", json=login(visitor)).status_code == 403, "no account yet"
+    assert client.post("/api/access-request", json={"npub": vpk}).status_code in (404, 405), "the request queue is gone"
+    with turnstile_on():
+        for token in ("", "bad"):
+            r = client.post("/api/signup", json={"event": login(visitor, 1), "turnstile": token})
+            assert r.status_code == 400 and r.json()["turnstile"], r.text
+        assert client.post("/login", json=login(visitor, 2)).status_code == 403, "a failed check creates nothing"
+        r = client.post("/api/signup", json={"event": login(visitor, 3), "turnstile": "good"})
+    assert r.status_code == 200 and W.COOKIE in r.cookies, r.text
+    assert not r.json()["approved"] and r.json()["allowed"] and r.json()["can_create"], r.json()
+    assert client.post("/login", json=login(visitor, 4)).status_code == 200, "and logs back in without a check"
+    assert "Sign up" in client.get("/connect").text and "{{TURNSTILE_SITE_KEY}}" not in client.get("/connect").text
     client.cookies.clear()
 
-    # Approved without a restart: the visitor logs in, and can now create a collection. (Back-dated a
-    # few seconds: the 403 above used an identical request, and the server refuses replays.)
-    login = lambda sk: E.sign(sk, E.REQUEST, {"tool": "login", "args": {}}, created_at=int(time.time()) - 5)  # noqa: E731
-    assert client.post("/login", json=login(visitor)).status_code == 200
-    assert client.post("/login", json=login(other)).status_code == 403
-    client.cookies.clear()
-    r = client.post("/api/publish", json={"events": [E.sign(visitor, E.TERMS, L.TERMS),
-                                                     E.sign(visitor, E.CLAIM, {"collection": "visitor-col", "text": "Mine."})]})
+    pub = lambda *evs: client.post("/api/publish", json={"events": list(evs)})  # noqa: E731
+    r = pub(E.sign(visitor, E.TERMS, L.TERMS), E.sign(visitor, E.CLAIM, {"collection": "visitor-col", "text": "Mine."}))
     assert r.status_code == 200 and r.json()["collections"] == ["visitor-col"], r.text
+    r = pub(E.sign(visitor, E.CLAIM, {"collection": "visitor-two", "text": "A second one."}))
+    assert r.status_code == 403 and r.json()["error"] == L.LIMIT_MSG, r.text
+    assert "Please email dustin@delegance.ai to increase your limits." in L.LIMIT_MSG
+
+    L.FREE_RECORDS = 3
+    try:
+        r = pub(*[E.sign(visitor, E.CLAIM, {"collection": "visitor-col", "text": f"Claim {i}."}) for i in range(3)])
+        assert r.status_code == 403 and r.json()["error"] == L.LIMIT_MSG, "a batch past the cap is refused whole"
+        assert pub(*[E.sign(visitor, E.CLAIM, {"collection": "visitor-col", "text": f"Claim {i}."}) for i in range(2)]).status_code == 200
+        # A plain member with no account writes on the owner's count, which is now full.
+        assert pub(E.sign(visitor, E.MEMBERS, {"collection": "visitor-col", "members": [hpk]}), E.sign(helper, E.TERMS, L.TERMS)).status_code == 200
+        r = pub(E.sign(helper, E.CLAIM, {"collection": "visitor-col", "text": "Helper's claim."}))
+        assert r.status_code == 403 and r.json()["error"] == L.LIMIT_MSG, r.text
+        # Agents get the same text from MCP.
+        r = client.post("/mcp", headers={"Accept": "application/json, text/event-stream"}, json={
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "publish", "arguments": {
+                "events": [E.sign(visitor, E.CLAIM, {"collection": "visitor-col", "text": "Over MCP."})]}}})
+        res = r.json()["result"]
+        assert res["isError"] and L.LIMIT_MSG in res["content"][0]["text"], res
+        # Approved keys have no limits.
+        assert pub(E.sign(OWNER, E.CLAIM, {"collection": "owner-extra", "text": "Approved: no cap."})).status_code == 200
+
+        client.cookies.set(W.COOKIE, W.make_cookie(PK[OWNER]))  # OWNER is the admin
+        page = client.get("/admin").text
+        assert "Free accounts" in page and E.bech32_encode("npub", vpk) in page and "Access requests" not in page
+        assert client.post(f"/admin/lift/{vpk}", headers={"Origin": "https://evil.example"}).status_code == 403
+        assert client.post("/admin/lift", data={"npub": "nope"}).status_code == 400
+        client.cookies.set(W.COOKIE, W.make_cookie(PK[BOB]))
+        assert client.post(f"/admin/lift/{vpk}").status_code == 404, "only admins lift limits"
+        client.cookies.set(W.COOKIE, W.make_cookie(PK[OWNER]))
+        r = client.post("/admin/lift", data={"npub": E.bech32_encode("npub", vpk)}, follow_redirects=False)
+        assert r.status_code == 303 and r.headers["location"] == "/admin"
+        client.cookies.clear()
+        # Lifted at once: the owner, its plain members and a second collection are all past the cap.
+        assert pub(E.sign(helper, E.CLAIM, {"collection": "visitor-col", "text": "Helper's claim."})).status_code == 200
+        assert pub(E.sign(visitor, E.CLAIM, {"collection": "visitor-two", "text": "A second one."})).status_code == 200
+    finally:
+        L.FREE_RECORDS = 10_000
     with L.connect() as conn:
         assert conn.execute("SELECT approved_by FROM approvals WHERE pubkey = %s", (vpk,)).fetchone()["approved_by"] == PK[OWNER]
-        assert conn.execute("SELECT count(*) AS n FROM approvals WHERE pubkey = %s", (opk,)).fetchone()["n"] == 0
-        assert {r["status"] for r in conn.execute("SELECT status FROM access_requests")} == {"approved", "dismissed", "pending"}
 
 
 def showcase() -> None:
@@ -775,52 +806,6 @@ def showcase() -> None:
         assert client.get("/showcase.json").json()["collections"] == [], "the latest about wins"
 
 
-def request_notifications() -> None:
-    """Access requests take an npub or an email, email the admins, and approving an email request
-    creates its account and emails the person."""
-    from starlette.testclient import TestClient
-
-    from tms import email_login as EL
-    from tms import server as S
-    from tms import web as W
-    mail = []
-    EL.send = lambda to, subject, text: mail.append((to, subject, text))
-    EL.KEY_SECRET, EL.RESEND_API_KEY, EL.NOTIFY = "smoke-key-secret", "test", ["admin@example.org"]
-    L.ADMINS = {PK[OWNER]}
-    newkey = E.bech32_encode("npub", E.pubkey_of(hashlib.sha256(b"requester").hexdigest()))
-    with TestClient(S.http_app()) as client:
-        W._recent.clear()
-        ask = lambda contact, note="": client.post("/api/access-request", json={"contact": contact, "note": note})  # noqa: E731
-        assert ask("neither", "x").status_code == 400
-        assert ask(newkey, "Biologist").status_code == 201
-        assert mail[-1][0] == "admin@example.org" and newkey in mail[-1][2] and "Biologist" in mail[-1][2] and "/admin" in mail[-1][2]
-        r = ask("Cal@Example.com", "No Nostr key yet")
-        assert r.status_code == 201 and r.json()["email"] == "cal@example.com" and r.json()["npub"] is None
-        assert mail[-1][0] == "admin@example.org" and "cal@example.com" in mail[-1][2]
-        n = len(mail)
-        assert ask("cal@example.com").status_code == 201 and len(mail) == n, "a repeat request doesn't email the admins again"
-        with L.connect() as conn:
-            assert conn.execute("SELECT count(*) AS n FROM access_requests WHERE email = 'cal@example.com' AND status = 'pending'").fetchone()["n"] == 1
-            rid = conn.execute("SELECT id FROM access_requests WHERE email = 'cal@example.com' AND status = 'pending'").fetchone()["id"]
-        page = None
-        client.cookies.set(W.COOKIE, W.make_cookie(PK[OWNER]))
-        page = client.get("/admin").text
-        assert "cal@example.com" in page and newkey in page
-        assert client.post(f"/admin/requests/{rid}/approve", follow_redirects=False).status_code == 303
-        with L.connect() as conn:
-            cal = conn.execute("SELECT pubkey, nsec_enc FROM email_accounts WHERE email = 'cal@example.com'").fetchone()
-            assert cal and cal["nsec_enc"] and L.is_approved(conn, cal["pubkey"]), "approval created an approved email account"
-        assert mail[-1][0] == "cal@example.com" and "/connect" in mail[-1][2], "the requester is told how to sign in"
-        client.cookies.clear()
-        W._recent.clear()
-        mail.clear()
-        client.post("/api/email/start", json={"email": "cal@example.com"})
-        code = re.search(r"\b(\d{6})\b", mail[-1][2]).group(1)
-        me = client.post("/api/email/verify", json={"email": "cal@example.com", "code": code}).json()
-        assert me["pubkey"] == cal["pubkey"] and me["custodial"], "and can sign in straight away"
-        client.cookies.clear()
-
-
 def email_signin() -> None:
     """Email sign-in: codes, a held key that signs for the account, export, and forgetting it."""
     import re as _re
@@ -841,12 +826,20 @@ def email_signin() -> None:
         assert sent[-1][0] == "ann@example.com"
         assert client.post("/api/email/verify", json={"email": "ann@example.com", "code": "000000" if code() != "000000" else "111111"}).status_code == 400
         r = client.post("/api/email/verify", json={"email": "ann@example.com", "code": code()})
-        assert r.status_code == 403 and "waiting for an admin" in r.json()["error"], r.text  # new, not yet approved
+        assert r.status_code == 200 and r.json()["can_create"] and not r.json()["approved"], r.text  # a free account at once
         with L.connect() as conn:
             pk = conn.execute("SELECT pubkey FROM email_accounts WHERE email = 'ann@example.com'").fetchone()["pubkey"]
-            assert conn.execute("SELECT email FROM access_requests WHERE npub = %s", (E.bech32_encode("npub", pk),)).fetchone()["email"] == "ann@example.com"
-            conn.execute("INSERT INTO approvals (pubkey, approved_by) VALUES (%s, 'smoke')", (pk,))
+            assert L.has_account(conn, pk) and not conn.execute("SELECT 1 FROM access_requests").fetchone()
             assert not conn.execute("SELECT 1 FROM events WHERE content LIKE '%%ann@example.com%%'").fetchone(), "the email never reaches a record"
+        client.cookies.clear()
+        # With Turnstile on, a new address needs the check before a code goes out; an existing one doesn't.
+        with turnstile_on():
+            n = len(sent)
+            r = client.post("/api/email/start", json={"email": "dee@example.com"})
+            assert r.status_code == 400 and r.json()["turnstile"] and len(sent) == n, r.text
+            assert client.post("/api/email/start", json={"email": "dee@example.com", "turnstile": "good"}).json() == {"sent": True}
+            assert client.post("/api/email/start", json={"email": "ann@example.com"}).json() == {"sent": True}
+        W._recent.clear()
         client.post("/api/email/start", json={"email": "ann@example.com"})
         me = client.post("/api/email/verify", json={"email": "ann@example.com", "code": code()}).json()
         assert me["pubkey"] == pk and me["custodial"] and me["email"] == "ann@example.com", me

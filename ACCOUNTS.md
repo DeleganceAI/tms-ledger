@@ -1,6 +1,6 @@
 # Accounts
 
-**Status: proposed.** Nothing here is built yet. [EVENTS.md](EVENTS.md) section 3 is how access works today, and it stays the spec until each part below lands. [ROLES.md](ROLES.md) is about what contributors do, not what they may do, and is unchanged.
+**Status: step 2 (sign-up and limits) is built; the rest is proposed.** [EVENTS.md](EVENTS.md) section 3 is how access works today, and it stays the spec until each part below lands. [ROLES.md](ROLES.md) is about what contributors do, not what they may do, and is unchanged.
 
 ## Today
 
@@ -64,6 +64,6 @@ The server reads these to decide access, the same way it reads `members` and `ad
 ## Order of work
 
 1. This document.
-2. Sign-up and limits: Turnstile, free accounts, the limits above, and the `TMS_CONTACT` message. Until accounts exist, the record limit counts keys the way the rule for plain members does.
+2. Sign-up and limits: Turnstile, free accounts, the limits above, and the `TMS_CONTACT` message. Until accounts exist, the record limit counts keys the way the rule for plain members does. **Built.** An extension sign-up is a row in `signups`; an email sign-up is its `email_accounts` row. The 100-agent limit waits for step 3.
 3. Accounts: the two new kinds, the account and collection screens, and limits counted per account.
 4. The block list, when needed.
