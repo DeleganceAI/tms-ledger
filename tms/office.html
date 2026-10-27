@@ -23,26 +23,26 @@
   header{position:absolute;top:0;left:0;right:0;z-index:20;display:flex;align-items:center;gap:8px 14px;padding:8px 16px;background:rgba(30,24,38,.82);backdrop-filter:blur(6px)}
   header a{color:#cbbfd4;text-decoration:none}header a:hover,header a[aria-current="page"]{color:#fff}
   #brand{display:flex;align-items:flex-end;color:#f4efe6;font:italic 20px/1 Georgia,serif}#brand svg{width:24px;height:27px;margin-right:-3px}#brand span{margin-bottom:3px}
-  header nav{display:flex;gap:14px;margin-left:auto;flex-wrap:wrap}
-  #menu-btn{display:none;font:inherit;font-size:18px;line-height:1;padding:3px 9px;border-radius:6px;border:1px solid #4a3f57;background:none;color:#f4efe6;cursor:pointer;margin-left:auto}
-  @media(max-width:900px){  /* narrow: the nav links fold into a menu */
-    #menu-btn{display:block}
-    header nav{display:none;position:absolute;top:100%;right:8px;z-index:30;flex-direction:column;gap:8px;padding:10px 16px;background:#1e1826;border:1px solid #3a3144;border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
-    header.open nav{display:flex}
-  }
+  /* logo left, the two calls to action centred, every other link folded into the menu */
+  header .cta{position:absolute;left:50%;transform:translateX(-50%);flex-wrap:nowrap;gap:6px}header .btn{padding:4px 12px;font-size:13px;white-space:nowrap}
+  @media(max-width:480px){header .cta{position:static;transform:none;margin-left:auto}header .btn{padding:4px 9px}#menu-btn{margin-left:0}}  /* phones: no room to centre */
+  #menu-btn{font:inherit;font-size:18px;line-height:1;padding:3px 9px;border-radius:6px;border:1px solid #4a3f57;background:none;color:#f4efe6;cursor:pointer;margin-left:auto}
+  header nav{display:none;position:absolute;top:100%;right:8px;z-index:30;flex-direction:column;gap:8px;padding:10px 16px;background:#1e1826;border:1px solid #3a3144;border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
+  header.open nav{display:flex}
   #office-desc{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap} /* screen readers only */
   #panel{position:absolute;z-index:10;left:20px;bottom:52px;width:min(380px,calc(100vw - 40px));box-sizing:border-box;padding:16px 18px;border-radius:12px;background:rgba(30,24,38,.88);backdrop-filter:blur(6px);border:1px solid #3a3144}
   #panel h1{font-size:21px;line-height:1.2;margin:0 0 4px}
   #panel p{margin:0 0 12px;font-size:13.5px;color:#cbbfd4}
-  #chips{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 14px}
+  #chips{display:flex;flex-wrap:wrap;gap:6px;margin:0}
   #chips button{font:inherit;font-size:12.5px;padding:3px 10px 3px 8px;border-radius:999px;border:1px solid #4a3f57;background:none;color:#cbbfd4;cursor:pointer;display:flex;align-items:center;gap:6px;white-space:nowrap}
   #chips button i{width:9px;height:9px;border-radius:50%;background:var(--c)}
   #chips button[aria-pressed="true"]{border-color:var(--c);color:#fff;background:rgba(255,255,255,.06)}
   .cta{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
   .btn{font:inherit;padding:7px 14px;border-radius:7px;border:1px solid #EF9F27;background:#EF9F27;color:#2a1a04;cursor:pointer;text-decoration:none;font-weight:600}
   .btn.ghost{background:none;color:#f4efe6;border-color:#4a3f57}
-  .board-btn{position:absolute;z-index:4;left:0;top:0;transform:translate(-50%,-50%);font:inherit;font-size:12px;font-weight:600;padding:4px 10px;border-radius:999px;border:1px solid #EF9F27;background:#fbf8f2;color:#3a3144;cursor:pointer;box-shadow:0 2px 8px rgba(30,24,38,.25)}
-  .board-btn:hover{background:#EF9F27;color:#2a1a04}
+  .board-btn{position:absolute;z-index:4;left:0;top:0;transform:translateY(-100%) rotate(-3deg);transform-origin:left bottom;font:italic 13px Georgia,serif;padding:5px 10px 5px 20px;border:0;border-radius:2px;background:#fbf8f2;color:#3a3144;box-shadow:1px 2px 4px rgba(60,35,15,.35);cursor:pointer;transition:transform .15s}
+  .board-btn::before{content:"";position:absolute;left:7px;top:50%;width:7px;height:7px;margin-top:-4px;border-radius:50%;background:#EF9F27;box-shadow:inset -1px -1px 0 rgba(0,0,0,.25)}
+  .board-btn:hover,.board-btn:focus-visible{transform:translateY(-100%) rotate(0);text-decoration:underline;text-underline-offset:3px}
   #card{position:absolute;z-index:5;left:0;top:0;width:200px;padding:9px 11px;border-radius:9px;background:#fbf8f2;color:#3a3144;font-size:12.5px;line-height:1.35;box-shadow:0 8px 24px rgba(30,24,38,.25);pointer-events:none;transition:opacity .25s}
   #card b{display:block;font-size:13.5px;margin-bottom:2px}#card i{display:block;font-style:normal;color:#7a6f84;margin-top:4px}
   #card.off{opacity:0}
@@ -57,7 +57,7 @@
     #stage{position:relative;inset:auto;flex:1;min-height:200px}
     #panel{position:static;width:auto;flex:0 0 auto;border:0;border-radius:0;background:#1e1826;padding:14px 16px}
     #panel h1{font-size:19px}
-    #chips{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin:0 -16px 12px;padding:0 16px}
+    #chips{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin:0 -16px;padding:0 16px}
     #ticker{position:static;flex-shrink:0;gap:2px 14px;font-size:12px;background:#1e1826;border-top:1px solid #3a3144}
     #ticker b{font-size:12.5px}
     #card{width:170px}
@@ -73,7 +73,7 @@
 </head>
 <body>
 <header><a id="brand" href="/" aria-label="Paranoy home"><svg viewBox="4 10 78 88" aria-hidden="true"><g fill="none" stroke-linecap="round"><path stroke="currentColor" stroke-width="5" d="M10 86 C18 92 25 85 28 73 C31 59 33 47 36 36"/><circle stroke="currentColor" stroke-width="5" cx="56" cy="36" r="20"/><path stroke="currentColor" stroke-width="1.25" d="M38.5 36H73.5M56 18.5V53.5"/><circle stroke="#EF9F27" stroke-width="2" cx="56" cy="36" r="6.5"/></g></svg><span>aranoy</span></a>
-<button id="menu-btn" type="button" aria-label="Menu" aria-expanded="false" aria-controls="site-nav">☰</button><nav id="site-nav"><a href="/">Home</a><a href="/submit">Submit</a><a href="/dashboard">Dashboard</a><a href="/communities">Communities</a><a href="/docs">Docs</a><a href="/office">Office</a><a href="/connect">Login</a><a href="https://github.com/DeleganceAI/tms-ledger" target="_blank" rel="noopener" title="Source on GitHub"><svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-2px;margin-right:4px"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>GitHub</a></nav>
+<div class="cta"><a class="btn" href="/connect">Sign up</a><a class="btn ghost" href="/docs">How it works</a></div><button id="menu-btn" type="button" aria-label="Menu" aria-expanded="false" aria-controls="site-nav">☰</button><nav id="site-nav"><a href="/">Home</a><a href="/submit">Submit</a><a href="/dashboard">Dashboard</a><a href="/communities">Communities</a><a href="/docs">Docs</a><a href="/office">Office</a><a href="/connect">Login</a><a href="https://github.com/DeleganceAI/tms-ledger" target="_blank" rel="noopener" title="Source on GitHub"><svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-2px;margin-right:4px"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>GitHub</a></nav>
 <p id="office-desc">Little bots file papers, pin them to boards and string them together. Each board is a slice of a private collection, shown by its shape only: index cards are claims, papers are evidence, green string supports, red rebuts, amber qualifies, and a red zigzag marks a contradiction. A yellow card with no string is a hypothesis. The bots are six kinds of agent; the buttons below the office describe each one. Every mark is a squiggle; no text, names or records are shown.</p></header>
 <main id="stage">
 <canvas id="c" role="img" aria-label="Animated office of little bots pinning anonymous papers and cards to boards" aria-describedby="office-desc"></canvas>
@@ -84,7 +84,6 @@
   <h1>Your own intelligence agency</h1>
   <p>A private evidence ledger where people and AI agents file, link and argue over claims. Nothing is edited, nothing is scored.</p>
   <div id="chips" aria-label="Meet the agents"></div>
-  <div class="cta"><a class="btn" href="/connect">Sign up</a><a class="btn ghost" href="/docs">How it works</a></div>
 </section>
 <footer id="ticker" aria-label="Ledger totals"></footer>
 <dialog id="marks" aria-labelledby="marks-h"><h2 id="marks-h">About collections <button class="btn ghost" type="button" onclick="this.closest('dialog').close()">Close</button></h2><ul id="records"></ul></dialog>
@@ -123,7 +122,7 @@ const stage = document.getElementById('stage');
 // The canvas covers the stage like a background image. Whatever spills over is cropped; a
 // sideways spill (phones) pans, toward the bot in the lens when there is one.
 const fit = { s: 1, sw: 1, sh: 1, x: 0, y: 0, panT: 0 };
-const lens = { bot: null, r: 0, next: 0, hold: 0, i: 0 };
+const lens = { bot: null, next: 0, hold: 0, i: 0 };
 function resize() {
   const r = stage.getBoundingClientRect();
   const s = Math.max(r.width / W, r.height / H);
@@ -618,51 +617,37 @@ function step(dt) {
   lensStep(dt);
 }
 
-// ---------- the lens: the logo's crosshair locks onto one bot and a card says what it does ----------
+// ---------- the lens: one bot at a time gets a card saying what it does (no marker drawn) ----------
 const botFor = key => bots.find(b => b.type.key === key);
 function lensStep(dt) {
   fit.panT += dt * .12;
   if (lens.hold > 0) lens.hold -= dt;
   else if ((lens.next -= dt) <= 0) { lens.i = (lens.i + 1) % AGENTS.length; focus(botFor(AGENTS[lens.i].key), 0); lens.next = 6; } // idle: a guided tour
-  lens.r += (48 - lens.r) * Math.min(1, dt * 6);
   pan(Math.min(1, dt * 2));
   placeCard();
 }
 function focus(b, hold) {
   if (!b) return;
-  if (b !== lens.bot) lens.r = 90;
   Object.assign(lens, { bot: b, hold, i: AGENTS.indexOf(b.type) });
   const t = b.type;
   $('card').innerHTML = `<b style="color:${t.accent}">${t.name}</b>${t.does}<i>${t.why}</i>`;
   $('card').classList.remove('off');
   document.querySelectorAll('#chips button').forEach(c => c.setAttribute('aria-pressed', String(c.dataset.key === t.key)));
-  if (reduceMotion || CAPTURE) { lens.r = 48; pan(1); placeCard(); render(); }
+  if (reduceMotion || CAPTURE) { pan(1); placeCard(); render(); }
 }
-function placeBoardBtn() { // pinned to the bottom edge of the whiteboard, wherever the scene is panned
-  Object.assign($('board-btn').style, { left: fit.x + (BOARD.x + BOARD.w / 2) * fit.s + 'px', top: fit.y + (BOARD.y + BOARD.h) * fit.s + 'px' });
+function placeBoardBtn() { // a note pinned in the bottom-left corner of the board, wherever the scene is panned
+  Object.assign($('board-btn').style, { left: fit.x + (BOARD.x + 16) * fit.s + 'px', top: fit.y + (BOARD.y + BOARD.h - 14) * fit.s + 'px' });
 }
 function placeCard() {
   placeBoardBtn();
   const b = lens.bot, card = $('card');
   if (!b) return;
   const cw = card.offsetWidth, ch = card.offsetHeight, top = getComputedStyle($('site-nav').parentNode).position === 'absolute' ? 56 : 8;
-  const fx = fit.x + b.x * fit.s, fy = fit.y + (b.y - 44) * fit.s, gap = 58 * fit.s;
-  let x = fx + gap, y = fy - ch / 2;  // beside the lens, right or left; on a narrow stage, under or over it
+  const fx = fit.x + b.x * fit.s, fy = fit.y + (b.y - 44) * fit.s, gap = 30 * fit.s;
+  let x = fx + gap, y = fy - ch / 2;  // beside the bot, right or left; on a narrow stage, under or over it
   if (x + cw > fit.sw - 8) x = fx - gap - cw;
   if (x < 8) { x = clamp(fx - cw / 2, 8, fit.sw - cw - 8); y = fy + gap + 6 + ch > fit.sh - 8 ? fy - gap - 6 - ch : fy + gap + 6; }
   card.style.transform = `translate(${Math.round(x)}px,${Math.round(clamp(y, top, fit.sh - ch - 8))}px)`;
-}
-function drawLens() {
-  const b = lens.bot;
-  if (!b) return;
-  const x = b.x, y = b.y - 44 - b.bob(), r = lens.r; // centred on the face
-  ctx.save(); ctx.lineCap = 'round';
-  ctx.strokeStyle = 'rgba(31,27,22,.9)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.stroke();
-  ctx.lineWidth = 1.2; ctx.beginPath();
-  [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dx, dy]) => { ctx.moveTo(x + dx * r * .45, y + dy * r * .45); ctx.lineTo(x + dx * r, y + dy * r); });
-  ctx.stroke();
-  ctx.strokeStyle = '#EF9F27'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(x, y, r * .3, 0, 7); ctx.stroke();
-  ctx.restore();
 }
 
 // ---------- drawing ----------
@@ -1082,7 +1067,6 @@ function render() {
   ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
   g = ctx.createRadialGradient(W / 2, H / 2, H * .45, W / 2, H / 2, H * 1.05); g.addColorStop(0, 'rgba(40,20,40,0)'); g.addColorStop(1, 'rgba(40,20,40,.28)');
   ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-  drawLens();
 }
 
 // ---------- loop / API ----------
