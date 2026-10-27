@@ -1,6 +1,6 @@
 # Accounts
 
-**Status: step 2 (sign-up and limits) is built; the rest is proposed.** [EVENTS.md](EVENTS.md) section 3 is how access works today, and it stays the spec until each part below lands. [ROLES.md](ROLES.md) is about what contributors do, not what they may do, and is unchanged.
+**Status: steps 2 and 3 are built; the block list is not.** [EVENTS.md](EVENTS.md) section 3 is how access works today, and it stays the spec until each part below lands. [ROLES.md](ROLES.md) is about what contributors do, not what they may do, and is unchanged.
 
 ## Today
 
@@ -65,5 +65,5 @@ The server reads these to decide access, the same way it reads `members` and `ad
 
 1. This document.
 2. Sign-up and limits: Turnstile, free accounts, the limits above, and the `TMS_CONTACT` message. Until accounts exist, the record limit counts keys the way the rule for plain members does. **Built.** An extension sign-up is a row in `signups`; an email sign-up is its `email_accounts` row. The 100-agent limit waits for step 3.
-3. Accounts: the two new kinds, the account and collection screens, and limits counted per account.
+3. Accounts: the two new kinds, the account and collection screens, and limits counted per account. **Built.** Account state is derived from the events by the `accounts` and `collection_agents` views. Which human a Ledger signs for comes from that human's own account events at the moment of signing (`ledger_human`), so replacing a Ledger never rewrites what the old one signed. The Ledger and the agents a person picks are members of a collection, not on its roster.
 4. The block list, when needed.

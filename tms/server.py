@@ -44,6 +44,8 @@ before signing, so one batch can hold evidence, claims and the links between the
 Managing collections is the same publish path. The owner names stewards (4711) who may open
 collections the owner owns (4712 found) and admins (4710) who may replace members (4705) and
 the topic (4709). A plain member cannot. list_members and list_delegations show the current roles.
+An account (4713) is a human, one Ledger that acts with the human's role, and agents; each person
+picks which of their agents work in a collection (4714).
 Every other tool takes `request`: a kind-4707 event signed now, content {"tool": <this tool>,
 "args": {<the tool's arguments>}, "nonce": <random string>}. Requests are single-use and expire after
 60 seconds; the nonce keeps two identical calls in the same second apart.
@@ -181,6 +183,11 @@ def publish(events: list[dict]) -> dict[str, Any]:
                          wins. Those keys may create collections owned by you. Do not name yourself.
       4712 found         {collection, owner: pubkey}   a steward opens a collection owned by that
                          approved grantor and becomes its admin. Put it before about/members in the batch.
+                         A Ledger is a steward of its own human.
+      4713 account       {ledger: pubkey|null, agents: [pubkeys]}   no collection; signed by the human, or by
+                         its Ledger with ledger unchanged. Every key named belongs to this account only.
+      4714 collection agents {collection, agents: [pubkeys]}   a person in the collection, or their Ledger:
+                         which of their account's agents work there. Latest per person wins.
       4706 terms         {version, sha256}   sign once before your first write (see TERMS.md)
       0    profile       {name, about?, picture?}
     References stay inside one collection and may point at events earlier in the same batch. A

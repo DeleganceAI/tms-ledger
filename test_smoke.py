@@ -101,6 +101,7 @@ def main() -> None:
     with L.connect() as conn:
         ids = ledger(conn)
         delegation(conn)
+        accounts(conn)
     embed_calls()
     server(ids)
     print("PASS: smoke")
@@ -420,6 +421,110 @@ def delegation(conn) -> None:
         assert {m["pubkey"]: m["role"] for m in body["members"]} == {
             PK[OWNER]: "owner", pk_agent: "admin", pk_pal: "member"}
         client.cookies.clear()
+
+
+def accounts(conn) -> None:
+    """ACCOUNTS.md step 3: a human names one Ledger and its agents (4713); each person picks which
+    of their agents work in a collection (4714). The Ledger acts for the human but cannot change
+    who the Ledger is or touch the human's key; a key belongs to one account; limits count the
+    whole account; removing a person removes their agents; replacing the Ledger keeps what the
+    old one signed."""
+    k = {n: hashlib.sha256(f"acct-{n}".encode()).hexdigest() for n in ("human", "ledger", "a1", "a2", "pal", "b1", "ledger2", "x1", "x2", "x3")}
+    pk = {n: E.pubkey_of(v) for n, v in k.items()}
+    pub = lambda *evs: L.publish(conn, list(evs))  # noqa: E731
+    at = iter(range(int(time.time()) + 100, 10**10))  # distinct created_at, so repeated contents get new ids
+    ev = lambda n, kind, content: sign(k[n], kind, content, created_at=next(at))  # noqa: E731
+    acct = lambda n, ledger, agents: ev(n, E.ACCOUNT, {"ledger": ledger and pk[ledger], "agents": [pk[a] for a in agents]})  # noqa: E731
+
+    conn.execute("INSERT INTO signups (pubkey) VALUES (%s), (%s)", (pk["human"], pk["pal"]))
+    pub(terms(k["human"]), terms(k["pal"]))
+    rejects(lambda: pub(terms(k["ledger"])), "has not signed up")
+    rejects(lambda: pub(acct("human", "ledger", ["human"])), "human's own key")
+    rejects(lambda: pub(acct("human", "ledger", ["ledger"])), "not also an agent")
+    pub(acct("human", "ledger", ["a1", "a2"]))
+    assert L.allowed(conn, pk["ledger"]) and L.allowed(conn, pk["a1"]) and L.account_human(conn, pk["a2"]) == pk["human"]
+    assert L.ledger_human(conn, pk["ledger"]) == pk["human"] and L.ledger_human(conn, pk["a1"]) is None
+    pub(terms(k["ledger"]), terms(k["a1"]), terms(k["a2"]))
+    # A key belongs to one account; the Ledger cannot change who the Ledger is or touch the human.
+    rejects(lambda: pub(acct("pal", None, ["a1"])), "already belongs to another account")
+    rejects(lambda: pub(acct("pal", None, ["human"])), "already belongs to another account")
+    rejects(lambda: pub(acct("ledger", "ledger2", ["a1"])), "cannot name a different Ledger")
+    rejects(lambda: pub(acct("ledger", None, ["a1"])), "cannot name a different Ledger")
+    rejects(lambda: pub(acct("ledger", "ledger", ["a1", "human"])), "human's own key")
+    rejects(lambda: pub(acct("a1", None, [])), "is an agent in another account")
+    a = L.account(conn, pk["ledger"])["account"]
+    assert a["role"] == "ledger" and a["human"]["pubkey"] == pk["human"] and [x["pubkey"] for x in a["agents"]] == [pk["a1"], pk["a2"]]
+    assert L.account(conn, pk["a1"])["account"]["role"] == "agent" and not L.account(conn, pk["a1"])["can_create"]
+
+    # The Ledger creates a collection its human owns, and picks which agents work there.
+    pub(ev("ledger", E.MEMBERS, {"collection": "acct-col", "members": []}))
+    assert conn.execute("SELECT owner FROM collections WHERE slug = 'acct-col'").fetchone()["owner"] == pk["human"]
+    assert L.acting_role(conn, pk["ledger"], "acct-col") == "owner" and L.list_members(conn, pk["ledger"], "acct-col")["can_manage_admins"]
+    rejects(lambda: pub(ev("ledger", E.AGENTS, {"collection": "acct-col", "agents": [pk["b1"]]})), "not in your account")
+    rejects(lambda: pub(ev("a1", E.AGENTS, {"collection": "acct-col", "agents": [pk["a1"]]})), "not a member")
+    pub(ev("ledger", E.AGENTS, {"collection": "acct-col", "agents": [pk["a1"]]}))
+    pub(ev("a1", E.CLAIM, {"collection": "acct-col", "text": "An agent's claim."}))
+    assert L.list_members(conn, pk["a1"], "acct-col")["role"] == "agent"
+    rejects(lambda: pub(ev("a2", E.CLAIM, {"collection": "acct-col", "text": "Not picked."})), "not a member")
+    rejects(lambda: pub(ev("a1", E.AGENTS, {"collection": "acct-col", "agents": [pk["a1"], pk["a2"]]})), "only a person")
+    rejects(lambda: pub(ev("ledger", E.ADMINS, {"collection": "acct-col", "admins": [pk["human"]]})), "always an owner")
+    rejects(lambda: pub(ev("a1", E.MEMBERS, {"collection": "acct-col", "members": [pk["a2"]]})), "only the owner or an admin")
+
+    # The owner (here, by its Ledger) adds a person; that person brings their own agent.
+    pub(ev("ledger", E.MEMBERS, {"collection": "acct-col", "members": [pk["pal"]]}))
+    pub(acct("pal", None, ["b1"]), terms(k["b1"]))
+    pub(ev("pal", E.AGENTS, {"collection": "acct-col", "agents": [pk["b1"]]}))
+    pub(ev("b1", E.CLAIM, {"collection": "acct-col", "text": "Pal's agent's claim."}))
+    roster = {r["pubkey"]: r["role"] for r in L.list_members(conn, pk["human"], "acct-col")["members"]}
+    assert roster == {pk["human"]: "owner", pk["pal"]: "member"}, "the roster lists people, not their agents"
+    # Removing the person removes their agents. The owner stays whatever the Ledger signs.
+    pub(ev("ledger", E.MEMBERS, {"collection": "acct-col", "members": []}))
+    rejects(lambda: pub(ev("b1", E.CLAIM, {"collection": "acct-col", "text": "Gone."})), "not a member")
+    rejects(lambda: L.list_claims(conn, pk["pal"], "acct-col"), "not a member")
+    assert L.collection_role(conn, pk["human"], "acct-col") == "owner"
+
+    # Limits count the whole account: human, Ledger and agents together.
+    used = L._records(conn, pk["human"])
+    assert used == 1, used  # a1's claim; pal's agent's claim counts against pal
+    assert L._records(conn, pk["pal"]) == 1
+    L.FREE_RECORDS = used + 1
+    try:
+        pub(ev("ledger", E.CLAIM, {"collection": "acct-col", "text": "The Ledger's claim."}))
+        rejects(lambda: pub(ev("a1", E.CLAIM, {"collection": "acct-col", "text": "One too many."})), "free-account limit")
+        rejects(lambda: pub(ev("human", E.CLAIM, {"collection": "acct-col", "text": "Mine too."})), "free-account limit")
+    finally:
+        L.FREE_RECORDS = 10_000
+    rejects(lambda: pub(ev("ledger", E.MEMBERS, {"collection": "acct-two", "members": []})), "free-account limit")
+    rejects(lambda: pub(ev("ledger", E.FOUND, {"collection": "acct-found", "owner": pk["human"]})), "free-account limit")
+    L.FREE_AGENTS = 2
+    try:
+        rejects(lambda: pub(acct("ledger", "ledger", ["a1", "a2", "x1"])), "free-account limit")
+        conn.execute("INSERT INTO approvals (pubkey, approved_by) VALUES (%s, 'smoke')", (pk["human"],))
+        pub(acct("ledger", "ledger", ["a1", "a2", "x1"]))  # approving the human lifts the whole account's limits
+    finally:
+        L.FREE_AGENTS = 100
+    L.FREE_RECORDS = 1
+    try:
+        pub(ev("a1", E.CLAIM, {"collection": "acct-col", "text": "Approved now."}))
+    finally:
+        L.FREE_RECORDS = 10_000
+    # A Ledger is a steward of its human: found opens a collection the human owns.
+    pub(ev("ledger", E.FOUND, {"collection": "acct-found", "owner": pk["human"]}))
+    assert conn.execute("SELECT owner FROM collections WHERE slug = 'acct-found'").fetchone()["owner"] == pk["human"]
+    assert pk["human"] in L.list_delegations(conn, pk["ledger"])["for"]
+
+    # Replacing the Ledger: the new one acts, the old one is out, and what the old one signed stands.
+    pub(ev("ledger", E.MEMBERS, {"collection": "acct-col", "members": [pk["pal"]]}))
+    pub(acct("human", "ledger2", ["a1", "a2", "x1"]), terms(k["ledger2"]))
+    assert L.ledger_human(conn, pk["ledger2"]) == pk["human"] and L.ledger_human(conn, pk["ledger"]) is None
+    assert L.collection_role(conn, pk["pal"], "acct-col") == "member", "the old Ledger's members list still counts"
+    # (it stays admin of acct-found, which it opened, like any founder)
+    rejects(lambda: pub(ev("ledger", E.CLAIM, {"collection": "acct-col", "text": "Old Ledger."})), "not a member")
+    pub(ev("ledger2", E.MEMBERS, {"collection": "acct-col", "members": []}))
+    assert L.collection_role(conn, pk["pal"], "acct-col") is None
+    # The old Ledger's key is free now; another account may take it.
+    pub(acct("pal", None, ["b1", "ledger"]))
+    assert L.account_human(conn, pk["ledger"]) == pk["pal"]
 
 
 def server(ids) -> None:

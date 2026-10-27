@@ -285,7 +285,7 @@ def collections(conn, pk: str, cols: list[str]) -> dict:
                               + pg_column_size(e.tags) + pg_column_size(e.content) + pg_column_size(e.collection)), 0) AS bytes
           FROM events e WHERE e.collection = c.slug) s
         WHERE c.slug = ANY(%s) ORDER BY c.created_at, c.slug""", (cols,))
-    return {"collections": rows, "can_create": L.is_approved(conn, pk) or L.has_account(conn, pk)}
+    return {"collections": rows, "can_create": L.is_approved(conn, pk) or L.has_account(conn, pk) or bool(L.ledger_human(conn, pk))}
 
 
 # ------------------------------------------------------------------ HTTP

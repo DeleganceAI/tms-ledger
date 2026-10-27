@@ -22,7 +22,9 @@ TRICKY = [
 
 def main() -> None:
     py = [E.sign(SK, k, c, created_at=1792454400 + i) for i, (k, c) in enumerate(
-        [(1, t) for t in TRICKY] + [(E.CLAIM, {"collection": "smoke", "text": "Ünï\x01\n🧪"})])]
+        [(1, t) for t in TRICKY] + [(E.CLAIM, {"collection": "smoke", "text": "Ünï\x01\n🧪"}),
+                                    (E.ACCOUNT, {"ledger": "ab" * 32, "agents": ["cd" * 32]}),
+                                    (E.AGENTS, {"collection": "smoke", "agents": ["cd" * 32]})])]
     py.append(E.sign(SK, E.PROFILE, PROFILE, created_at=1792454400, tags=PROFILE_TAGS))
     todo = [{"sk": SK, "kind": 1, "content": t, "created_at": 1792454400} for t in TRICKY]
     todo.append({"sk": SK, "kind": 0, "content": PROFILE, "created_at": 1792454400, "tags": PROFILE_TAGS})
@@ -65,6 +67,11 @@ def main() -> None:
         (E.sign(SK, E.ADMINS, {"collection": "s", "admins": ["ab" * 32, "ab" * 32]}), "'admins'"),
         (E.sign(SK, E.STEWARDS, {"stewards": ["not-a-key"]}), "'stewards'"),
         (E.sign(SK, E.FOUND, {"collection": "s", "owner": "zz"}), "'owner'"),
+        (E.sign(SK, E.ACCOUNT, {"agents": []}), "missing ledger"),
+        (E.sign(SK, E.ACCOUNT, {"ledger": "zz", "agents": []}), "'ledger'"),
+        (E.sign(SK, E.ACCOUNT, {"ledger": None, "agents": ["ab" * 32, "ab" * 32]}), "'agents'"),
+        (E.sign(SK, E.ACCOUNT, {"ledger": None, "agents": [], "collection": "s"}), "unknown fields"),
+        (E.sign(SK, E.AGENTS, {"collection": "s", "agents": ["nope"]}), "'agents'"),
     ]:
         try:
             E.verify(bad)
@@ -78,6 +85,8 @@ def main() -> None:
     assert E.verify(E.sign(SK, E.ADMINS, {"collection": "s", "admins": [pk]}))["admins"] == [pk]
     assert E.verify(E.sign(SK, E.STEWARDS, {"stewards": [pk]}))["stewards"] == [pk]
     assert E.verify(E.sign(SK, E.FOUND, {"collection": "s", "owner": pk}))["owner"] == pk
+    assert E.verify(E.sign(SK, E.ACCOUNT, {"ledger": None, "agents": []}))["ledger"] is None
+    assert E.verify(E.sign(SK, E.AGENTS, {"collection": "s", "agents": [pk]}))["agents"] == [pk]
 
     # NIP-19: the published test vector, and a round trip
     npub = "npub10elfcs4fr0l0r8af98jlmgdh9c8tcxjvz9qkw038js35mp4dma8qzvjptg"

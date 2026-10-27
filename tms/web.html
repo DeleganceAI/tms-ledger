@@ -60,11 +60,18 @@ td.n{font-family:var(--mono);text-align:right}.actions{display:flex;gap:8px;flex
     <div id="newCol" hidden style="margin-top:12px"><div class="grid2"><label>New collection<input id="newSlug" placeholder="new-collection-slug"></label>
       <label>Topic (one line, up to 140 characters)<input id="newTopic" maxlength="140" placeholder="What this collection is about"></label></div>
       <label class="check"><input type="checkbox" id="newPublic"> Public: show its name, topic and record counts on Communities (its records stay private)</label>
+      <div id="newAgents" class="actions"></div>
       <div class="actions"><button id="newBtn" class="ghost">Create collection</button><span id="newMsg"></span></div></div>
     <div id="stewardsBox" hidden style="margin-top:16px"><h2>Agents who may create collections for you</h2>
       <p class="muted" style="margin-top:0">One npub or hex pubkey per line. This is the full list: anyone left out can no longer create collections owned by you. Opening a collection makes that agent its admin. It does not make them an admin of collections you already have — do that on the collection's members page.</p>
       <textarea id="sList" placeholder="npub1…"></textarea>
       <div class="actions"><button id="sSave" class="ghost">Sign steward list</button><span id="sMsg"></span></div></div></section>
+  <section id="agentsBox" hidden><h2>Your agents</h2>
+    <p class="muted" style="margin-top:0">Your account is you, one <b>Ledger</b> agent that acts for you (it can create collections, manage members and pick agents, but cannot change which key is the Ledger), and your other agents. Each key belongs to one account. Agents work only in the collections you pick for them below.</p>
+    <div class="grid2"><label>Ledger (one npub or hex pubkey; empty for none)<input id="acLedger" placeholder="npub1…"></label>
+      <label>Agents, one npub or hex pubkey per line (the full list)<textarea id="acAgents" placeholder="npub1…"></textarea></label></div>
+    <div class="actions"><button id="acSave" class="ghost">Sign account</button><span id="acMsg"></span></div>
+    <div id="acPlaces"></div></section>
   <section id="submit" hidden><h2>Submit evidence</h2>
     <div class="grid2"><label>Collection<select id="sCol"></select></label>
       <label>URL<div style="display:flex;gap:6px"><input id="sUrl" placeholder="https://..."><button id="fetchBtn" class="ghost">Fetch</button></div></label>
@@ -85,7 +92,7 @@ td.n{font-family:var(--mono);text-align:right}.actions{display:flex;gap:8px;flex
     <div id="adminBox" hidden><label style="margin-top:12px">Admins, one npub or hex pubkey per line (the full list; the owner is never an admin)<textarea id="admList" placeholder="npub1…"></textarea></label>
       <p class="muted" style="margin:6px 0 0">Admins can change members and the topic. They cannot change this list. Someone removed here keeps access only if they are still on the member list below.</p>
       <div class="actions"><button id="admSave" class="ghost">Sign admin list</button><span id="admMsg"></span></div></div>
-    <label style="margin-top:12px">Members besides the owner, one npub or hex pubkey per line (the full list: anyone left out is removed). The owner always stays. Admins stay members even if left off this list.<textarea id="mList"></textarea></label>
+    <label style="margin-top:12px">People besides the owner, one npub or hex pubkey per line (the full list: anyone left out is removed, and their agents with them). Add people, not their bots: each person picks which of their own agents work here. The owner always stays. Admins stay members even if left off this list.<textarea id="mList"></textarea></label>
     <div class="actions"><button id="mSave">Sign members list</button><a id="mExport" href="#">Download export (JSONL)</a><span id="mMsg"></span></div></section>
 </main>
 <script>
@@ -194,6 +201,7 @@ function renderHome() {
     : '<p class="muted">You are not a member of any collection yet.</p>'
   renderAbout(cs.filter(c => c.role === 'owner'))
   $('newCol').hidden = !ME.can_create
+  renderAgents()
   $('stewardsBox').hidden = !ME.approved
   if (ME.approved) $('sList').value = (ME.stewards || []).map(s => s.npub).join('\n')
   if (ME.can_create && location.hash === '#new') { $('newCol').scrollIntoView({block: 'center'}); $('newSlug').focus() }  // from the dashboard's + card
@@ -221,10 +229,42 @@ function renderAbout(owned) {
   }
 }
 
+// The account's Ledger and agents, and a checklist per collection of which agents work there.
+const agentList = () => ME.account?.agents || []
+const checklist = (cls, on = []) => agentList().map(a => `<label class="check" style="margin:0"><input type="checkbox" class="${cls}" value="${a.pubkey}"${on.includes(a.pubkey) ? ' checked' : ''}> ${esc(a.name || a.npub.slice(0, 16) + '…')}</label>`).join('')
+const checked = el => [...el.querySelectorAll('input:checked')].map(i => i.value)
+function renderAgents() {
+  const A = ME.account
+  $('agentsBox').hidden = !A || A.role === 'agent'
+  if ($('agentsBox').hidden) return
+  $('acLedger').value = A.ledger?.npub || ''; $('acLedger').disabled = A.role === 'ledger'
+  $('acAgents').value = A.agents.map(a => a.npub).join('\n')
+  $('newAgents').innerHTML = A.agents.length ? '<span class="muted">Agents that may work here:</span>' + checklist('na') : ''
+  const cols = ME.collections.filter(c => c.role)
+  $('acPlaces').innerHTML = A.agents.length && cols.length ? '<h2 style="margin-top:16px">Where they work</h2>' + cols.map(c => `<div class="aboutrow" data-slug="${esc(c.slug)}"><b class="mono">${esc(c.slug)}</b>
+    <div class="actions" style="margin:0">${checklist('pick', A.collection_agents[c.slug] || [])}</div><button class="ghost save">Save</button><span class="msg muted"></span></div>`).join('') : ''
+  for (const row of $('acPlaces').querySelectorAll('.aboutrow')) {
+    const msg = row.querySelector('.msg')
+    row.querySelector('.save').onclick = async () => {
+      try { await publish([await sign(4714, {collection: row.dataset.slug, agents: checked(row)})]); msg.className = 'msg ok'; msg.textContent = 'Saved.' }
+      catch (e) { msg.className = 'msg err'; msg.textContent = e.message }
+    }
+  }
+}
+$('acSave').onclick = async () => {
+  try {
+    const ledger = $('acLedger').value.trim() ? toHex($('acLedger').value) : null
+    const agents = [...new Set($('acAgents').value.split(/[\s,]+/).filter(Boolean).map(toHex))]
+    await publish([await sign(4713, {ledger, agents})]); say('acMsg', 'Saved.', 'ok'); await refresh()
+  } catch (e) { say('acMsg', e.message, 'err') }
+}
+
 $('newBtn').onclick = async () => {  // an empty members list names the collection, so this event creates it
   try {
     const collection = $('newSlug').value.trim(), topic = $('newTopic').value.trim()
     const batch = [await sign(4705, {collection, members: []})]
+    const picked = checked($('newAgents'))
+    if (picked.length) batch.push(await sign(4714, {collection, agents: picked}))
     if (topic || $('newPublic').checked) {
       if (!topic) throw new Error('add a topic to make the collection public')
       batch.push(await sign(4709, {collection, topic, public: $('newPublic').checked}))

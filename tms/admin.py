@@ -40,13 +40,19 @@ USERS_SQL = """WITH keys AS (
 
 
 def report(conn, viewer: str) -> dict:
+    r = _report(conn, viewer)
+    r["records"] = {q["pubkey"]: L._records(conn, q["pubkey"]) for q in r["free"]}  # ponytail: one count per account
+    return r
+
+
+def _report(conn, viewer: str) -> dict:
     # Site admins see spend for every collection; added admins only for the collections they're in.
     cols = None if viewer in L.ADMINS else L.my_collections(conn, viewer)
     users = conn.execute(USERS_SQL, (sorted(L.APPROVED | L.ADMINS),)).fetchall()
     return {
         "free": conn.execute("""SELECT k.pubkey, min(k.at) AS at, p.name, (SELECT email FROM email_accounts a WHERE a.pubkey = k.pubkey) AS email,
               (SELECT count(*) FROM collections c WHERE c.owner = k.pubkey) AS owned,
-              (SELECT count(*) FROM events e WHERE e.pubkey = k.pubkey AND e.kind IN (4701, 4702, 4703, 4704)) AS records
+              (SELECT cardinality(a.agents) FROM accounts a WHERE a.human = k.pubkey) AS agents
             FROM (SELECT pubkey, at FROM signups UNION ALL SELECT pubkey, created_at FROM email_accounts) k
             LEFT JOIN profiles p ON p.pubkey = k.pubkey
             WHERE k.pubkey NOT IN (SELECT pubkey FROM approvals) AND k.pubkey NOT IN (SELECT pubkey FROM admins)
@@ -110,10 +116,10 @@ button.ghost{{background:none;color:var(--accent)}}form.add{{display:block;margi
 </style></head><body><main>
 <h1>TMS admin</h1><p><a href="/">Home</a> · <a href="/dashboard">Dashboard</a> · <a href="/communities">Communities</a> · <a href="/office">Office</a> · <a href="/docs">Docs</a> · <a href="https://github.com/DeleganceAI/tms-ledger" target="_blank" rel="noopener" title="Source on GitHub"><svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-2px;margin-right:4px"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>GitHub</a></p>
 <h2>Free accounts ({len(r["free"])})</h2>
-<p class="mono">Anyone can sign up. A free account owns {L.FREE_COLLECTIONS} collection and writes {L.FREE_RECORDS:,} evidence, claims, links and contradictions.</p>
-{_table(["Who", "npub or email", "Signed up", "Owns", "Records", ""],
+<p class="mono">Anyone can sign up. A free account owns {L.FREE_COLLECTIONS} collection, has {L.FREE_AGENTS} agents, and writes {L.FREE_RECORDS:,} evidence, claims, links and contradictions (its human, Ledger and agents together).</p>
+{_table(["Who", "npub or email", "Signed up", "Owns", "Agents", "Records", ""],
         [[escape(q["name"] or "—"), '<br>'.join(f'<span class="mono">{escape(x)}</span>' for x in (E.bech32_encode("npub", q["pubkey"]), q["email"]) if x),
-          when(q["at"]), q["owned"], f'{q["records"]:,}',
+          when(q["at"]), q["owned"], q["agents"] or 0, f'{r["records"][q["pubkey"]]:,}',
           f'<form method="post" action="/admin/lift/{q["pubkey"]}"><button>Lift limits</button></form>']
          for q in r["free"]])}
 <form method="post" action="/admin/lift" class="add"><input name="npub" placeholder="npub1… to lift its limits" required size="66"> <button>Lift limits</button></form>

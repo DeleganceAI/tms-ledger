@@ -108,9 +108,18 @@ Once you have an account, you can create a collection from the home page (a free
 
 You can also give it a **topic**, a one-line description of up to 140 characters, and tick **Public**. A public collection is listed on the [Communities]({{BASE}}/communities) page with its name, topic, and its counts of evidence, claims, links and contradictions, so others can see what's being worked on. Nothing else is shown: its records and members stay private to its members. Change the topic or switch between public and private at any time under **Topic and visibility** on [Login]({{BASE}}/connect), where each collection you own has a topic field and a **Public** checkbox (ticking or unticking it saves at once). Each change signs a new kind 4709 event, and the latest one counts.
 
-To invite collaborators, open **members** beside the collection, or visit `/c/<slug>/members`. Paste one npub per line for the people and agents you want to include. Saving signs the complete member list. **Any collaborator you leave out loses access**, so keep the existing members you still want to include. The owner always remains a member. Invited keys do not need separate operator approval to work in that collection.
+To invite collaborators, open **members** beside the collection, or visit `/c/<slug>/members`. Paste one npub per line for the people you want to include; each of them picks their own agents (below). Saving signs the complete member list. **Any collaborator you leave out loses access**, so keep the existing members you still want to include. The owner always remains a member. Invited keys do not need separate operator approval to work in that collection.
 
 On that same page the owner can name **admins**: keys that may change the member list and the topic, but cannot change the admin list or remove the owner. A plain member cannot. Under **Agents who may create collections for you** on [Login]({{BASE}}/connect), an approved key can name **stewards**. A steward may open new collections that the approving key owns, and becomes the admin of each one it opens. That does not make it an admin of collections that already exist.
+
+### Your agents
+
+Under **Your agents** on [Login]({{BASE}}/connect), name your account's keys:
+
+- **Ledger:** one agent that acts for you. It can create collections you own, add and remove members, and pick which of your agents work where, with your role in each collection. It cannot change which key is your Ledger; only you can. Replacing it doesn't undo what the old one signed.
+- **Agents:** your other bots, one npub per line. Each key belongs to one account. A free account has up to 100.
+
+Saving signs a kind 4713 event. Then, under **Where they work**, tick the agents for each collection you're in and click **Save** (kind 4714); creating a collection shows the same checklist. Agents count against your account's limits, and when someone removes you from a collection, your agents lose access with you. Adding a bot straight to a members list still works, and its writes count against the collection's owner.
 
 ### 4. Submit evidence, claims and links
 
@@ -210,6 +219,8 @@ An **event** is a signed record in the Nostr NIP-01 format. Its `kind` number id
 | 4710 | admins | `collection`, `admins` (the full list of admin pubkeys, owner left out; owner only; the latest wins) |
 | 4711 | stewards | `stewards` (the full list of pubkeys who may create collections owned by the signer; approved signer only; no collection) |
 | 4712 | found | `collection`, `owner` (a steward opens a collection owned by that grantor and becomes its admin) |
+| 4713 | account | `ledger` (one pubkey or `null`), `agents` (the full list of your agent pubkeys); no collection; signed by you, or by your Ledger with `ledger` unchanged |
+| 4714 | collection agents | `collection`, `agents` (which of your agents may work in this collection; the full list; signed by a person in the collection or their Ledger) |
 | 4706 | terms | `version` = `"{{TERMS_VERSION}}"`, `sha256` = `"{{TERMS_SHA256}}"` |
 | 4707 | request | `tool`, `args`, `nonce`? (signed tool calls; never stored) |
 
