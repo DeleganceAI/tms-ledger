@@ -681,7 +681,8 @@ def server(ids) -> None:
 
 
 class turnstile_on:
-    """Turnstile configured, with Cloudflare's siteverify faked: the token "good" passes."""
+    """Turnstile configured, with Cloudflare's siteverify faked. A token "ok:<action>[:<hostname>]" passes
+    for that action, on that hostname (default testserver); anything else fails."""
     def __enter__(self):
         import httpx
 
@@ -689,15 +690,19 @@ class turnstile_on:
         self.real, self.W, self.httpx = httpx.post, W, httpx
 
         class R:
-            def __init__(self, ok):
-                self.ok = ok
+            def __init__(self, out):
+                self.out = out
+
+            def raise_for_status(self):
+                pass
 
             def json(self):
-                return {"success": self.ok}
+                return self.out
 
         def fake(url, data=None, **kw):
             assert url.endswith("/turnstile/v0/siteverify") and data["secret"] == "smoke-turnstile", (url, data)
-            return R(data["response"] == "good")
+            ok, action, host = (data["response"].split(":") + ["", "", "testserver"])[:3]
+            return R({"success": ok == "ok", "action": action, "hostname": host or "testserver"})
         httpx.post, W.TURNSTILE_SECRET = fake, "smoke-turnstile"
 
     def __exit__(self, *exc):
@@ -715,11 +720,11 @@ def signup(client, W, S) -> None:
     assert client.post("/login", json=login(visitor)).status_code == 403, "no account yet"
     assert client.post("/api/access-request", json={"npub": vpk}).status_code in (404, 405), "the request queue is gone"
     with turnstile_on():
-        for token in ("", "bad"):
+        for token in ("", "bad", "ok:email", "ok:signup:evil.example", "ok:signup:testserver:" + "x" * 2048):  # wrong action, host, too long
             r = client.post("/api/signup", json={"event": login(visitor, 1), "turnstile": token})
             assert r.status_code == 400 and r.json()["turnstile"], r.text
         assert client.post("/login", json=login(visitor, 2)).status_code == 403, "a failed check creates nothing"
-        r = client.post("/api/signup", json={"event": login(visitor, 3), "turnstile": "good"})
+        r = client.post("/api/signup", json={"event": login(visitor, 3), "turnstile": "ok:signup"})
     assert r.status_code == 200 and W.COOKIE in r.cookies, r.text
     assert not r.json()["approved"] and r.json()["allowed"] and r.json()["can_create"], r.json()
     assert client.post("/login", json=login(visitor, 4)).status_code == 200, "and logs back in without a check"
@@ -836,12 +841,12 @@ def email_signin() -> None:
         # never tells whether an address has an account.
         with turnstile_on():
             n = len(sent)
-            for addr in ("dee@example.com", "ann@example.com"):
-                r = client.post("/api/email/start", json={"email": addr})
+            for addr, token in (("dee@example.com", ""), ("ann@example.com", ""), ("ann@example.com", "ok:signup")):
+                r = client.post("/api/email/start", json={"email": addr, "turnstile": token})
                 assert r.status_code == 400 and r.json() == {"error": r.json()["error"], "turnstile": True} and len(sent) == n, r.text
-            W._recent.clear()  # five code requests per IP per hour; the refusals above used two
-            assert client.post("/api/email/start", json={"email": "dee@example.com", "turnstile": "good"}).json() == {"sent": True}
-            assert client.post("/api/email/start", json={"email": "ann@example.com", "turnstile": "good"}).json() == {"sent": True}
+            W._recent.clear()  # five code requests per IP per hour; the refusals above used three
+            assert client.post("/api/email/start", json={"email": "dee@example.com", "turnstile": "ok:email"}).json() == {"sent": True}
+            assert client.post("/api/email/start", json={"email": "ann@example.com", "turnstile": "ok:email"}).json() == {"sent": True}
         W._recent.clear()
         client.post("/api/email/start", json={"email": "ann@example.com"})
         me = client.post("/api/email/verify", json={"email": "ann@example.com", "code": code()}).json()
