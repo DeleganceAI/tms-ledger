@@ -27,7 +27,7 @@ def main() -> None:
         return r.json()["result"]
 
     assert http.get("/healthz").text == "ok", "healthz"
-    assert "Connect" in http.get("/").text, "home page"
+    assert "Login" in http.get("/").text, "home page"
     r = http.post("/mcp", headers={"Accept": "application/json, text/event-stream"},
                   json={"jsonrpc": "2.0", "id": 0, "method": "tools/list"})
     tools = {t["name"] for t in r.json()["result"]["tools"]}
