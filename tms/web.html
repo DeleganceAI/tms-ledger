@@ -150,11 +150,11 @@ function toHex(s) {
 // Cloudflare Turnstile on sign-up and on every email code request. interaction-only: most people never
 // see it; it shows a challenge only when Cloudflare wants one. With no site key there is no check.
 const TS_KEY = '{{TURNSTILE_SITE_KEY}}'
-const tsToken = {}
+const tsToken = {}, TS_ACTION = {signupCheck: 'signup', eCheck: 'email'}  // the server checks the action
 function botCheck(el) {
   if (!TS_KEY || TS_KEY.startsWith('{{') || $(el).dataset.on) return
   $(el).dataset.on = 1
-  const render = () => window.turnstile.render('#' + el, {sitekey: TS_KEY, appearance: 'interaction-only',
+  const render = () => window.turnstile.render('#' + el, {sitekey: TS_KEY, action: TS_ACTION[el], appearance: 'interaction-only',
     callback: t => { tsToken[el] = t }, 'expired-callback': () => { tsToken[el] = '' }})
   if (window.turnstile) return render()
   const s = document.createElement('script')

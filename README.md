@@ -72,6 +72,7 @@ Environment:
 | `DATABASE_URL` | Postgres URL (`TMS_DATABASE_URL` also read; default the local container). In the cloud, the PgBouncer pool. |
 | `TMS_APPROVED` | npubs or hex pubkeys the operator approves: no free-account limits, and they may name stewards. |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET` | Cloudflare Turnstile on extension sign-up and on every email code request (interaction-only, so usually invisible). Unset, sign-up isn't checked for bots and the server logs a warning. |
+| `TURNSTILE_HOSTNAMES` | Optional. Hostnames a Turnstile token may come from, comma-separated. Unset, the host the request came to. Tokens must also carry the right action (`signup` or `email`). |
 | `TMS_CONTACT` | Who the free-account limit message tells people to email (default `TMS_CONTACT_EMAIL`, then dustin@delegance.ai). |
 | `TMS_ADMINS` | Site admins: npubs or hex pubkeys that may open `/admin` and add or remove admins there (the `admins` table). Added admins can do everything else; everyone else gets a 404. |
 | `TMS_SECRET` | HMAC key for login cookies. Required over HTTP. |

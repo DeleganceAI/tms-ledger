@@ -43,6 +43,8 @@ CONTACT_EMAIL = L.CONTACT
 # Cloudflare Turnstile on sign-up only. Unset, sign-up goes unchecked (local dev and tests).
 TURNSTILE_SITE_KEY = os.environ.get("TURNSTILE_SITE_KEY", "")
 TURNSTILE_SECRET = os.environ.get("TURNSTILE_SECRET", "")
+# Hostnames a token may come from; unset, the host the request came to (behind the proxy, the public one)
+TURNSTILE_HOSTNAMES = {h for h in os.environ.get("TURNSTILE_HOSTNAMES", "").replace(",", " ").split() if h}
 if not TURNSTILE_SECRET:
     print("TURNSTILE_SECRET is not set: sign-up is not checked for bots", file=sys.stderr)
 DOCS_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -155,18 +157,23 @@ async def login(request: Request) -> JSONResponse:
     return resp
 
 
-def turnstile_ok(token, ip: str) -> bool:
-    """Cloudflare's verdict on a Turnstile token. True when Turnstile isn't configured. Tests replace this."""
+def turnstile_ok(token, ip: str, action: str, host: str) -> bool:
+    """Cloudflare's verdict on a Turnstile token: it passed, for this action ("signup" or "email"),
+    on one of our hostnames. True when Turnstile isn't configured. Tests replace httpx.post."""
     if not TURNSTILE_SECRET:
         return True
-    if not isinstance(token, str) or not token:
+    if not isinstance(token, str) or not token or len(token) > 2048:
         return False
     try:
         r = httpx.post("https://challenges.cloudflare.com/turnstile/v0/siteverify", timeout=10,
                        data={"secret": TURNSTILE_SECRET, "response": token, "remoteip": ip})
-        return bool(r.json().get("success"))
+        r.raise_for_status()
+        out = r.json()
     except (httpx.HTTPError, ValueError):
         return False
+    if (out.get("metadata") or {}).get("result_with_testing_key"):  # Cloudflare's test keys: example.com, no action
+        return out.get("success") is True
+    return out.get("success") is True and out.get("action") == action and out.get("hostname") in (TURNSTILE_HOSTNAMES or {host})
 
 
 async def signup(request: Request) -> JSONResponse:
@@ -179,7 +186,7 @@ async def signup(request: Request) -> JSONResponse:
         body = None
     if not isinstance(body, dict):
         return _error(ValueError("send {event, turnstile}"))
-    if not await run_in_threadpool(turnstile_ok, body.get("turnstile"), _client_ip(request)):
+    if not await run_in_threadpool(turnstile_ok, body.get("turnstile"), _client_ip(request), "signup", request.url.hostname):
         return JSONResponse({"error": "the bot check failed; try it again", "turnstile": True}, status_code=400)
 
     def run(conn, ev):
