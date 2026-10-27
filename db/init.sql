@@ -22,13 +22,13 @@ CREATE TABLE events (
     id          text PRIMARY KEY CHECK (id ~ '^[0-9a-f]{64}$'),
     pubkey      text NOT NULL CHECK (pubkey ~ '^[0-9a-f]{64}$'),
     created_at  bigint NOT NULL,          -- claimed by the signer
-    kind        integer NOT NULL CHECK (kind IN (0, 4701, 4702, 4703, 4704, 4705, 4706, 4708, 4709, 4710, 4711, 4712)),
+    kind        integer NOT NULL CHECK (kind IN (0, 4701, 4702, 4703, 4704, 4705, 4706, 4708, 4709, 4710, 4711, 4712, 4713, 4714)),
     tags        jsonb NOT NULL DEFAULT '[]' CHECK (kind = 0 OR tags = '[]'::jsonb),
     content     text NOT NULL CHECK (jsonb_typeof(content::jsonb) = 'object'),
     sig         text NOT NULL CHECK (sig ~ '^[0-9a-f]{128}$'),
     received_at timestamptz NOT NULL DEFAULT clock_timestamp(),  -- orders the ledger
     collection  text REFERENCES collections(slug),
-    CONSTRAINT events_collection_by_kind CHECK ((collection IS NULL) = (kind IN (0, 4706, 4708, 4711))),
+    CONSTRAINT events_collection_by_kind CHECK ((collection IS NULL) = (kind IN (0, 4706, 4708, 4711, 4713))),
     CONSTRAINT events_collection_matches CHECK (collection IS NULL OR collection = content::jsonb ->> 'collection')
 );
 
@@ -67,6 +67,29 @@ CREATE VIEW profiles AS
            content::jsonb ->> 'picture' AS picture
     FROM events WHERE kind = 0 ORDER BY pubkey, received_at DESC, id;
 
+-- The human whose Ledger pk was at as_of, or NULL (ACCOUNTS.md). Only a human changes its
+-- Ledger, so the human's own account events (those whose ledger is not the signer) decide it:
+-- find the events that named pk as the Ledger, and keep one the human had not replaced by as_of.
+-- Both lookups use indexes (events_account_ledger_idx, events_account_idx), so the cost does not
+-- grow with the ledger or the number of accounts.
+CREATE FUNCTION ledger_human(pk text, as_of timestamptz) RETURNS text
+LANGUAGE sql STABLE SET search_path = public, pg_temp AS $$
+    SELECT n.pubkey FROM events n
+    WHERE n.kind = 4713 AND n.content::jsonb ->> 'ledger' = pk AND n.pubkey <> pk AND n.received_at <= as_of
+      AND NOT EXISTS (
+          SELECT 1 FROM events later
+          WHERE later.kind = 4713 AND later.pubkey = n.pubkey AND later.received_at <= as_of
+            AND (later.content::jsonb ->> 'ledger') IS DISTINCT FROM later.pubkey
+            AND (later.received_at > n.received_at OR (later.received_at = n.received_at AND later.id < n.id)))
+    LIMIT 1
+$$;
+
+-- Who pk signs for at as_of: its human when pk was a Ledger then, else pk itself.
+CREATE FUNCTION acts_for(pk text, as_of timestamptz) RETURNS text
+LANGUAGE sql STABLE SET search_path = public, pg_temp AS $$
+    SELECT coalesce(ledger_human(pk, as_of), pk)
+$$;
+
 -- True when pk was an admin of col at as_of: the latest owner-signed admins event at or
 -- before that time lists them, or, if the owner had not signed one yet, they signed the
 -- found event that opened the collection. The owner is never an admin; that role is separate.
@@ -75,12 +98,12 @@ LANGUAGE sql STABLE SET search_path = public, pg_temp AS $$
     SELECT CASE
         WHEN EXISTS (
             SELECT 1 FROM events e
-            JOIN collections c ON c.slug = e.collection AND c.owner = e.pubkey
+            JOIN collections c ON c.slug = e.collection AND c.owner = acts_for(e.pubkey, e.received_at)
             WHERE e.kind = 4710 AND e.collection = col AND e.received_at <= as_of
         ) THEN EXISTS (
             SELECT 1 FROM (
                 SELECT e.content FROM events e
-                JOIN collections c ON c.slug = e.collection AND c.owner = e.pubkey
+                JOIN collections c ON c.slug = e.collection AND c.owner = acts_for(e.pubkey, e.received_at)
                 WHERE e.kind = 4710 AND e.collection = col AND e.received_at <= as_of
                 ORDER BY e.received_at DESC, e.id
                 LIMIT 1
@@ -103,7 +126,7 @@ CREATE VIEW collection_admins AS
     SELECT DISTINCT l.collection, a.pubkey
     FROM (
         SELECT DISTINCT ON (e.collection) e.collection, e.content
-        FROM events e JOIN collections c ON c.slug = e.collection AND c.owner = e.pubkey
+        FROM events e JOIN collections c ON c.slug = e.collection AND c.owner = acts_for(e.pubkey, e.received_at)
         WHERE e.kind = 4710
         ORDER BY e.collection, e.received_at DESC, e.id
     ) l
@@ -117,7 +140,7 @@ CREATE VIEW collection_admins AS
     WHERE e.kind = 4712 AND e.pubkey <> c.owner
       AND NOT EXISTS (
           SELECT 1 FROM events a
-          JOIN collections c2 ON c2.slug = a.collection AND c2.owner = a.pubkey
+          JOIN collections c2 ON c2.slug = a.collection AND c2.owner = acts_for(a.pubkey, a.received_at)
           WHERE a.kind = 4710 AND a.collection = e.collection);
 
 -- One row per (collection, pubkey). Role is derived: owner, else admin, else member.
@@ -134,7 +157,8 @@ CREATE VIEW collection_roster AS
         SELECT DISTINCT ON (e.collection) e.collection, e.content
         FROM events e JOIN collections c ON c.slug = e.collection
         WHERE e.kind = 4705
-          AND (e.pubkey = c.owner OR is_collection_admin(e.collection, e.pubkey, e.received_at))
+          AND (acts_for(e.pubkey, e.received_at) = c.owner
+           OR is_collection_admin(e.collection, acts_for(e.pubkey, e.received_at), e.received_at))
         ORDER BY e.collection, e.received_at DESC, e.id
     ) l
     JOIN collections c ON c.slug = l.collection
@@ -143,9 +167,43 @@ CREATE VIEW collection_roster AS
       AND NOT EXISTS (
           SELECT 1 FROM collection_admins a WHERE a.collection = l.collection AND a.pubkey = m.pubkey);
 
--- Current membership: everyone on the roster. Same shape as before roles existed.
+-- Accounts (ACCOUNTS.md): the latest account event for each human, signed by the human or by
+-- its Ledger at that moment. ledger is NULL when the account has none.
+-- ponytail: re-sorts every account event per read (about 10 ms at 3,000 accounts); a derived
+-- table kept up to date on publish if that ever shows up.
+CREATE VIEW accounts AS
+    SELECT DISTINCT ON (a.human) a.human, a.content::jsonb ->> 'ledger' AS ledger,
+           ARRAY(SELECT jsonb_array_elements_text(a.content::jsonb -> 'agents')) AS agents, a.received_at
+    FROM (SELECT CASE WHEN e.content::jsonb ->> 'ledger' = e.pubkey  -- signed by a Ledger
+                      THEN ledger_human(e.pubkey, e.received_at) ELSE e.pubkey END AS human,
+                 e.content, e.received_at, e.id
+          FROM events e WHERE e.kind = 4713) a
+    WHERE a.human IS NOT NULL
+    ORDER BY a.human, a.received_at DESC, a.id;
+
+-- The agents each person lets work in a collection: their latest collection agents event (signed
+-- by them or their Ledger), keeping only keys still in their account, while they are on the roster.
+CREATE VIEW collection_agents AS
+    SELECT l.collection, l.person, x.agent
+    FROM (
+        SELECT DISTINCT ON (e.collection, acts_for(e.pubkey, e.received_at))
+               e.collection, acts_for(e.pubkey, e.received_at) AS person, e.content
+        FROM events e WHERE e.kind = 4714
+        ORDER BY e.collection, acts_for(e.pubkey, e.received_at), e.received_at DESC, e.id
+    ) l
+    CROSS JOIN LATERAL jsonb_array_elements_text(l.content::jsonb -> 'agents') AS x(agent)
+    JOIN accounts a ON a.human = l.person AND x.agent = ANY(a.agents)
+    WHERE EXISTS (SELECT 1 FROM collection_roster r WHERE r.collection = l.collection AND r.pubkey = l.person);
+
+-- Current membership: everyone on the roster, the agents their people chose, and the Ledger of
+-- each person on the roster.
 CREATE VIEW members AS
-    SELECT collection, pubkey FROM collection_roster;
+    SELECT collection, pubkey FROM collection_roster
+    UNION
+    SELECT collection, agent FROM collection_agents
+    UNION
+    SELECT r.collection, a.ledger FROM collection_roster r JOIN accounts a ON a.human = r.pubkey
+    WHERE a.ledger IS NOT NULL;
 
 -- Latest stewards event per grantor: pubkeys who may create collections that grantor owns.
 CREATE VIEW stewards AS
@@ -164,7 +222,8 @@ CREATE VIEW collection_about AS
            (e.content::jsonb ->> 'public')::boolean AS public, e.received_at
     FROM events e JOIN collections c ON c.slug = e.collection
     WHERE e.kind = 4709
-      AND (e.pubkey = c.owner OR is_collection_admin(e.collection, e.pubkey, e.received_at))
+      AND (acts_for(e.pubkey, e.received_at) = c.owner
+           OR is_collection_admin(e.collection, acts_for(e.pubkey, e.received_at), e.received_at))
     ORDER BY e.collection, e.received_at DESC, e.id;
 
 -- Quote matching forgives case, whitespace, curly quotes, dashes, soft hyphens and fi/fl
@@ -254,6 +313,8 @@ CREATE INDEX events_received_idx ON events (received_at, id);
 CREATE INDEX events_link_from_idx ON events ((content::jsonb ->> 'from')) WHERE kind = 4703;
 CREATE INDEX events_link_to_idx ON events ((content::jsonb ->> 'to')) WHERE kind = 4703;
 CREATE INDEX events_contradiction_claims_idx ON events USING gin ((content::jsonb -> 'claims')) WHERE kind = 4704;
+CREATE INDEX events_account_idx ON events (pubkey, received_at) WHERE kind = 4713;
+CREATE INDEX events_account_ledger_idx ON events ((content::jsonb ->> 'ledger')) WHERE kind = 4713;
 CREATE INDEX events_text_idx ON events USING gin (to_tsvector('simple', content::jsonb ->> 'text'))
     WHERE kind IN (4701, 4702);
 

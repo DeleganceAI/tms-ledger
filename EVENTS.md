@@ -44,7 +44,8 @@ A pubkey can use the service at all only if it signed up on the Login page (with
 - The owner names admins with an `admins` event (section 4). The latest one the owner signed, by `received_at`, is the whole admin set. Until the owner has signed one, the steward who opened the collection with a `found` event is its admin. An `admins` event replaces that founder, including when the list is empty.
 - The owner, or an admin at that moment, changes membership with a `members` event. The latest such event, by `received_at`, is the member list. An event signed by anyone else does not count, including one signed by an admin after they were revoked. Revoking an admin does not rewrite the list they already signed; it only stops them signing another. The owner is unioned in, so a members event cannot remove the owner.
 - An approved pubkey names **stewards** with a `stewards` event (no collection). The latest one that pubkey signed is the set of keys that may open new collections **owned by the grantor**. A steward is not thereby a member or an admin of collections that already exist. Opening one is a `found` event: the collection's owner is the grantor, and the signer becomes its admin. A key cannot name itself as a steward, and a steward cannot name further stewards.
-- Every record belongs to exactly one collection, except profiles, terms, snapshots and stewards grants, and every reference must stay inside that collection. That way, reading one collection can never reveal records from another.
+- An **account** (ACCOUNTS.md) is a human key, at most one **Ledger** key and any number of **agent** keys, set by an `account` event. The Ledger acts with its human's role everywhere: it may create collections the human owns, open them with `found` (a Ledger is a steward of its human), change members, admins and topics where the human may, and pick agents. It cannot change which key is the Ledger, and an owner can never be removed. An owner adds people to the member list; each person picks which of their own agents work there with a `collection agents` event.
+- Every record belongs to exactly one collection, except profiles, terms, snapshots, stewards grants and accounts, and every reference must stay inside that collection. That way, reading one collection can never reveal records from another.
 - Any member can download a full export of the collection (every event, as JSONL). Each line verifies on its own.
 - Before their first write, each user signs the current terms (section 4): they have the right to upload everything they upload.
 
@@ -67,6 +68,8 @@ Kind numbers stay within 0–65535, because common Nostr libraries reject larger
 | 4710 | admins | `collection`, `admins` | yes |
 | 4711 | stewards | `stewards` | yes |
 | 4712 | found | `collection`, `owner` | yes |
+| 4713 | account | `ledger`, `agents` | yes |
+| 4714 | collection agents | `collection`, `agents` | yes |
 
 Fields marked `?` are optional. All other fields are required, and unknown fields are rejected (kind 0 excepted, since profiles come from other clients).
 
@@ -104,6 +107,12 @@ Signed by an approved pubkey. There is no collection. `stewards` is the complete
 ### found (4712)
 Signed by a steward. `owner` is the approved pubkey that named the signer as a steward, and `collection` is a slug that does not exist yet. The collection's owner is `owner`, not the signer. The signer becomes the collection's admin (and therefore a member) until the owner publishes an `admins` event. A key does not use `found` to create a collection it will own; an approved key does that by publishing any other event that names a new slug.
 
+### account (4713)
+No collection. A human's account: `ledger` is one hex pubkey or `null`, and `agents` is the complete list of the account's other agent keys, without duplicates. The latest one for that human counts. The human signs it, or its current Ledger signs it with `ledger` set to itself (unchanged). A Ledger cannot name a different Ledger; only the human changes it, and the change takes effect from that event on, so what the old Ledger signed while it was the Ledger still stands. The signer of a human's own event must have an account (signed up or approved) and must not be someone else's Ledger or agent. Every key named must belong to no other account and not be another person's own key, the human's own key is never named, and a free account names at most 100 agents. Every key named may use the service from then on.
+
+### collection agents (4714)
+In a collection. `agents` is the complete list of the signer's own agents (or, signed by a Ledger, its human's) that may work there. Signed by a person on the collection's roster, or by their Ledger. The latest one per person counts. Only keys still in that person's account count, and only while that person is on the roster, so removing a person removes their agents. Those agents, and the Ledger of each person on the roster, are members of the collection; they are not on the roster and have no role of their own.
+
 ### terms (4706)
 A user's acceptance of the terms in [TERMS.md](TERMS.md). `version` names the document, and `sha256` is the hash of its exact text, so the signature commits to what was accepted. The server rejects writes from a key that hasn't signed the current version.
 
@@ -130,7 +139,7 @@ The server accepts an event only if:
 
 1. Recomputing the `id` matches, and `sig` verifies for `pubkey`.
 2. `kind` is a stored kind from section 4, and `content` parses to an object with exactly that kind's fields. Required strings are non-blank.
-3. The signer is signed up, approved, a member of some collection, or a steward of a pubkey that is still approved. For `profile` and `terms` events, that is enough. A `stewards` event must be signed by an approved pubkey. A `found` event must be signed by a current steward of the named owner, and that owner must still be approved; it creates the collection. For every other kind, the signer must also have signed the current `terms`, and must be a member of the event's collection, or be signed up or approved and creating it. Evidence, claims, links and contradictions past a free account's limit are refused, with a message naming `TMS_CONTACT`. `admins` events must be signed by the owner. `members` and `about` events must be signed by the owner or by a current admin.
+3. The signer is signed up, approved, a Ledger or agent in an account, a member of some collection, or a steward of a pubkey that is still approved. For `profile` and `terms` events, that is enough. A `stewards` event must be signed by an approved pubkey. A `found` event must be signed by a current steward of the named owner, and that owner must still be approved; it creates the collection. For every other kind, the signer must also have signed the current `terms`, and must be a member of the event's collection, or be signed up or approved and creating it. Evidence, claims, links and contradictions past a free account's limit are refused, with a message naming `TMS_CONTACT`; an account's human, Ledger and agents share one count. `account` and `collection agents` events follow the rules in section 4. A Ledger's `admins`, `members` and `about` events count as its human's. `admins` events must be signed by the owner. `members` and `about` events must be signed by the owner or by a current admin.
 4. Every referenced ID exists, either in the ledger or earlier in the same batch, has the kind the field requires, and belongs to the same collection.
 5. Link quotes appear in the `from` evidence text.
 6. `snapshot` events are signed by the server's key, and no other kind is.

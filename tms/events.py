@@ -28,6 +28,8 @@ PROFILE, EVIDENCE, CLAIM, LINK, CONTRADICTION, MEMBERS, TERMS, REQUEST, SNAPSHOT
 # 4710 admins: per-collection managers. 4711 stewards: account-level create grant.
 # 4712 found: a steward opens a collection owned by the grantor.
 ADMINS, STEWARDS, FOUND = 4710, 4711, 4712
+# 4713 account: a human's Ledger and agents. 4714 agents: which of them work in a collection.
+ACCOUNT, AGENTS = 4713, 4714
 TOPIC_MAX = 140  # characters in a collection's public topic line
 
 
@@ -63,6 +65,10 @@ def _pubkeys(v):
 
 def _distinct_pubkeys(v):  # admin and steward lists: no duplicates, so a role can't be listed twice
     return _pubkeys(v) and len(set(v)) == len(v)
+
+
+def _pubkey_or_null(v):
+    return v is None or _id(v)
 
 
 def _relation(v):
@@ -102,6 +108,11 @@ KINDS = {
     STEWARDS: ("stewards", {"stewards": _distinct_pubkeys}, {}),
     # a steward opens a collection owned by the grantor named in `owner`; the signer becomes its admin
     FOUND: ("found", {"collection": _slug, "owner": _id}, {}),
+    # no collection, latest per human wins: its Ledger (or null) and its agents. Signed by the human,
+    # or by its Ledger with ledger unchanged
+    ACCOUNT: ("account", {"ledger": _pubkey_or_null, "agents": _distinct_pubkeys}, {}),
+    # latest per person wins: which of that person's agents may work in the collection
+    AGENTS: ("collection agents", {"collection": _slug, "agents": _distinct_pubkeys}, {}),
     TERMS: ("terms", {"version": _text, "sha256": _id}, {}),
     # nonce: any string, so two identical calls signed in the same second get different ids
     REQUEST: ("request", {"tool": _text, "args": _object}, {"nonce": _opt_text}),

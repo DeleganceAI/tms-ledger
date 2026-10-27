@@ -45,7 +45,8 @@ APPROVED = {E.pubkey_hex(p) for p in re.split(r"[\s,]+", os.environ.get("TMS_APP
 ADMINS = {E.pubkey_hex(p) for p in re.split(r"[\s,]+", os.environ.get("TMS_ADMINS", "")) if p}  # site admins
 # Free accounts (ACCOUNTS.md "Limits"); an approved key has none. Tests lower these.
 FREE_COLLECTIONS = 1
-FREE_RECORDS = 10_000    # evidence, claims, links and contradictions together
+FREE_RECORDS = 10_000    # evidence, claims, links and contradictions together, across the account
+FREE_AGENTS = 100
 CONTACT = os.environ.get("TMS_CONTACT") or os.environ.get("TMS_CONTACT_EMAIL", "dustin@delegance.ai")
 LIMIT_MSG = f"You have reached the free-account limit. Please email {CONTACT} to increase your limits."
 SERVER_PUBKEY = E.pubkey_of(os.environ["TMS_SERVER_NSEC"]) if os.environ.get("TMS_SERVER_NSEC") else None
@@ -298,16 +299,39 @@ def has_account(conn, pubkey: str) -> bool:
                            UNION ALL SELECT 1 FROM email_accounts WHERE pubkey = %(p)s""", {"p": pubkey}).fetchone() is not None
 
 
+def ledger_human(conn, pubkey: str) -> str | None:
+    """The human this key is the Ledger of now (ACCOUNTS.md), or None."""
+    return conn.execute("SELECT ledger_human(%s, clock_timestamp()) AS h", (pubkey,)).fetchone()["h"]
+
+
+def account_human(conn, pubkey: str) -> str | None:
+    """The human whose account holds this key as its Ledger or an agent, or None."""
+    row = conn.execute("SELECT human FROM accounts WHERE ledger = %(p)s OR %(p)s = ANY(agents) LIMIT 1",
+                       {"p": pubkey}).fetchone()
+    return row["human"] if row else None
+
+
+def _is_human(conn, pubkey: str) -> bool:
+    """Has an account of its own: signed up, or an account event names it as the human."""
+    return has_account(conn, pubkey) or conn.execute(
+        "SELECT 1 FROM accounts WHERE human = %s", (pubkey,)).fetchone() is not None
+
+
 def _approved_grantors(conn, pubkey: str) -> list[str]:
-    """Approved pubkeys whose latest stewards event names this key."""
-    return [r["grantor"] for r in conn.execute(
-        "SELECT grantor FROM stewards WHERE steward = %s ORDER BY grantor", (pubkey,))
-        if is_approved(conn, r["grantor"])]
+    """Owners this key may open collections for: approved pubkeys whose latest stewards event names
+    it, and, for a Ledger, its own human (a Ledger is a steward of its human)."""
+    out = {r["grantor"] for r in conn.execute("SELECT grantor FROM stewards WHERE steward = %s", (pubkey,))
+           if is_approved(conn, r["grantor"])}
+    human = ledger_human(conn, pubkey)
+    if human:
+        out.add(human)
+    return sorted(out)
 
 
 def allowed(conn, pubkey: str) -> bool:
-    """Approved, signed up, a member of some collection, or a steward of an approved pubkey (EVENTS.md section 3)."""
-    return is_approved(conn, pubkey) or has_account(conn, pubkey) or conn.execute(
+    """Approved, signed up, in an account (its Ledger or an agent), a member of some collection, or a
+    steward of an approved pubkey (EVENTS.md section 3)."""
+    return is_approved(conn, pubkey) or has_account(conn, pubkey) or account_human(conn, pubkey) is not None or conn.execute(
         "SELECT 1 FROM members WHERE pubkey = %s LIMIT 1", (pubkey,)).fetchone() is not None or bool(
         _approved_grantors(conn, pubkey))
 
@@ -324,6 +348,11 @@ def require_member(conn, pubkey: str, collection: str) -> None:
     if conn.execute("SELECT 1 FROM members WHERE collection = %s AND pubkey = %s",
                     (collection, pubkey)).fetchone() is None:
         raise Denied(f"not a member of collection '{collection}'")
+
+
+def acting_role(conn, pubkey: str, collection: str) -> str | None:
+    """collection_role of whoever this key acts for: a Ledger has its human's role."""
+    return collection_role(conn, ledger_human(conn, pubkey) or pubkey, collection)
 
 
 def collection_role(conn, pubkey: str, collection: str) -> str | None:
@@ -351,9 +380,27 @@ def account(conn, pubkey: str) -> dict:
         """SELECT s.steward AS pubkey, p.name FROM stewards s LEFT JOIN profiles p ON p.pubkey = s.steward
            WHERE s.grantor = %s ORDER BY s.steward""", (pubkey,))]
     approved = is_approved(conn, pubkey)
+    human = account_human(conn, pubkey)
+    role = "ledger" if human and ledger_human(conn, pubkey) else "agent" if human else (
+        "human" if approved or _is_human(conn, pubkey) else None)
+    human = human or (pubkey if role == "human" else None)
     return {"pubkey": pubkey, "npub": E.bech32_encode("npub", pubkey), "approved": approved,
-            "allowed": allowed(conn, pubkey), "can_create": approved or has_account(conn, pubkey), "terms_signed": signed_terms(conn, pubkey), "terms": TERMS,
+            "allowed": allowed(conn, pubkey), "can_create": role in ("human", "ledger"),
+            "account": _account_keys(conn, human, role) if human else None, "terms_signed": signed_terms(conn, pubkey), "terms": TERMS,
             "profile": profile, "collections": list_collections(conn, pubkey), "stewards": stewards}
+
+
+def _account_keys(conn, human: str, role: str) -> dict:
+    """An account's Ledger and agents with their profile names, and which agents work where."""
+    row = conn.execute("SELECT ledger, agents FROM accounts WHERE human = %s", (human,)).fetchone() or {"ledger": None, "agents": []}
+    key = lambda k: {"pubkey": k, "npub": E.bech32_encode("npub", k), "name": (conn.execute(  # noqa: E731
+        "SELECT name FROM profiles WHERE pubkey = %s", (k,)).fetchone() or {}).get("name")}
+    placed: dict[str, list] = {}
+    for r in conn.execute("SELECT collection, agent FROM collection_agents WHERE person = %s ORDER BY collection, agent", (human,)):
+        placed.setdefault(r["collection"], []).append(r["agent"])
+    return {"role": role, "human": key(human), "ledger": key(row["ledger"]) if row["ledger"] else None,
+            "agents": [key(a) for a in row["agents"]], "collection_agents": placed,
+            "approved": is_approved(conn, human)}
 
 
 # ------------------------------------------------------------------ publish
@@ -365,14 +412,50 @@ def _authorize_found(conn, ev: dict, data: dict) -> str:
     if owner == pk:
         raise Denied(f"{ev['id']}: found names the owner you are acting for; an approved key creates "
                      f"its own collection by publishing into a new slug")
-    if not is_approved(conn, owner):
-        raise Denied(f"{ev['id']}: a collection can only be created for an approved pubkey")
-    if conn.execute("SELECT 1 FROM stewards WHERE grantor = %s AND steward = %s", (owner, pk)).fetchone() is None:
+    mine = ledger_human(conn, pk) == owner  # a Ledger is a steward of its human
+    if not mine and conn.execute("SELECT 1 FROM stewards WHERE grantor = %s AND steward = %s", (owner, pk)).fetchone() is None:
         raise Denied(f"{ev['id']}: {pk} is not a steward of {owner}")
+    if not is_approved(conn, owner):
+        if not mine:
+            raise Denied(f"{ev['id']}: a collection can only be created for an approved pubkey")
+        _collection_slot(conn, owner)
     if conn.execute("SELECT 1 FROM collections WHERE slug = %s", (col,)).fetchone() is not None:
         raise Denied(f"{ev['id']}: collection '{col}' already exists")
     conn.execute("INSERT INTO collections (slug, owner) VALUES (%s, %s)", (col, owner))
     return col
+
+
+def _collection_slot(conn, owner: str) -> None:
+    """Refuse a free account's collection past its limit."""
+    if conn.execute("SELECT count(*) AS n FROM collections WHERE owner = %s", (owner,)).fetchone()["n"] >= FREE_COLLECTIONS:
+        raise Denied(LIMIT_MSG)
+
+
+def _authorize_account(conn, ev: dict, data: dict) -> None:
+    """An account event (4713): signed by the human, or by its Ledger with the Ledger unchanged.
+    Every named key belongs to this account only, and the human's own key is never one of them."""
+    pk, ledger, agents = ev["pubkey"], data["ledger"], data["agents"]
+    if ledger_human(conn, pk):
+        if ledger != pk:
+            raise Denied(f"{ev['id']}: a Ledger cannot name a different Ledger; its human does that")
+        human = ledger_human(conn, pk)
+    else:
+        human = pk
+        if account_human(conn, pk):
+            raise Denied(f"{ev['id']}: {pk} is an agent in another account and cannot have one of its own")
+        if not (has_account(conn, pk) or is_approved(conn, pk)):
+            raise Denied(f"{ev['id']}: sign up on the Login page before naming a Ledger or agents")
+    keys = ([ledger] if ledger else []) + agents
+    if human in keys:
+        raise Denied(f"{ev['id']}: the human's own key cannot be its Ledger or one of its agents")
+    if ledger in agents:
+        raise Denied(f"{ev['id']}: the Ledger is not also an agent")
+    for k in keys:
+        other = account_human(conn, k)
+        if (other is not None and other != human) or _is_human(conn, k):
+            raise Denied(f"{ev['id']}: {k} already belongs to another account")
+    if len(agents) > FREE_AGENTS and not is_approved(conn, human):
+        raise Denied(LIMIT_MSG)
 
 
 def _authorize(conn, ev: dict, data: dict) -> str | None:
@@ -400,28 +483,38 @@ def _authorize(conn, ev: dict, data: dict) -> str | None:
         return None
     if kind == E.FOUND:
         return _authorize_found(conn, ev, data)
+    if kind == E.ACCOUNT:
+        _authorize_account(conn, ev, data)
+        return None
     col = data["collection"]
+    principal = ledger_human(conn, pk) or pk  # a Ledger acts with its human's role
     row = conn.execute("SELECT owner FROM collections WHERE slug = %s", (col,)).fetchone()
     if row is None:
-        if not is_approved(conn, pk):
-            if not has_account(conn, pk):
+        if not is_approved(conn, principal):
+            if not has_account(conn, principal):
                 if _approved_grantors(conn, pk):
                     raise Denied(f"{ev['id']}: collection '{col}' does not exist; a steward creates one with a "
                                  f"kind 4712 found event naming its owner")
                 raise Denied(f"{ev['id']}: collection '{col}' does not exist, and only signed-up keys create collections")
-            if conn.execute("SELECT count(*) AS n FROM collections WHERE owner = %s", (pk,)).fetchone()["n"] >= FREE_COLLECTIONS:
-                raise Denied(LIMIT_MSG)
-        conn.execute("INSERT INTO collections (slug, owner) VALUES (%s, %s) ON CONFLICT DO NOTHING", (col, pk))
+            _collection_slot(conn, principal)
+        conn.execute("INSERT INTO collections (slug, owner) VALUES (%s, %s) ON CONFLICT DO NOTHING", (col, principal))
         row = conn.execute("SELECT owner FROM collections WHERE slug = %s", (col,)).fetchone()
     require_member(conn, pk, col)
     if kind == E.ADMINS:
-        if row["owner"] != pk:
+        if row["owner"] != principal:
             raise Denied(f"{ev['id']}: only the owner of '{col}' changes its admins")
         if row["owner"] in data["admins"]:
             raise Denied(f"{ev['id']}: the owner of '{col}' is always an owner, not an admin")
         return col
-    if kind in (E.MEMBERS, E.ABOUT) and row["owner"] != pk and not _admin_now(conn, col, pk):
+    if kind in (E.MEMBERS, E.ABOUT) and row["owner"] != principal and not _admin_now(conn, col, principal):
         raise Denied(f"{ev['id']}: only the owner or an admin of '{col}' changes its {E.NAMES[kind]}")
+    if kind == E.AGENTS:
+        if collection_role(conn, principal, col) is None:
+            raise Denied(f"{ev['id']}: only a person in '{col}', or their Ledger, picks the agents that work there")
+        mine = (conn.execute("SELECT agents FROM accounts WHERE human = %s", (principal,)).fetchone() or {"agents": []})["agents"]
+        stray = [a for a in data["agents"] if a not in mine]
+        if stray:
+            raise Denied(f"{ev['id']}: {', '.join(stray)} not in your account; add agents on the Login page first")
     return col
 
 
@@ -429,27 +522,31 @@ RECORDS = (E.EVIDENCE, E.CLAIM, E.LINK, E.CONTRADICTION)
 
 
 def _payer(conn, pk: str, col: str) -> str | None:
-    """Whose free-account limit a record counts against, or None when nobody's does: the signer's
-    own account, else (a plain member with no account) the collection owner's."""
+    """Whose free-account limit a record counts against, or None when nobody's does: the human of the
+    signer's account (itself, its Ledger or an agent), else (a plain member with no account) the
+    collection owner."""
     if is_approved(conn, pk):
         return None
-    if has_account(conn, pk):
-        return pk
-    owner = conn.execute("SELECT owner FROM collections WHERE slug = %s", (col,)).fetchone()["owner"]
-    return None if is_approved(conn, owner) else owner
+    human = account_human(conn, pk) or (pk if _is_human(conn, pk) else None)
+    if human is None:
+        human = conn.execute("SELECT owner FROM collections WHERE slug = %s", (col,)).fetchone()["owner"]
+    return None if is_approved(conn, human) else human
 
 
 def _records(conn, payer: str) -> int:
-    """Records counted against payer: those it signed, plus those signed in its collections by keys
-    with no account and no approval."""
+    """Records counted against payer: those its human, Ledger and agents signed, plus those signed in
+    its collections by keys with no account and no approval."""
+    row = conn.execute("SELECT ledger, agents FROM accounts WHERE human = %s", (payer,)).fetchone()
+    keys = [payer] + ([row["ledger"]] if row and row["ledger"] else []) + (row["agents"] if row else [])
     return conn.execute(
-        """SELECT count(*) AS n FROM events e WHERE e.kind IN (4701, 4702, 4703, 4704) AND (e.pubkey = %(p)s OR (
+        """SELECT count(*) AS n FROM events e WHERE e.kind IN (4701, 4702, 4703, 4704) AND (e.pubkey = ANY(%(keys)s) OR (
                e.collection IN (SELECT slug FROM collections WHERE owner = %(p)s) AND e.pubkey <> ALL(%(env)s)
+               AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.human = e.pubkey OR a.ledger = e.pubkey OR e.pubkey = ANY(a.agents))
                AND NOT EXISTS (SELECT 1 FROM signups s WHERE s.pubkey = e.pubkey)
                AND NOT EXISTS (SELECT 1 FROM email_accounts a WHERE a.pubkey = e.pubkey)
                AND NOT EXISTS (SELECT 1 FROM approvals a WHERE a.pubkey = e.pubkey)
                AND NOT EXISTS (SELECT 1 FROM admins a WHERE a.pubkey = e.pubkey)))""",
-        {"p": payer, "env": sorted(APPROVED | ADMINS)}).fetchone()["n"]
+        {"p": payer, "keys": keys, "env": sorted(APPROVED | ADMINS)}).fetchone()["n"]
 
 
 def _charge(conn, ev: dict, col: str, used: dict) -> None:
@@ -515,6 +612,8 @@ LINK_COLS = f"""x.id, x.pubkey, {AUTHOR}, x.from_id AS "from", x.to_id AS "to", 
 
 
 def list_collections(conn, pubkey: str) -> list[dict]:
+    """Collections this key can read. role is that of whoever it acts for (a Ledger: its human)."""
+    principal = ledger_human(conn, pubkey) or pubkey
     return [_clean(r) for r in conn.execute(
         """SELECT c.slug, c.owner, c.created_at,
                   ARRAY(SELECT m.pubkey FROM members m WHERE m.collection = c.slug ORDER BY m.pubkey) AS members,
@@ -527,18 +626,36 @@ def list_collections(conn, pubkey: str) -> list[dict]:
                   a.topic, coalesce(a.public, false) AS public
            FROM collections c LEFT JOIN collection_about a ON a.collection = c.slug
            WHERE c.slug IN (SELECT collection FROM members WHERE pubkey = %s)
-           ORDER BY c.created_at, c.slug""", (pubkey, pubkey))]
+           ORDER BY c.created_at, c.slug""", (principal, pubkey))]
+
+
+def collection_bots(conn, collection: str) -> dict[str, dict]:
+    """For each person on the roster with an account: their Ledger and the agents they picked for
+    this collection, with profile names. View only; people manage their own on the Login page."""
+    name = lambda k: (conn.execute("SELECT name FROM profiles WHERE pubkey = %s", (k,)).fetchone() or {}).get("name")  # noqa: E731
+    out: dict[str, dict] = {}
+    for r in conn.execute("""SELECT r.pubkey, a.ledger FROM collection_roster r JOIN accounts a ON a.human = r.pubkey
+                             WHERE r.collection = %s""", (collection,)):
+        out[r["pubkey"]] = {"ledger": r["ledger"] and {"pubkey": r["ledger"], "name": name(r["ledger"])}, "agents": []}
+    for r in conn.execute("SELECT person, agent FROM collection_agents WHERE collection = %s ORDER BY agent", (collection,)):
+        out.setdefault(r["person"], {"ledger": None, "agents": []})["agents"].append({"pubkey": r["agent"], "name": name(r["agent"])})
+    return out
 
 
 def list_members(conn, pubkey: str, collection: str) -> dict:
-    """Roster of one collection. The caller must already be a member. Roles are derived."""
+    """Roster of one collection. The caller must already be a member. Roles are derived. Each person
+    also lists their Ledger and the agents they picked for this collection (ledger, agents)."""
     require_member(conn, pubkey, collection)
     rows = [_clean(r) for r in conn.execute(
         """SELECT r.pubkey, r.role, p.name AS author FROM collection_roster r
            LEFT JOIN profiles p ON p.pubkey = r.pubkey WHERE r.collection = %s
            ORDER BY CASE r.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, r.pubkey""",
         (collection,))]
-    role = next(r["role"] for r in rows if r["pubkey"] == pubkey)
+    bots = collection_bots(conn, collection)
+    for r in rows:
+        r.update(bots.get(r["pubkey"], {"ledger": None, "agents": []}))
+    principal = ledger_human(conn, pubkey) or pubkey  # a Ledger has its human's role; an agent has none
+    role = next((r["role"] for r in rows if r["pubkey"] == principal), "agent")
     return {"collection": collection, "role": role,
             "can_manage_members": role in ("owner", "admin"), "can_manage_admins": role == "owner",
             "members": rows}

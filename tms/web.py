@@ -283,7 +283,7 @@ async def members_page(request: Request):
     pubkey, slug = cookie_pubkey(request), request.path_params["slug"]
     if pubkey is None:
         return HTMLResponse('<meta http-equiv="refresh" content="0;url=/">', status_code=401)
-    role = await db(L.collection_role, pubkey, slug)
+    role = await db(L.acting_role, pubkey, slug)
     if role not in ("owner", "admin"):
         return PlainTextResponse(f"Only an owner or admin of '{slug}' manages its members.", status_code=403)
     return await page(request)
@@ -310,8 +310,11 @@ async def collection(request: Request) -> JSONResponse:
                WHERE r.collection = %s
                ORDER BY CASE r.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END,
                         p.name NULLS LAST, r.pubkey""", (slug,))]
+        bots = L.collection_bots(conn, slug)
+        for m in members:
+            m.update(bots.get(m["pubkey"], {"ledger": None, "agents": []}))
         about = conn.execute("SELECT topic, public FROM collection_about WHERE collection = %s", (slug,)).fetchone()
-        return owner, members, L.collection_role(conn, pubkey, slug), about
+        return owner, members, L.acting_role(conn, pubkey, slug), about
     try:
         owner, members, role, about = await db(run)
     except ValueError as err:
