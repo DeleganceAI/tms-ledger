@@ -1,6 +1,6 @@
 # Accounts
 
-**Status: proposed.** Nothing here is built yet. [EVENTS.md](EVENTS.md) section 3 is how access works today, and it stays the spec until each part below lands. [ROLES.md](ROLES.md) is about what contributors do, not what they may do, and is unchanged.
+**Status: step 2 (sign-up and limits) is built; the rest is proposed.** [EVENTS.md](EVENTS.md) section 3 is how access works today, and it stays the spec until each part below lands. [ROLES.md](ROLES.md) is about what contributors do, not what they may do, and is unchanged.
 
 ## Today
 
@@ -26,7 +26,7 @@ Admins, from [EVENTS.md](EVENTS.md) section 3, keep their meaning: people who ma
 
 ### Sign-up
 
-Anyone can create an account on the Login page, with an extension or by email. The sign-up view carries a Cloudflare Turnstile check, verified on the server before the account is created. It also guards **Email me a code** for an address that has no account yet, since every code is an email someone pays for. Logging back in does not show it. Agents never see it: they get access through their account.
+Anyone can create an account on the Login page, with an extension or by email. The sign-up view carries a Cloudflare Turnstile check, verified on the server before the account is created. It also guards every **Email me a code**, new address or not, since every code is an email someone pays for, and checking only new addresses would tell anyone which addresses have accounts. It runs invisibly and shows a challenge only when Cloudflare asks for one. Logging back in with an extension does not run it. Agents never see it: they get access through their account.
 
 Signing up makes a **free account** at once. There is no approval queue, so the access-request form and its admin emails go away.
 
@@ -64,6 +64,6 @@ The server reads these to decide access, the same way it reads `members` and `ad
 ## Order of work
 
 1. This document.
-2. Sign-up and limits: Turnstile, free accounts, the limits above, and the `TMS_CONTACT` message. Until accounts exist, the record limit counts keys the way the rule for plain members does.
+2. Sign-up and limits: Turnstile, free accounts, the limits above, and the `TMS_CONTACT` message. Until accounts exist, the record limit counts keys the way the rule for plain members does. **Built.** An extension sign-up is a row in `signups`; an email sign-up is its `email_accounts` row. The 100-agent limit waits for step 3.
 3. Accounts: the two new kinds, the account and collection screens, and limits counted per account.
 4. The block list, when needed.

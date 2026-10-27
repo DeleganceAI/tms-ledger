@@ -36,11 +36,14 @@ td.n{font-family:var(--mono);text-align:right}.actions{display:flex;gap:8px;flex
   <div id="who"></div></header>
 <main>
   <section id="connect" hidden><h2>Login</h2>
-    <p>Every record here is signed by its author's Nostr key. Log in with a NIP-07 browser extension (Alby, nos2x, Keys.band) to read and write the collections you belong to.</p>
+    <p>Every record here is signed by its author's Nostr key. Log in with a NIP-07 browser extension (Alby, nos2x, Keys.band) to read and write the collections you belong to. New here? Logging in with a new key, or a new email address below, creates a free account.</p>
     <button id="connectBtn">Log in</button> <span id="connectMsg" class="muted"></span>
+    <div id="signupBox" hidden><p>This key has no account yet. Sign up to get a free account: one collection of your own, and 10,000 records.</p>
+      <div id="signupCheck"></div><div class="actions"><button id="signupBtn">Sign up</button></div></div>
     <h2 style="margin-top:18px">Or sign in with email</h2>
     <p class="muted" style="margin-top:0">No extension needed. We email you a code each time; there's no password. On your first sign-in we create a Nostr key for you and hold it, so the site can sign your records. You can export it at any time and switch to signing with it yourself.</p>
     <div class="actions"><input id="eAddr" type="email" autocomplete="email" placeholder="you@example.com" style="max-width:280px"><button id="eSend" class="ghost">Email me a code</button></div>
+    <div id="eCheck"></div>
     <div class="actions" id="eCodeRow" hidden><input id="eCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6-digit code" style="max-width:140px"><button id="eVerify">Sign in</button></div>
     <span id="eMsg" class="muted"></span></section>
   <section id="keyBox" hidden><h2>Your key</h2>
@@ -94,7 +97,7 @@ let ME = null
 
 async function api(path, opts = {}) {
   const r = await fetch(path, opts), d = await r.json().catch(() => ({}))
-  if (!r.ok) { const e = new Error(d.error || `${r.status} ${r.statusText}`); e.status = r.status; throw e }
+  if (!r.ok) { const e = new Error(d.error || `${r.status} ${r.statusText}`); e.status = r.status; e.data = d; throw e }
   return d
 }
 const post = (path, body) => api(path, {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(body)})
@@ -137,6 +140,28 @@ function toHex(s) {
   return out.map(b => b.toString(16).padStart(2, '0')).join('')
 }
 
+// Cloudflare Turnstile on sign-up and on every email code request. interaction-only: most people never
+// see it; it shows a challenge only when Cloudflare wants one. With no site key there is no check.
+const TS_KEY = '{{TURNSTILE_SITE_KEY}}'
+const tsToken = {}, TS_ACTION = {signupCheck: 'signup', eCheck: 'email'}  // the server checks the action
+function botCheck(el) {
+  if (!TS_KEY || TS_KEY.startsWith('{{') || $(el).dataset.on) return
+  $(el).dataset.on = 1
+  const render = () => window.turnstile.render('#' + el, {sitekey: TS_KEY, action: TS_ACTION[el], appearance: 'interaction-only',
+    callback: t => { tsToken[el] = t }, 'expired-callback': () => { tsToken[el] = '' }})
+  if (window.turnstile) return render()
+  const s = document.createElement('script')
+  s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'; s.onload = render
+  document.head.append(s)
+}
+// The token for el, waiting up to 10 seconds for an invisible check to finish.
+async function checkToken(el) {
+  if (!TS_KEY || TS_KEY.startsWith('{{')) return ''
+  for (let i = 0; i < 40 && !tsToken[el]; i++) await new Promise(r => setTimeout(r, 250))
+  return tsToken[el] || ''
+}
+function resetCheck(el) { tsToken[el] = ''; if (window.turnstile && $(el).dataset.on) window.turnstile.reset('#' + el) }
+
 function renderWho() {
   $('who').innerHTML = ME ? `<span>${esc(ME.profile?.name || ME.npub.slice(0, 16) + '…')}</span><button class="ghost" id="logout">Log out</button>` : ''
   if (ME) $('logout').onclick = async () => { await post('/logout', {}); location.href = '/' }
@@ -176,10 +201,10 @@ function renderHome() {
     <td>${c.role === 'owner' || c.role === 'admin' ? `<a href="/c/${esc(c.slug)}/members">members</a> · ` : ''}<a href="/c/${esc(c.slug)}/export.jsonl">export</a></td></tr>`).join('')}</table>`
     : '<p class="muted">You are not a member of any collection yet.</p>'
   renderAbout(cs.filter(c => c.role === 'owner'))
-  $('newCol').hidden = !ME.approved
+  $('newCol').hidden = !ME.can_create
   $('stewardsBox').hidden = !ME.approved
   if (ME.approved) $('sList').value = (ME.stewards || []).map(s => s.npub).join('\n')
-  if (ME.approved && location.hash === '#new') { $('newCol').scrollIntoView({block: 'center'}); $('newSlug').focus() }  // from the dashboard's + card
+  if (ME.can_create && location.hash === '#new') { $('newCol').scrollIntoView({block: 'center'}); $('newSlug').focus() }  // from the dashboard's + card
 }
 
 // Owners set each collection's topic and whether Communities shows it. Ticking or unticking
@@ -238,15 +263,27 @@ async function connect() {
     $('connect').hidden = true
     show(relay)
   } catch (e) {
-    say('connectMsg', e.status === 403 ? `${e.message}. Ask the operator to approve your key, or a collection owner to add you.` : e.message, 'err')
+    if (e.status !== 403) return say('connectMsg', e.message, 'err')
+    say('connectMsg', '')
+    $('signupBox').hidden = false; botCheck('signupCheck')
   }
 }
 $('connectBtn').onclick = connect
+$('signupBtn').onclick = async () => {
+  try {
+    say('connectMsg', 'Sign the sign-up request in your extension…')
+    const event = await sign(4707, {tool: 'login', args: {}})
+    ME = await post('/api/signup', {event, turnstile: await checkToken('signupCheck')})
+    $('connect').hidden = true
+    show(await relayProfile(ME.pubkey))
+  } catch (e) { say('connectMsg', e.message, 'err'); resetCheck('signupCheck') }
+}
 
 $('eSend').onclick = async () => {
-  try { await post('/api/email/start', {email: $('eAddr').value}); $('eCodeRow').hidden = false; $('eCode').focus()
+  try { say('eMsg', 'Sending…'); await post('/api/email/start', {email: $('eAddr').value, turnstile: await checkToken('eCheck')}); $('eCodeRow').hidden = false; $('eCode').focus()
         say('eMsg', 'Check your inbox for a 6-digit code. It expires in 10 minutes.') }
   catch (e) { say('eMsg', e.message, 'err') }
+  finally { resetCheck('eCheck') }  // tokens work once
 }
 $('eVerify').onclick = async () => {
   try { ME = await post('/api/email/verify', {email: $('eAddr').value, code: $('eCode').value}); $('connect').hidden = true; show(null) }
@@ -379,6 +416,6 @@ async function renderCommunities() {
 if (location.pathname === '/communities') {  // public: no login needed
   renderCommunities()
   api('/api/me').then(d => { ME = d; renderWho() }).catch(() => renderWho())
-} else api('/api/me').then(d => { ME = d; show(null) }).catch(() => { $('connect').hidden = false; renderWho() })
+} else api('/api/me').then(d => { ME = d; show(null) }).catch(() => { $('connect').hidden = false; renderWho(); botCheck('eCheck') })
 </script>
 <script src="/chat.js" defer></script></body></html>

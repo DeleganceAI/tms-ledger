@@ -1,4 +1,4 @@
-"""Operator page at /admin: access requests, admins, DeepInfra spend (embeddings and chat), users, and a few context numbers.
+"""Operator page at /admin: free accounts and lifting their limits, admins, DeepInfra spend (embeddings and chat), users, and a few context numbers.
 
 Site admins are the pubkeys in TMS_ADMINS; they can add and remove admins here (the admins table),
 who can do everything else. Both log in with the same cookie as the other pages.
@@ -44,8 +44,13 @@ def report(conn, viewer: str) -> dict:
     cols = None if viewer in L.ADMINS else L.my_collections(conn, viewer)
     users = conn.execute(USERS_SQL, (sorted(L.APPROVED | L.ADMINS),)).fetchall()
     return {
-        "requests": conn.execute("""SELECT id, npub, email, note, at FROM access_requests
-            WHERE status = 'pending' ORDER BY at""").fetchall(),
+        "free": conn.execute("""SELECT k.pubkey, min(k.at) AS at, p.name, (SELECT email FROM email_accounts a WHERE a.pubkey = k.pubkey) AS email,
+              (SELECT count(*) FROM collections c WHERE c.owner = k.pubkey) AS owned,
+              (SELECT count(*) FROM events e WHERE e.pubkey = k.pubkey AND e.kind IN (4701, 4702, 4703, 4704)) AS records
+            FROM (SELECT pubkey, at FROM signups UNION ALL SELECT pubkey, created_at FROM email_accounts) k
+            LEFT JOIN profiles p ON p.pubkey = k.pubkey
+            WHERE k.pubkey NOT IN (SELECT pubkey FROM approvals) AND k.pubkey NOT IN (SELECT pubkey FROM admins)
+              AND k.pubkey <> ALL(%s) GROUP BY k.pubkey, p.name ORDER BY min(k.at) DESC""", (sorted(L.APPROVED | L.ADMINS),)).fetchall(),
         "approvals": conn.execute("""SELECT a.pubkey, a.at, p.name, (SELECT name FROM profiles q WHERE q.pubkey = a.approved_by) AS by_name,
               a.approved_by FROM approvals a LEFT JOIN profiles p ON p.pubkey = a.pubkey ORDER BY a.at DESC""").fetchall(),
         "admins": conn.execute("""SELECT a.pubkey, a.at, p.name, (SELECT name FROM profiles q WHERE q.pubkey = a.added_by) AS by_name,
@@ -104,18 +109,19 @@ form{{display:inline}}button{{font:inherit;padding:3px 10px;border-radius:5px;bo
 button.ghost{{background:none;color:var(--accent)}}form.add{{display:block;margin:6px 0}}form.add input{{font:13px var(--mono);padding:4px 6px;border:1px solid var(--line);border-radius:5px;background:var(--panel);color:var(--ink);max-width:100%}}td.note{{white-space:pre-wrap;max-width:420px}}
 </style></head><body><main>
 <h1>TMS admin</h1><p><a href="/">Home</a> · <a href="/dashboard">Dashboard</a> · <a href="/communities">Communities</a> · <a href="/office">Office</a> · <a href="/docs">Docs</a> · <a href="https://github.com/DeleganceAI/tms-ledger" target="_blank" rel="noopener" title="Source on GitHub"><svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-2px;margin-right:4px"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>GitHub</a></p>
-<h2>Access requests ({len(r["requests"])} pending)</h2>
-{_table(["npub or email", "Note", "Asked", ""],
-        [['<br>'.join(f'<span class="mono">{escape(x)}</span>' for x in (q["npub"], q["email"]) if x),
-          f'<span class="note">{escape(q["note"] or "")}</span>', when(q["at"]),
-          f'<form method="post" action="/admin/requests/{q["id"]}/approve"><button>Approve</button></form> '
-          f'<form method="post" action="/admin/requests/{q["id"]}/dismiss"><button class="ghost">Dismiss</button></form>']
-         for q in r["requests"]])}
-<h2>Approved here ({len(r["approvals"])})</h2>
-{_table(["Who", "npub", "Approved by", "When"],
+<h2>Free accounts ({len(r["free"])})</h2>
+<p class="mono">Anyone can sign up. A free account owns {L.FREE_COLLECTIONS} collection and writes {L.FREE_RECORDS:,} evidence, claims, links and contradictions.</p>
+{_table(["Who", "npub or email", "Signed up", "Owns", "Records", ""],
+        [[escape(q["name"] or "—"), '<br>'.join(f'<span class="mono">{escape(x)}</span>' for x in (E.bech32_encode("npub", q["pubkey"]), q["email"]) if x),
+          when(q["at"]), q["owned"], f'{q["records"]:,}',
+          f'<form method="post" action="/admin/lift/{q["pubkey"]}"><button>Lift limits</button></form>']
+         for q in r["free"]])}
+<form method="post" action="/admin/lift" class="add"><input name="npub" placeholder="npub1… to lift its limits" required size="66"> <button>Lift limits</button></form>
+<h2>Limits lifted here ({len(r["approvals"])})</h2>
+{_table(["Who", "npub", "Lifted by", "When"],
         [[escape(a["name"] or "—"), f'<span class="mono">{escape(E.bech32_encode("npub", a["pubkey"]))}</span>',
           _who(a["approved_by"], a["by_name"]), when(a["at"])] for a in r["approvals"]])}
-<p class="mono">Access = TMS_ADMINS + TMS_APPROVED ({len(L.APPROVED | L.ADMINS)} from the environment) + the keys approved here.</p>
+<p class="mono">No limits = TMS_ADMINS + TMS_APPROVED ({len(L.APPROVED | L.ADMINS)} from the environment) + the keys lifted here.</p>
 <h2>Admins</h2>
 {_table(["Who", "npub", "Role", "Added by", "When", ""],
         [[escape(a["name"] or "—"), f'<span class="mono">{escape(E.bech32_encode("npub", a["pubkey"]))}</span>', "site admin (TMS_ADMINS)", "—", "—", ""]
@@ -184,42 +190,35 @@ async def admins(request: Request):
     return RedirectResponse("/admin", status_code=303)
 
 
-def decide(request: Request):
-    """Approve or dismiss a pending request. Approval writes the approvals table, so it takes
-    effect on the key's next call, with no redeploy."""
+async def lift(request: Request):
+    """Admins: lift a key's free-account limits (POST /admin/lift, form field npub, or /admin/lift/<hex>).
+    Writes the approvals table, so it takes effect on the key's next write, with no redeploy."""
     pubkey = cookie_pubkey(request)
-    if request.path_params["action"] not in ("approve", "dismiss"):
+    if not await run_in_threadpool(lambda: _is_admin(pubkey)):
         return PlainTextResponse("Not Found", status_code=404)
-    with L.connect() as conn:
-        if not L.is_admin(conn, pubkey):
-            return PlainTextResponse("Not Found", status_code=404)
     if not _same_origin(request):
         return PlainTextResponse("cross-site request refused", status_code=403)
-    from . import email_login as EL
-    rid, action = int(request.path_params["id"]), request.path_params["action"]
-    status = {"approve": "approved", "dismiss": "dismissed"}[action]
-    with L.connect() as conn, conn.transaction():
-        row = conn.execute("SELECT npub, email FROM access_requests WHERE id = %s AND status = 'pending' FOR UPDATE", (rid,)).fetchone()
-        if row and action == "approve":
-            if row["npub"]:
-                key = E.pubkey_hex(row["npub"])
-            elif EL.configured():  # an email request: create the account and the key we hold for it
-                key = EL.ensure_account(conn, row["email"])["pubkey"]
-            else:
-                return PlainTextResponse("Email sign-in isn't configured (RESEND_API_KEY, TMS_KEY_SECRET), so an email "
-                                         "request can't be approved yet.", status_code=503)
-            conn.execute("INSERT INTO approvals (pubkey, approved_by) VALUES (%s, %s) ON CONFLICT DO NOTHING", (key, pubkey))
-        if row:
-            conn.execute("UPDATE access_requests SET status = %s, decided_by = %s, decided_at = now() WHERE id = %s",
-                         (status, pubkey, rid))
-    if row and action == "approve" and row["email"]:
-        EL.notify_approved(str(request.base_url).rstrip("/"), row["email"])
+    try:
+        target = E.pubkey_hex(request.path_params.get("pubkey") or str((await request.form()).get("npub", "")))
+    except ValueError as err:
+        return PlainTextResponse(f"not a valid npub or hex key: {err}", status_code=400)
+
+    def write():
+        with L.connect() as conn:
+            conn.execute("INSERT INTO approvals (pubkey, approved_by) VALUES (%s, %s) ON CONFLICT DO NOTHING", (target, pubkey))
+    await run_in_threadpool(write)
     return RedirectResponse("/admin", status_code=303)
+
+
+def _is_admin(pubkey) -> bool:
+    with L.connect() as conn:
+        return L.is_admin(conn, pubkey)
 
 
 routes = [  # sync handlers: Starlette runs them in its threadpool
     Route("/admin", admin),
-    Route("/admin/requests/{id:int}/{action:str}", decide, methods=["POST"]),
+    Route("/admin/lift", lift, methods=["POST"]),
+    Route("/admin/lift/{pubkey:str}", lift, methods=["POST"]),
     Route("/admin/admins", admins, methods=["POST"]),
     Route("/admin/admins/{pubkey:str}/remove", admins, methods=["POST"]),
 ]

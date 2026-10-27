@@ -1,7 +1,7 @@
 """Browser side (EVENTS.md section 6): NIP-07 login cookie, the pages, and their JSON.
 
-    /                       logged out: the office, totals and Request access; logged in: as /connect
-    /connect                connect, profile, terms, your collections
+    /                       logged out: the office, totals and Sign up; logged in: as /connect
+    /connect                log in or sign up, profile, terms, your collections
     /submit                 sign and publish evidence, claims and links
     /office                 ambient animation; no ledger data
     /c/<slug>/members       owner or admin: sign a new members list; the owner also signs admins
@@ -16,11 +16,13 @@ import hashlib
 import hmac
 import json
 import os
+import sys
 import threading
 import time
 from collections import deque
 from pathlib import Path
 
+import httpx
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
@@ -37,7 +39,14 @@ DOCS_FILE = Path(__file__).resolve().parent.parent / "DOCS.md"
 # Extra docs pages, served at /docs/<name> with the same template.
 DOCS_PAGES = {"bitter-lesson": Path(__file__).resolve().parent.parent / "BITTER_LESSON.md",
               "why-nostr": Path(__file__).resolve().parent.parent / "WHY_NOSTR.md"}
-CONTACT_EMAIL = os.environ.get("TMS_CONTACT_EMAIL", "dustin@delegance.ai")
+CONTACT_EMAIL = L.CONTACT
+# Cloudflare Turnstile on sign-up only. Unset, sign-up goes unchecked (local dev and tests).
+TURNSTILE_SITE_KEY = os.environ.get("TURNSTILE_SITE_KEY", "")
+TURNSTILE_SECRET = os.environ.get("TURNSTILE_SECRET", "")
+# Hostnames a token may come from; unset, the host the request came to (behind the proxy, the public one)
+TURNSTILE_HOSTNAMES = {h for h in os.environ.get("TURNSTILE_HOSTNAMES", "").replace(",", " ").split() if h}
+if not TURNSTILE_SECRET:
+    print("TURNSTILE_SECRET is not set: sign-up is not checked for bots", file=sys.stderr)
 DOCS_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>TMS docs</title><style>
 :root{{color-scheme:dark;--bg:#2b2433;--panel:#342b3e;--line:#4a3f57;--ink:#f4efe6;--ink3:#9d91a8;--accent:#8ab6f9;--code:#241e2c}}
@@ -148,6 +157,52 @@ async def login(request: Request) -> JSONResponse:
     return resp
 
 
+def turnstile_ok(token, ip: str, action: str, host: str) -> bool:
+    """Cloudflare's verdict on a Turnstile token: it passed, for this action ("signup" or "email"),
+    on one of our hostnames. True when Turnstile isn't configured. Tests replace httpx.post."""
+    if not TURNSTILE_SECRET:
+        return True
+    if not isinstance(token, str) or not token or len(token) > 2048:
+        return False
+    try:
+        r = httpx.post("https://challenges.cloudflare.com/turnstile/v0/siteverify", timeout=10,
+                       data={"secret": TURNSTILE_SECRET, "response": token, "remoteip": ip})
+        r.raise_for_status()
+        out = r.json()
+    except (httpx.HTTPError, ValueError):
+        return False
+    if (out.get("metadata") or {}).get("result_with_testing_key"):  # Cloudflare's test keys: example.com, no action
+        return out.get("success") is True
+    return out.get("success") is True and out.get("action") == action and out.get("hostname") in (TURNSTILE_HOSTNAMES or {host})
+
+
+async def signup(request: Request) -> JSONResponse:
+    """POST {event, turnstile}: a login request signed by a new key, plus a Turnstile token. Creates
+    the free account (the signups table) and logs in. Signing up again is harmless."""
+    from .server import authenticate
+    try:
+        body = await request.json()
+    except ValueError:
+        body = None
+    if not isinstance(body, dict):
+        return _error(ValueError("send {event, turnstile}"))
+    if not await run_in_threadpool(turnstile_ok, body.get("turnstile"), _client_ip(request), "signup", request.url.hostname):
+        return JSONResponse({"error": "the bot check failed; try it again", "turnstile": True}, status_code=400)
+
+    def run(conn, ev):
+        pubkey, _ = authenticate(conn, ev, "login", check_allowed=False)
+        conn.execute("INSERT INTO signups (pubkey) VALUES (%s) ON CONFLICT DO NOTHING", (pubkey,))
+        return pubkey, _account(conn, pubkey)
+    try:
+        pubkey, acct = await db(run, body.get("event"))
+    except ValueError as err:
+        return _error(err)
+    resp = JSONResponse(acct)
+    resp.set_cookie(COOKIE, make_cookie(pubkey), max_age=COOKIE_TTL, httponly=True, samesite="lax",
+                    secure=request.url.scheme == "https")
+    return resp
+
+
 async def logout(request: Request) -> JSONResponse:
     resp = JSONResponse({"ok": True})
     resp.delete_cookie(COOKIE)
@@ -155,7 +210,8 @@ async def logout(request: Request) -> JSONResponse:
 
 
 async def page(request: Request):
-    return HTMLResponse(PAGE_FILE.read_text(encoding="utf-8"))  # re-read so edits show on refresh
+    return HTMLResponse(PAGE_FILE.read_text(encoding="utf-8")  # re-read so edits show on refresh
+                        .replace("{{TURNSTILE_SITE_KEY}}", TURNSTILE_SITE_KEY))
 
 
 async def home(request: Request):
@@ -165,8 +221,7 @@ async def home(request: Request):
     return resp
 
 
-REQUEST_LIMIT, REQUEST_WINDOW = 5, 3600  # access requests per IP per hour
-MAX_PENDING = 200                        # all pending requests together, whatever the addresses
+REQUEST_LIMIT, REQUEST_WINDOW = 5, 3600  # email codes per IP per hour
 _recent: dict[str, deque] = {}
 _recent_lock = threading.Lock()
 
@@ -192,38 +247,6 @@ def _rate_limited(ip: str) -> bool:
             return True
         q.append(now)
         return False
-
-
-async def access_request(request: Request) -> JSONResponse:
-    """Unsigned on purpose: the visitor may not have a Nostr extension yet. They give an npub, or an
-    email address if they have no key. The admins get an email; an admin decides in /admin."""
-    from . import email_login as EL
-    if _rate_limited(_client_ip(request)):
-        return JSONResponse({"error": "too many requests from this address; try again later"}, status_code=429)
-    try:
-        body = await request.json()
-        contact = str(body.get("contact") or body.get("npub") or "").strip()
-        note = str(body.get("note") or "").strip()
-        npub, email = (None, EL._email(contact)) if "@" in contact else (E.bech32_encode("npub", E.pubkey_hex(contact)), None)
-    except (ValueError, TypeError, AttributeError):
-        return JSONResponse({"error": "enter an npub (npub1...), a 64-character hex pubkey, or an email address"}, status_code=400)
-    if len(note) > 500:
-        return JSONResponse({"error": "the note is limited to 500 characters"}, status_code=400)
-
-    def store() -> str:
-        with L.connect() as conn:
-            if conn.execute("SELECT count(*) AS n FROM access_requests WHERE status = 'pending'").fetchone()["n"] >= MAX_PENDING:
-                return "full"
-            conflict = "(npub) WHERE status = 'pending'" if npub else "(email) WHERE status = 'pending' AND npub IS NULL"
-            new = conn.execute(f"""INSERT INTO access_requests (npub, email, note) VALUES (%s, %s, %s)
-                                  ON CONFLICT {conflict} DO NOTHING RETURNING id""", (npub, email, note or None)).fetchone()
-        if new:  # only a new request emails the admins, so repeats can't spam them
-            EL.notify_request(str(request.base_url).rstrip("/"), npub, email, note)
-        return "ok"
-    if await run_in_threadpool(store) == "full":
-        return JSONResponse({"error": "too many requests are waiting; try again later"}, status_code=429)
-    # The same answer whether or not this key already had a request waiting: the reply says nothing about anyone.
-    return JSONResponse({"status": "pending", "npub": npub, "email": email}, status_code=201)
 
 
 async def office(request: Request) -> HTMLResponse:
@@ -367,13 +390,13 @@ routes = [
     Route("/docs/{name}", docs_page),
     Route("/", home),
     Route("/connect", page),
-    Route("/api/access-request", access_request, methods=["POST"]),
     Route("/submit", page),
     Route("/communities", page),
     Route("/office", office),
     Route("/c/{slug}/members", members_page),
     Route("/c/{slug}/export.jsonl", export),
     Route("/login", login, methods=["POST"]),
+    Route("/api/signup", signup, methods=["POST"]),
     Route("/logout", logout, methods=["POST"]),
     Route("/api/me", me),
     Route("/api/c/{slug}", collection),

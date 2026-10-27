@@ -96,8 +96,9 @@ async def _log_calls(ctx, call_next):
 mcp = MCPServer("tms", instructions=INSTRUCTIONS, middleware=[_log_calls])
 
 
-def authenticate(conn, request, tool: str) -> tuple[str, dict]:
-    """Check a signed request (EVENTS.md section 4) and return (pubkey, args)."""
+def authenticate(conn, request, tool: str, check_allowed: bool = True) -> tuple[str, dict]:
+    """Check a signed request (EVENTS.md section 4) and return (pubkey, args). check_allowed=False
+    is for sign-up, where the key is new."""
     if not isinstance(request, dict) or request.get("kind") != E.REQUEST:
         raise E.Invalid("request must be a kind-4707 event")
     data = E.verify(request)
@@ -110,7 +111,8 @@ def authenticate(conn, request, tool: str) -> tuple[str, dict]:
         if conn.execute("INSERT INTO auth_seen (id) VALUES (%s) ON CONFLICT DO NOTHING RETURNING id",
                         (request["id"],)).fetchone() is None:
             raise E.Invalid("request was already used; sign a fresh one for every call")
-    L.require_allowed(conn, request["pubkey"])
+    if check_allowed:
+        L.require_allowed(conn, request["pubkey"])
     return request["pubkey"], data["args"]
 
 

@@ -70,6 +70,8 @@ When a bot adds something, it shows a speech bubble:
 
 ## 6. Request access
 
+*Superseded: open sign-up replaced this form and its queue ([ACCOUNTS.md](ACCOUNTS.md)). The landing page links to **Sign up**, and `/admin` lifts limits instead of approving requests.*
+
 - **The form:** an npub field plus an optional note (500 characters max). There's no signing, because the visitor may not have an extension yet. Rate-limited per IP, and the same npub can't have more than one pending request.
 - **Storage:** an operational table, `access_requests` (npub, note, at, status).
 - **In `/admin`:** a list of pending requests with Approve and Dismiss buttons.

@@ -298,7 +298,7 @@ CREATE TABLE embed_calls (
 );
 CREATE INDEX embed_calls_at_idx ON embed_calls (at DESC);
 
--- Unsigned requests from the landing page. One pending request per npub. Safe to prune.
+-- Unsigned requests from the old landing page form, from before open sign-up. Nothing writes it now; safe to drop.
 CREATE TABLE access_requests (
     id         bigserial PRIMARY KEY,
     npub       text CHECK (npub ~ '^npub1[02-9ac-hj-np-z]{58}$'),
@@ -313,11 +313,18 @@ CREATE TABLE access_requests (
 CREATE UNIQUE INDEX access_requests_one_pending ON access_requests (npub) WHERE status = 'pending';
 CREATE UNIQUE INDEX access_requests_one_pending_email ON access_requests (email) WHERE status = 'pending' AND npub IS NULL;
 
--- Keys an admin approved in /admin. Access = TMS_ADMINS + TMS_APPROVED (env, bootstrap) + this table.
+-- Keys whose free-account limits an admin lifted in /admin. No limits = TMS_ADMINS + TMS_APPROVED (env, bootstrap) + this table.
 CREATE TABLE approvals (
     pubkey      text PRIMARY KEY CHECK (pubkey ~ '^[0-9a-f]{64}$'),
     approved_by text NOT NULL,
     at          timestamptz NOT NULL DEFAULT now()
+);
+
+-- Keys that signed up on the Login page with an extension, after a Turnstile check. Email
+-- sign-ups are their email_accounts row. Either one is a free account (ACCOUNTS.md "Limits").
+CREATE TABLE signups (
+    pubkey text PRIMARY KEY CHECK (pubkey ~ '^[0-9a-f]{64}$'),
+    at     timestamptz NOT NULL DEFAULT now()
 );
 
 -- Admins added in /admin by a site admin (TMS_ADMINS). Same powers as a site admin, except
