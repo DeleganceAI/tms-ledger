@@ -17,6 +17,7 @@ The server enforces exactly two mechanical things beyond structure: a link's quo
 | Path | What |
 |---|---|
 | [EVENTS.md](EVENTS.md), [TERMS.md](TERMS.md) | Event kinds, acceptance rules, access; the one upload-rights clause users sign. |
+| [ACCOUNTS.md](ACCOUNTS.md) | Proposed: open sign-up, free-account limits, and accounts of a person, their Ledger key and their agents. |
 | [db/init.sql](db/init.sql) | `events` (the only signed table), views `evidence`, `claims`, `links`, `contradictions`, `contradiction_claims`, `profiles`, `members`, `collection_roster`, `collection_admins`, `stewards`; `collections`, `embeddings`, `auth_seen`, `mcp_calls`. Reference and quote triggers, append-only. [db/migrate_collection_admin.sql](db/migrate_collection_admin.sql) applies the role views to a database created before them. |
 | [db/verify.sql](db/verify.sql) | Database-side guards on unsigned stand-in events. Rolls back. |
 | [tms/events.py](tms/events.py) | NIP-01 IDs, BIP-340 signing (`coincurve`), per-kind content rules, the `tms-sign` CLI. |
