@@ -302,9 +302,15 @@ function renderAgents() {
   $('acLedger').value = A.ledger?.npub || ''; $('acLedger').disabled = $('acSave').disabled = A.role === 'ledger'
   if (!A.agents.some(a => a.pubkey === picked)) picked = A.agents[0]?.pubkey || null
   const cols = ME.collections.filter(c => c.role), where = pk => cols.filter(c => (A.collection_agents[c.slug] || []).includes(pk))
+  const top = $('acAgents').querySelector('ul')?.scrollTop || 0  // a re-render (after a save) keeps the list where you scrolled it
   keyList('acAgents', A.agents, async agents => { await publish([await sign(4713, {ledger: A.ledger?.pubkey || null, agents})]); await refresh() },
-    {what: "an agent", none: 'No agents yet. Add one by its npub.', picked, pick: pk => { picked = pk; renderAgents() },
+    {what: "an agent", none: 'No agents yet. Add one by its npub.', picked, pick: pk => {
+      picked = pk  // only the highlight and the right pane change, so the list doesn't jump
+      $('acAgents').querySelectorAll('li').forEach(li => { const b = li.querySelector('button.pick'); if (!b) return
+        li.classList.toggle('on', b.dataset.pk === pk); b.setAttribute('aria-pressed', String(b.dataset.pk === pk)) })
+      renderPlaces(A, cols) },
      note: k => `<small>${where(k.pubkey).length ? `${where(k.pubkey).length} of ${cols.length} collections` : 'not working anywhere yet'}</small>`})
+  $('acAgents').querySelector('ul').scrollTop = top
   renderConnect()
   $('newAgents').innerHTML = A.agents.length ? '<span class="muted">Agents that may work here:</span>' + checklist('na') : ''
   renderPlaces(A, cols)
