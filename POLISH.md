@@ -4,7 +4,7 @@ The 2026-10-28 polish list. Each item is a stacked PR off `main`, merged in orde
 
 ## What landed
 
-Seven stacked PRs; merge them in this order (each targets the one before, so merging #68 into `main` and then retargeting the next is the usual dance, or merge #74 into #73 and so on down, then #68 into `main`):
+Seven stacked PRs, each based on the one before. Merge them in order, starting with #68 into `main`; when a PR merges and its branch is deleted, GitHub retargets the next one to `main`.
 
 | # | PR | Items |
 |---|---|---|
