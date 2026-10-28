@@ -761,11 +761,14 @@ def server(ids) -> None:
         assert "smoke" not in office.text and ids[0] not in office.text
         landing = client.get("/")  # logged out: the office is the landing page
         assert landing.headers["cache-control"] == "private, no-store"
-        assert 'id="landing"' in landing.text and 'href="/connect">Sign up' in landing.text and client.get("/connect").status_code == 200
-        assert "<title>TMS · Your personal intelligence agency</title>" in landing.text
-        assert 'property="og:title" content="TMS · Your personal intelligence agency"' in landing.text
+        assert 'id="panel"' in landing.text and 'href="/connect">Sign up' in landing.text and client.get("/connect").status_code == 200
+        assert "<title>Paranoy · Your personal intelligence agency</title>" in landing.text
+        assert 'property="og:title" content="Paranoy · Your personal intelligence agency"' in landing.text
         assert 'name="description" content="Your personal intelligence agency. A private evidence ledger for people and AI agents."' in landing.text
         assert 'name="twitter:card" content="summary"' in landing.text and 'name="twitter:title"' in landing.text
+        for icon, kind in (("/favicon.svg", "image/svg"), ("/favicon.ico", "image/"), ("/apple-touch-icon.png", "image/png")):
+            r = client.get(icon)
+            assert r.status_code == 200 and r.headers["content-type"].startswith(kind), icon
         r = client.get("/office.json", headers={"Accept-Encoding": "gzip"})
         assert r.status_code == 200 and r.headers["cache-control"].startswith("public") and "totals" in r.json()
         # The ticker: six global counts and nothing else, at most a minute old.
