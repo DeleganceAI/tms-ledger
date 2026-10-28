@@ -123,7 +123,14 @@ details.connect{margin-top:14px;border-top:1px solid var(--line);padding-top:10p
       <select id="cSort" aria-label="Sort collections"><option value="active">Most active</option><option value="big">Biggest</option><option value="new">Newest</option></select>
       <span class="muted" id="cNote"></span></div>
     <div id="cList" class="cgrid"></div></section>
+  <section id="invite" hidden><h2>Join <span id="iSlug" class="mono"></span></h2>
+    <p class="muted" style="margin-top:0">You were sent an invite to this collection. Ask to join, and its owner or an admin lets you in.</p>
+    <div id="iBox"><label>A note for the owner (optional)<textarea id="iNote" maxlength="250" placeholder="Who you are" style="min-height:60px;font-family:var(--sans)"></textarea></label>
+      <div class="actions"><button id="iAsk">Ask to join</button><span id="iMsg"></span></div></div></section>
   <section id="members" hidden><h2>Members of <span id="mSlug"></span></h2><table id="mTable"></table>
+    <div id="invBox" hidden><h2 style="margin-top:18px">Invite link</h2>
+      <p class="muted" style="margin:0">Anyone with this link can sign up and ask to join, even though the collection is private. You still accept each request below.</p>
+      <div class="actions"><code id="invLink" style="word-break:break-all"></code><button class="ghost" id="invCopy" type="button">Copy</button></div></div>
     <div id="reqBox" hidden><h2 style="margin-top:18px">Asking to join</h2><div id="reqList"></div></div>
     <h2 style="margin-top:18px">People</h2>
     <p class="muted" style="margin:0">Add people, not their bots: each person picks which of their own agents work here. Removing someone removes their agents with them. The owner always stays, and admins stay members.</p>
@@ -219,7 +226,7 @@ function keyList(el, items, save, {what = "a key", none = 'None yet.', pick = nu
 const NEXT = new URLSearchParams(location.search).get('next')
 const goNext = () => { if (NEXT && /^\/(?!\/)/.test(NEXT)) { location.href = NEXT; return true } return false }
 const WHY = [[/^\/dashboard/, 'Log in to see your dashboard.'], [/^\/submit/, 'Log in to submit evidence.'],
-  [/^\/c\/[^/]+\/chat/, 'Log in to chat with this collection.'], [/^\/c\/[^/]+\/members/, "Log in to manage this collection's members."], [/^\//, 'Log in to continue.']]
+  [/^\/c\/[^/]+\/chat/, 'Log in to chat with this collection.'], [/^\/c\/[^/]+\/members/, "Log in to manage this collection's members."], [/^\/c\/[^/]+\/invite/, 'You were invited to a collection. Sign up or log in, then ask to join.'], [/^\//, 'Log in to continue.']]
 
 // Cloudflare Turnstile on sign-up and on every email code request. interaction-only: most people never
 // see it; it shows a challenge only when Cloudflare wants one. With no site key there is no check.
@@ -488,6 +495,7 @@ function show(relay) {
   $('termsText').textContent = ME.terms_text
   if (path === '/' || path === '/connect') { renderProfile(relay); renderKey(); renderHome() }
   else if (path === '/submit') renderSubmit()
+  else if (path.endsWith('/invite')) renderInvite(decodeURIComponent(path.split('/')[2]))
   else if (path.startsWith('/c/')) renderMembers(decodeURIComponent(path.split('/')[2]))
 }
 
@@ -548,7 +556,9 @@ async function renderMembers(slug) {
       `<tr><td>${esc(m.name || 'No profile yet')}${roleLabel(m)}<div class="muted">${esc(m.about || '')}</div>${bots(m)}</td>
        <td class="mono" style="white-space:nowrap"><span title="${esc(m.npub)}">${esc(shortNpub(m.npub))}</span> <button class="ghost x" type="button" data-copy="${esc(m.npub)}" aria-label="Copy ${esc(m.name || 'this')} npub" title="Copy npub">⧉</button></td></tr>`).join('')
     $('mTable').querySelectorAll('[data-copy]').forEach(b => b.onclick = async () => { await navigator.clipboard.writeText(b.dataset.copy); b.textContent = '✓' })
-    // Requests from Communities: accepting signs the members list with them added; dismissing hides it.
+    $('invBox').hidden = !d.invite; $('invLink').textContent = d.invite || ''
+    $('invCopy').onclick = async () => { await navigator.clipboard.writeText(d.invite); $('invCopy').textContent = 'Copied' }
+    // Requests from Communities and invite links: accepting signs the members list with them added; dismissing hides it.
     $('reqBox').hidden = !d.requests.length
     $('reqList').innerHTML = `<ul class="keys">${d.requests.map(r => `<li style="flex-wrap:wrap"><span class="nm"><b>${esc(r.name || 'No profile yet')}</b>
         <code title="${esc(r.npub)}">${esc(shortNpub(r.npub))}</code>${r.note ? `<div class="muted" style="white-space:normal">“${esc(r.note)}”</div>` : ''}</span>
@@ -609,6 +619,18 @@ function thumb(shape) {
 const sinceText = iso => { if (!iso) return 'no records yet'; const s = (Date.now() - new Date(iso)) / 1000
   return s < 3600 ? 'active in the last hour' : s < 86400 ? `active ${Math.floor(s / 3600)}h ago` : s < 30 * 86400 ? `active ${Math.floor(s / 86400)}d ago` : 'quiet for a month or more' }
 let SHOW = []
+function renderInvite(slug) {
+  $('invite').hidden = false; $('iSlug').textContent = slug
+  const done = html => { $('iBox').innerHTML = `<p>${html}</p>` }
+  if (ME.collections.some(c => c.slug === slug)) return done(`You're already a member. <a href="/?c=${encodeURIComponent(slug)}">Open it</a>.`)
+  if (ME.requested?.includes(slug)) return done('<span class="ok">Asked. The owner will see your request.</span>')
+  $('iAsk').onclick = async () => {
+    try { await post(`/api/c/${encodeURIComponent(slug)}/join`, {note: $('iNote').value, invite: new URLSearchParams(location.search).get('t')})
+      done('<span class="ok">Asked. The owner will see your request.</span>') }
+    catch (e) { say('iMsg', e.message, 'err') }
+  }
+}
+
 async function renderCommunities() {
   $('communities').hidden = false; document.body.classList.add('wide')
   try { SHOW = (await api('/showcase.json')).collections } catch (e) { $('cList').innerHTML = `<p class="err">${esc(e.message)}</p>`; return }
