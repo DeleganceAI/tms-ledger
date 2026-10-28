@@ -948,7 +948,14 @@ def showcase() -> None:
         assert r.status_code == 200 and r.headers["cache-control"] == "no-cache"
         cols = r.json()["collections"]
         assert [c["slug"] for c in cols] == ["smoke"], cols  # "other" and "outside" stay hidden
-        assert set(cols[0]) == {"slug", "topic", "evidence", "claims", "links", "contradictions"}, "counts only, no records"
+        assert set(cols[0]) == {"slug", "topic", "created_at", "evidence", "claims", "links", "contradictions", "last_at", "contributors",
+                                "daily", "supports", "qualifies", "rebuts", "unlinked", "shape"}, "counts and activity, no records"
+        c0 = cols[0]
+        assert len(c0["daily"]) == 30 and sum(c0["daily"]) <= sum(c0[k] for k in counts) and c0["contributors"] >= 1
+        assert c0["supports"] + c0["qualifies"] + c0["rebuts"] == c0["links"] and 0 <= c0["unlinked"] <= c0["claims"]
+        sh = json.dumps(c0["shape"])  # the board outline is anonymous: kinds, local indices and relation letters only
+        assert set(c0["shape"]) == {"nodes", "edges", "contradictions"} and len(c0["shape"]["nodes"]) <= O.SLICE_NODES
+        assert not re.search(r"[0-9a-f]{64}", sh) and "Histamine" not in sh and all(n["t"] in ("claim", "evidence") for n in c0["shape"]["nodes"])
         assert all(cols[0][k] == counts[k] for k in counts), (cols, counts)
         page = client.get("/communities")  # public page, no login
         assert page.status_code == 200 and 'id="communities"' in page.text and "/showcase.json" in page.text
