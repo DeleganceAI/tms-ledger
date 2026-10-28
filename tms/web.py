@@ -136,10 +136,24 @@ async def db(fn, *args):
     return await run_in_threadpool(run)
 
 
+# Join requests waiting on an owner or admin: not dismissed, and the key is not a member yet.
+PENDING = """SELECT j.collection, j.pubkey, j.note, j.at, p.name FROM join_requests j LEFT JOIN profiles p ON p.pubkey = j.pubkey
+    WHERE j.dismissed_at IS NULL AND NOT EXISTS (SELECT 1 FROM members m WHERE m.collection = j.collection AND m.pubkey = j.pubkey)"""
+
+
 def _account(conn, pubkey: str) -> dict:
-    """What the pages need about the logged-in key. custodial: the server holds its key (email sign-in)."""
+    """What the pages need about the logged-in key. custodial: the server holds its key (email sign-in).
+    requested: collections it asked to join; requests on each collection it runs: how many are waiting."""
     email = conn.execute("SELECT email, nsec_enc IS NOT NULL AS held FROM email_accounts WHERE pubkey = %s", (pubkey,)).fetchone()
-    return {**L.account(conn, pubkey), "terms_text": L.TERMS_TEXT.decode(),
+    acct = L.account(conn, pubkey)
+    runs = [c["slug"] for c in acct["collections"] if c["role"] in ("owner", "admin")]
+    waiting: dict[str, int] = {}
+    for r in conn.execute(f"SELECT collection FROM ({PENDING}) q WHERE collection = ANY(%s)", (runs,)):
+        waiting[r["collection"]] = waiting.get(r["collection"], 0) + 1
+    for c in acct["collections"]:
+        c["requests"] = waiting.get(c["slug"], 0)
+    asked = [r["collection"] for r in conn.execute("SELECT collection FROM join_requests WHERE pubkey = %s", (pubkey,))]
+    return {**acct, "terms_text": L.TERMS_TEXT.decode(), "requested": asked,
             "email": email["email"] if email else None, "custodial": bool(email and email["held"])}
 
 
@@ -344,15 +358,76 @@ async def collection(request: Request) -> JSONResponse:
         for m in members:
             m.update(bots.get(m["pubkey"], {"ledger": None, "agents": []}))
         about = conn.execute("SELECT topic, public FROM collection_about WHERE collection = %s", (slug,)).fetchone()
-        return owner, members, L.acting_role(conn, pubkey, slug), about
+        role = L.acting_role(conn, pubkey, slug)
+        requests = [L._clean(r) for r in conn.execute(f"{PENDING} AND j.collection = %s ORDER BY j.at", (slug,))] if role in ("owner", "admin") else []
+        return owner, members, role, about, requests
     try:
-        owner, members, role, about = await db(run)
+        owner, members, role, about, requests = await db(run)
     except ValueError as err:
         return _error(err)
-    for m in members:
+    for m in members + requests:
         m["npub"] = E.bech32_encode("npub", m["pubkey"])
-    return JSONResponse({"slug": slug, "owner": owner, "caller_role": role, "members": members,
+    return JSONResponse({"slug": slug, "owner": owner, "caller_role": role, "members": members, "requests": requests,
                          "topic": about["topic"] if about else None, "public": bool(about and about["public"])})
+
+
+async def join(request: Request) -> JSONResponse:
+    """POST {note}: ask to join a public collection. The owner and admins see it on the members page,
+    and an owner who signed in by email gets an email. One request per key and collection."""
+    pubkey, slug = cookie_pubkey(request), request.path_params["slug"]
+    if pubkey is None:
+        return JSONResponse({"error": "log in first"}, status_code=401)
+    try:
+        body = await request.json()
+    except ValueError:
+        body = {}
+    note = str((body or {}).get("note") or "").strip()[:280]
+
+    def run(conn):
+        L.require_allowed(conn, pubkey)
+        about = conn.execute("SELECT public FROM collection_about WHERE collection = %s", (slug,)).fetchone()
+        if not (about and about["public"]):
+            raise L.Denied(f"'{slug}' is not open to requests")  # private collections stay unseen
+        if conn.execute("SELECT 1 FROM members WHERE collection = %s AND pubkey = %s", (slug, pubkey)).fetchone():
+            raise ValueError(f"you are already a member of '{slug}'")
+        new = conn.execute("""INSERT INTO join_requests (collection, pubkey, note) VALUES (%s, %s, %s)
+                              ON CONFLICT DO NOTHING RETURNING at""", (slug, pubkey, note)).fetchone()
+        owner = conn.execute("""SELECT a.email, p.name FROM collections c JOIN email_accounts a ON a.pubkey = c.owner
+                                LEFT JOIN profiles p ON p.pubkey = %s WHERE c.slug = %s""", (pubkey, slug)).fetchone()
+        return bool(new), owner
+    try:
+        new, owner = await db(run)
+    except ValueError as err:
+        return _error(err)
+    if new and owner:  # ponytail: email only owners who signed in by email; extension-only owners see it in the app
+        from . import email_login
+        who = owner["name"] or E.bech32_encode("npub", pubkey)[:16] + "…"
+        base = str(request.base_url).rstrip("/")
+        try:
+            await run_in_threadpool(email_login.send, owner["email"], f"{who} asked to join {slug} on Paranoy",
+                                    f"{who} asked to join your collection {slug}." + (f'\n\n"{note}"' if note else "")
+                                    + f"\n\nAccept or dismiss it on the members page: {base}/c/{slug}/members")
+        except Exception as err:  # the request is saved either way
+            print(f"join request email failed: {err}", file=sys.stderr)
+    return JSONResponse({"ok": True, "status": "asked" if new else "already asked"})
+
+
+async def dismiss(request: Request) -> JSONResponse:
+    """POST: an owner or admin dismisses a join request. Accepting is signing a members list."""
+    pubkey, slug, who = cookie_pubkey(request), request.path_params["slug"], request.path_params["pubkey"]
+    if pubkey is None:
+        return JSONResponse({"error": "log in first"}, status_code=401)
+
+    def run(conn):
+        if L.acting_role(conn, pubkey, slug) not in ("owner", "admin"):
+            raise L.Denied(f"only an owner or admin of '{slug}' answers its requests")
+        conn.execute("""UPDATE join_requests SET dismissed_by = %s, dismissed_at = now()
+                        WHERE collection = %s AND pubkey = %s AND dismissed_at IS NULL""", (pubkey, slug, who))
+    try:
+        await db(run)
+    except ValueError as err:
+        return _error(err)
+    return JSONResponse({"ok": True})
 
 
 BOARD_MAX = 300  # per kind; ponytail: the newest 300 evidence and claims, paging if a board ever needs more
@@ -471,6 +546,8 @@ routes = [
     Route("/api/me", me),
     Route("/api/c/{slug}", collection),
     Route("/api/c/{slug}/board", board_json),
+    Route("/api/c/{slug}/join", join, methods=["POST"]),
+    Route("/api/c/{slug}/join/{pubkey}/dismiss", dismiss, methods=["POST"]),
     Route("/api/publish", publish, methods=["POST"]),
     Route("/api/fetch", fetch),
 ]

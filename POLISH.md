@@ -9,10 +9,11 @@ The 2026-10-28 polish list. Each item is a stacked PR off `main`, merged in orde
 - [x] 3. One visual system and consistent page titles ([#69](https://github.com/DeleganceAI/tms-ledger/pull/69))
 - [x] 4. Collections page as the signed-in home: cards on the left, a zoomable pin board on the right ([#70](https://github.com/DeleganceAI/tms-ledger/pull/70))
 - [x] 5. Full-page chat per collection, approved accounts only, with the records it reads beside it ([#71](https://github.com/DeleganceAI/tms-ledger/pull/71))
-- [x] 6. A + button to add an npub (members, admins, agents, stewards) instead of editing a text list (Polish 5)
-- [x] 7. Signed-out visitors to signed-in pages go to Login with a reason, and come back after (Polish 5)
-- [x] 8. First-run guide on the collections page, and a Connect an agent panel with MCP config and a starter prompt (Polish 5)
-- [x] 9. Usage meter for free accounts (Polish 5)
+- [x] 6. A + button to add an npub (members, admins, agents, stewards) instead of editing a text list ([#72](https://github.com/DeleganceAI/tms-ledger/pull/72))
+- [x] 7. Signed-out visitors to signed-in pages go to Login with a reason, and come back after ([#72](https://github.com/DeleganceAI/tms-ledger/pull/72))
+- [x] 8. First-run guide on the collections page, and a Connect an agent panel with MCP config and a starter prompt ([#72](https://github.com/DeleganceAI/tms-ledger/pull/72))
+- [x] 9. Usage meter for free accounts ([#72](https://github.com/DeleganceAI/tms-ledger/pull/72))
+- [x] 10. Request-to-join on Communities; the owner sees it and accepts it in the app (Polish 6)
 - [x] 13a. chat.js only for signed-in people; no 404 in the console ([#69](https://github.com/DeleganceAI/tms-ledger/pull/69))
 
 ## Decisions
@@ -35,6 +36,12 @@ The 2026-10-28 polish list. Each item is a stacked PR off `main`, merged in orde
 12. **Connect an agent.** This panel under Your agents gives the key step (`tms-sign keygen`), the MCP config (`{"mcpServers": {"paranoy": {"type": "http", "url": "<base>/mcp"}}}`) and a starter prompt naming your collections, with copy buttons and links to the bot templates and the signing docs. The panel says plainly that every call is signed, since a bare MCP client can list tools but not call them.
 13. **Usage meter.** `/api/me` now has `usage` for free accounts: records, collections and agents against their limits. It uses the same counts the write path checks. The Account page shows three bars, and the collections page shows a one-line summary with a mailto to `TMS_CONTACT`. At the collection limit, the New collection card turns into that note. Approved accounts see no meter.
 
+14. **Join requests.** A request is a note to an owner, not a ledger record, so it lives in a small operational table (`join_requests`, like `signups` and `approvals`) rather than as a new event kind. Accepting is the existing members list (kind 4705) with the person added, signed by the owner or an admin. A request counts as pending while its key is not a member and nobody has dismissed it, so accepting needs no second write. Only signed-in keys with an account can ask, only public collections take requests, and each key gets one request per collection, with a note of up to 280 characters. Owners and admins see requests on the members page, with Accept and Dismiss, and a badge on the collection's card. Owners who signed in by email also get an email (through the existing Resend sender). Extension-only owners have no address, so they see requests only in the app.
+
 ## SQL to apply
 
-None yet.
+Apply by hand as doadmin, before deploying the PR that needs it:
+
+| PR | File | What |
+|---|---|---|
+| Polish 6 | `db/migrate_join_requests.sql` | `join_requests` table, `GRANT SELECT, INSERT, UPDATE` to `tms` |
