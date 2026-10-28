@@ -5,9 +5,10 @@ The 2026-10-28 polish list. Each item is a stacked PR off `main`, merged in orde
 ## Checklist
 
 - [x] 1. Rename "TMS ledger" to Paranoy in user-facing text ([#68](https://github.com/DeleganceAI/tms-ledger/pull/68))
-- [x] 2. One shared header on every page, the dashboard's sections as a second bar, a ☰ menu on phones (Polish 2)
-- [x] 3. One visual system and consistent page titles (Polish 2)
-- [x] 13a. chat.js only for signed-in people; no 404 in the console (Polish 2)
+- [x] 2. One shared header on every page, the dashboard's sections as a second bar, a ☰ menu on phones ([#69](https://github.com/DeleganceAI/tms-ledger/pull/69))
+- [x] 3. One visual system and consistent page titles ([#69](https://github.com/DeleganceAI/tms-ledger/pull/69))
+- [x] 4. Collections page as the signed-in home: cards on the left, a zoomable pin board on the right (Polish 3)
+- [x] 13a. chat.js only for signed-in people; no 404 in the console ([#69](https://github.com/DeleganceAI/tms-ledger/pull/69))
 
 ## Decisions
 
@@ -17,6 +18,9 @@ The 2026-10-28 polish list. Each item is a stacked PR off `main`, merged in orde
 3. **Second bar.** The dashboard's tabs (Overview, Activity, Browse, Agents, Npubs, Sources) live in `nav.subnav` under the header. On the dashboard it is pinned; elsewhere hovering Dashboard, or clicking its ▾, pops it over the page. Tabs are hash links (`/dashboard#agents`), so they can be bookmarked. On phones the sections sit inside the ☰ menu under Dashboard, and on the dashboard the bar scrolls sideways.
 4. **Visual system.** `tms/site.css` holds the colours (the dark purple the app already used, Paranoy's amber as the one action colour, blue kept for links and record IDs), the fonts (system sans, Georgia italic for the logo) and the header. Primary buttons are amber everywhere, secondary ones outlined. The dashboard keeps its denser type. Titles read "Paranoy · <page>". The CSS and JS URLs carry a content hash, so they cache for a day and still change on deploy.
 5. **Chat loading.** Visitors get no `chat.js`. Signed-in non-admins get `{"enabled": false}` from `/dashboard/api/chat` instead of a 404.
+
+6. **Collections page.** Signed in, `/` is now your collections: a card for each one (topic, role, public, counts, Members and Export) and, on the right, a pin board of the selected collection. Account settings (profile, key, terms, topic and visibility, new collection, agents) stay on `/connect`, which the header calls Account. `/?c=<slug>` opens a given board.
+7. **Pin board.** Evidence is a paper, a claim an index card. Links are strings coloured by relation (green supports, amber qualifies, red rebuts), and a contradiction is the office's red zigzag. The layout is a force layout computed in the browser on every load: strings pull linked pins together, pins push each other apart, and a last pass stops them overlapping. Nothing is stored and there are no new tables. The board shows the newest 300 evidence and 300 claims and says so when there are more (the layout takes 0.3 s for 600 pins). Click a pin to open its record beside the board, dim everything unrelated, and step along its links. You can pan by dragging or with the arrow keys, zoom with the wheel, a pinch, +/−, or Fit, and press 0 to fit.
 
 ## SQL to apply
 
