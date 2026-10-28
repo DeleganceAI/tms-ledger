@@ -815,8 +815,10 @@ function drawLiveSlice() {
   const contraOn = k => H.contra !== k || (R && R.contra === k);
   const linked = new Set(); sl.edges.forEach((e, k) => { if (H.edge !== k && vis(e[0]) && vis(e[1])) { linked.add(e[0]); linked.add(e[1]); } });
   sl.off_edge.forEach(([i]) => linked.add(i));
-  // strings running off the board: the slice continues beyond the frame
+  // strings running off the board: the slice continues beyond the frame, so they tuck under it rather than cross the wall
+  ctx.save(); ctx.beginPath(); ctx.rect(BOARD.x + 10, BOARD.y + 10, BOARD.w - 20, BOARD.h - 20); ctx.clip();
   L.off.forEach(o => { if (vis(o.i)) { const a = livePin(sl, L, o.i); ctx.globalAlpha = .55; drawString(a, o.end, '#8a6a52', 1, 1.2); ctx.globalAlpha = 1; } });
+  ctx.restore();
   sl.nodes.forEach((nd, i) => {
     if (!vis(i)) return;
     const [w, h] = nodeSize(sl, L, i), pop = view.pop[i] ?? 1, s = .7 + .3 * ease(pop);
