@@ -17,7 +17,7 @@ from starlette.routing import Route
 
 from . import events as E
 from . import ledger as L
-from .web import cookie_pubkey
+from .web import cookie_pubkey, with_header
 
 # Display name: the latest kind-0 profile, else the first 12 hex chars of the key.
 WHO = "coalesce((SELECT p.name FROM profiles p WHERE p.pubkey = {0}.pubkey), left({0}.pubkey, 12)) AS author"
@@ -296,7 +296,7 @@ PAGE_FILE = Path(__file__).with_name("ui.html")
 def index(request: Request):
     if cookie_pubkey(request) is None:
         return RedirectResponse("/", status_code=302)
-    return HTMLResponse(PAGE_FILE.read_text(encoding="utf-8"))  # re-read so edits show on refresh
+    return HTMLResponse(with_header(request, PAGE_FILE.read_text(encoding="utf-8")))  # re-read so edits show on refresh
 
 
 def _api(fn):

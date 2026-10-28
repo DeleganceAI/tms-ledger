@@ -1,18 +1,14 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Paranoy</title>
+<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/site.css?v=SITE_V">
 <style>
-:root{color-scheme:dark;--bg:#2b2433;--panel:#342b3e;--line:#4a3f57;--ink:#f4efe6;--ink2:#cbbfd4;--ink3:#9d91a8;--accent:#8ab6f9;--accent2:#2f3a5c;--bad:#f4a6a0;--good:#a9d6c4;
-  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;--sans:Inter,system-ui,-apple-system,"Segoe UI",sans-serif}
 a{color:var(--accent)}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 var(--sans)}
-header{display:flex;align-items:center;gap:16px;padding:10px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
-header b{font-size:15px}header nav{display:flex;gap:12px}header a{color:var(--ink2);text-decoration:none}header a:hover{color:var(--accent)}
-#who{margin-left:auto;color:var(--ink3);font-family:var(--mono);font-size:12px;display:flex;gap:8px;align-items:center}
 main{max-width:860px;margin:0 auto;padding:16px;display:grid;gap:14px}
 section{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px 16px}
 h2{margin:0 0 10px;font-size:13px;letter-spacing:.05em;text-transform:uppercase;color:var(--ink3)}
-button{font:inherit;padding:6px 12px;border-radius:6px;border:1px solid var(--accent);background:var(--accent);color:#1e1826;cursor:pointer}
-button.ghost{background:none;color:var(--accent)}button:disabled{opacity:.5;cursor:default}
+main button{font:inherit;padding:6px 12px;border-radius:6px;border:1px solid var(--brand);background:var(--brand);color:var(--brand-ink);font-weight:600;cursor:pointer}
+main button.ghost{background:none;color:var(--ink);border-color:var(--line);font-weight:400}main button.ghost:hover{border-color:var(--ink3)}main button:disabled{opacity:.5;cursor:default}
 input,textarea,select{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;width:100%}
 textarea{font:12.5px/1.45 var(--mono);min-height:90px}label{display:grid;gap:4px;color:var(--ink2);font-size:12.5px}
 label.check{display:flex;align-items:center;gap:8px;margin-top:10px}label.check input{width:auto;margin:0}
@@ -32,10 +28,9 @@ table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:6px 4px;
 td.n{font-family:var(--mono);text-align:right}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center}
 [hidden]{display:none!important}
 </style></head><body>
-<header><b>Paranoy</b><nav><a href="/">Home</a><a href="/submit">Submit</a><a href="/dashboard">Dashboard</a><a href="/communities">Communities</a><a href="/office">Office</a><a href="/docs">Docs</a><a href="https://github.com/DeleganceAI/tms-ledger" target="_blank" rel="noopener" title="Source on GitHub"><svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-2px;margin-right:4px"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>GitHub</a></nav>
-  <div id="who"></div></header>
-<main>
-  <section id="connect" hidden><h2>Login</h2>
+<!--HEADER-->
+<main id="main">
+  <section id="connect" hidden><h2>Log in or sign up</h2>
     <p>Every record here is signed by its author's Nostr key. Log in with a NIP-07 browser extension (Alby, nos2x, Keys.band) to read and write the collections you belong to. New here? Logging in with a new key, or a new email address below, creates a free account.</p>
     <button id="connectBtn">Log in</button> <span id="connectMsg" class="muted"></span>
     <div id="signupBox" hidden><p>This key has no account yet. Sign up to get a free account: one collection of your own, and 10,000 records.</p>
@@ -168,11 +163,6 @@ async function checkToken(el) {
   return tsToken[el] || ''
 }
 function resetCheck(el) { tsToken[el] = ''; if (window.turnstile && $(el).dataset.on) window.turnstile.reset('#' + el) }
-
-function renderWho() {
-  $('who').innerHTML = ME ? `<span>${esc(ME.profile?.name || ME.npub.slice(0, 16) + '…')}</span><button class="ghost" id="logout">Log out</button>` : ''
-  if (ME) $('logout').onclick = async () => { await post('/logout', {}); location.href = '/' }
-}
 
 function renderProfile(relay) {
   const p = ME.profile, box = $('profile')
@@ -357,7 +347,6 @@ $('kShow').onclick = async () => {
 async function refresh() { ME = await api('/api/me'); show(null) }
 
 function show(relay) {
-  renderWho()
   const path = location.pathname
   $('termsBox').hidden = ME.terms_signed
   $('termsText').textContent = ME.terms_text
@@ -459,7 +448,8 @@ async function renderCommunities() {
 }
 if (location.pathname === '/communities') {  // public: no login needed
   renderCommunities()
-  api('/api/me').then(d => { ME = d; renderWho() }).catch(() => renderWho())
-} else api('/api/me').then(d => { ME = d; show(null) }).catch(() => { $('connect').hidden = false; renderWho(); botCheck('eCheck') })
-</script>
-<script src="/chat.js" defer></script></body></html>
+} else api('/api/me').then(d => { ME = d; show(null) }).catch(() => {
+  $('connect').hidden = false; botCheck('eCheck')
+  if (location.hash === '#signup') $('eAddr').focus()  // the header's Sign up
+})
+</script></body></html>

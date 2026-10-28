@@ -74,7 +74,7 @@
   const save = () => { try { sessionStorage.setItem(KEY, JSON.stringify(C)); } catch {} };
 
   fetch('/dashboard/api/chat').then(r => r.ok ? r.json() : null).then(d => {
-    if (!d) return;  // not an admin: nothing on the page
+    if (!d?.enabled) return;  // not an admin: nothing on the page
     model = d.model; cols = d.collections;
     if (!cols.includes(C.col)) { C.col = cols[0] || ''; C.messages = []; C.log = []; }
     mount(d.configured);
