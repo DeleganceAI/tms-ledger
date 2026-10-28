@@ -22,6 +22,11 @@
   if ($('who-name')) fetch('/api/me').then(r => r.ok ? r.json() : null).then(me => {
     if (!me) return
     $('who-name').textContent = me.profile?.name || me.email || me.npub.slice(0, 12) + '…'
+    if (me.is_admin && !$('site-nav').querySelector('a[href="/admin"]')) {  // admins only; the page itself 404s for anyone else
+      const a = document.createElement('a'); a.href = '/admin'; a.textContent = 'Admin'
+      if (location.pathname === '/admin') a.setAttribute('aria-current', 'page')
+      $('site-nav').querySelector('.end').before(a)
+    }
     // Npubs is for collection owners and site admins (the dashboard asks its API for admins).
     if (me.collections?.some(c => c.role === 'owner'))
       document.querySelectorAll('[data-tab="npubs"]').forEach(a => { a.hidden = false })

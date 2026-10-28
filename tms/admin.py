@@ -27,6 +27,28 @@ SPEND_SQL = """SELECT
     coalesce(sum(tokens), 0) AS tokens, count(*) AS calls
   FROM embed_calls"""
 
+# ponytail: a model counts as embeddings when its name says so ("Qwen3-Embedding-8B"); everything else is chat
+IS_EMBED = "model ILIKE '%%embed%%'"
+
+# Spend per account: a human's own calls plus their Ledger's and agents' (ACCOUNTS.md); keys in no account stand alone.
+BY_ACCOUNT_SQL = f"""WITH k AS (
+    SELECT e.*, coalesce((SELECT a.human FROM accounts a WHERE a.human = e.pubkey OR a.ledger = e.pubkey OR e.pubkey = ANY(a.agents)
+                          LIMIT 1), e.pubkey) AS owner
+    FROM embed_calls e)
+  SELECT k.owner AS pubkey, p.name, count(DISTINCT k.pubkey) AS keys, count(*) AS calls,
+         coalesce(sum(cost_usd) FILTER (WHERE {IS_EMBED}), 0) AS embed,
+         coalesce(sum(cost_usd) FILTER (WHERE NOT {IS_EMBED}), 0) AS chat,
+         coalesce(sum(cost_usd) FILTER (WHERE at > now() - interval '30 days'), 0) AS last_30_days,
+         coalesce(sum(cost_usd), 0) AS cost
+  FROM k LEFT JOIN profiles p ON p.pubkey = k.owner
+  GROUP BY 1, 2 ORDER BY cost DESC, calls DESC"""
+
+# Spend per day for the last 30 days, embeddings and chat apart.
+SPEND_DAYS_SQL = f"""SELECT d::date AS day,
+    coalesce((SELECT sum(cost_usd) FROM embed_calls e WHERE e.at >= d AND e.at < d + interval '1 day' AND {IS_EMBED}), 0) AS embed,
+    coalesce((SELECT sum(cost_usd) FROM embed_calls e WHERE e.at >= d AND e.at < d + interval '1 day' AND NOT {IS_EMBED}), 0) AS chat
+  FROM generate_series(date_trunc('day', now()) - interval '29 days', date_trunc('day', now()), interval '1 day') d ORDER BY d"""
+
 USERS_SQL = """WITH keys AS (
     SELECT unnest(%s::text[]) AS pubkey UNION SELECT pubkey FROM approvals UNION SELECT pubkey FROM admins
     UNION SELECT pubkey FROM members UNION SELECT pubkey FROM events)
@@ -65,6 +87,8 @@ def _report(conn, viewer: str) -> dict:
         "site_admins": [{"pubkey": k, "name": (conn.execute("SELECT name FROM profiles WHERE pubkey = %s", (k,)).fetchone() or {}).get("name")}
                         for k in sorted(L.ADMINS)],
         "spend": conn.execute(SPEND_SQL).fetchone(),
+        "by_account": conn.execute(BY_ACCOUNT_SQL).fetchall(),
+        "spend_days": conn.execute(SPEND_DAYS_SQL).fetchall(),
         "by_pubkey": conn.execute("""SELECT e.pubkey, p.name, count(*) AS calls, sum(e.tokens) AS tokens, sum(e.cost_usd) AS cost
             FROM embed_calls e LEFT JOIN profiles p ON p.pubkey = e.pubkey GROUP BY 1, 2 ORDER BY cost DESC, calls DESC""").fetchall(),
         "by_model": conn.execute("""SELECT model, count(*) AS calls, sum(tokens) AS tokens, sum(cost_usd) AS cost
@@ -93,6 +117,26 @@ def _usd(v) -> str:
     return f"${float(v or 0):,.4f}"
 
 
+def _spend_chart(days: list[dict]) -> str:
+    """The last 30 days' spend as stacked bars, embeddings under chat; hover a day for its numbers."""
+    w, h, top = 22, 120, max([float(d["embed"]) + float(d["chat"]) for d in days] + [0.0001])
+    bars = []
+    for i, d in enumerate(days):
+        e, c = float(d["embed"]), float(d["chat"])
+        he, hc = h * e / top, h * c / top
+        x = i * w + 2
+        bars.append(f'<g><title>{d["day"].isoformat()}: embeddings {_usd(e)}, chat {_usd(c)}</title>'
+                    f'<rect x="{x}" y="0" width="{w - 4}" height="{h}" fill="transparent"/>'
+                    f'<rect x="{x}" y="{h - he:.1f}" width="{w - 4}" height="{he:.1f}" fill="var(--accent)"/>'
+                    f'<rect x="{x}" y="{h - he - hc:.1f}" width="{w - 4}" height="{hc:.1f}" fill="var(--brand)"/></g>')
+    total = sum(float(d["embed"]) + float(d["chat"]) for d in days)
+    return (f'<div class="chart"><svg viewBox="0 0 {w * len(days)} {h}" preserveAspectRatio="none" role="img" '
+            f'aria-label="Spend per day for the last 30 days, {_usd(total)} in all">{"".join(bars)}</svg>'
+            f'<div class="axis"><span>{days[0]["day"].isoformat()}</span><span>peak {_usd(top)} a day</span><span>today</span></div>'
+            f'<div class="axis"><span><i style="background:var(--brand)"></i>chat</span><span><i style="background:var(--accent)"></i>embeddings</span>'
+            f'<span>{_usd(total)} in 30 days</span></div></div>')
+
+
 def _who(pubkey, name) -> str:
     if not pubkey:
         return "—"
@@ -113,6 +157,8 @@ table{{border-collapse:collapse;background:var(--panel);width:100%;margin-bottom
 th{{font-size:12px;color:var(--ink3)}}td{{font-variant-numeric:tabular-nums}}.mono{{font-family:var(--mono);font-size:12px}}
 form{{display:inline}}main button{{font:inherit;padding:3px 10px;border-radius:5px;border:1px solid var(--brand);background:var(--brand);color:var(--brand-ink);cursor:pointer}}
 main button.ghost{{background:none;color:var(--ink);border-color:var(--line)}}form.add{{display:block;margin:6px 0}}form.add input{{font:13px var(--mono);padding:4px 6px;border:1px solid var(--line);border-radius:5px;background:var(--panel);color:var(--ink);max-width:100%}}td.note{{white-space:pre-wrap;max-width:420px}}
+.chart{{background:var(--panel);border:1px solid var(--line);padding:10px 12px 6px;max-width:760px}}.chart svg{{display:block;width:100%;height:120px}}
+.axis{{display:flex;justify-content:space-between;gap:12px;color:var(--ink3);font:11px var(--mono);margin-top:4px}}.axis i{{display:inline-block;width:9px;height:9px;margin-right:4px;vertical-align:-1px}}
 </style></head><body>{site.header(True, "/admin")}<main id="main">
 <h1>Admin</h1>
 <h2>Free accounts ({len(r["free"])})</h2>
@@ -144,6 +190,13 @@ main button.ghost{{background:none;color:var(--ink);border-color:var(--line)}}fo
 <p class="mono">Embeddings at ${L.EMBED_PRICE_PER_MTOK} per million tokens (EMBED_PRICE_PER_MTOK), local endpoints $0; chat at ${chat.PRICE_IN} in / ${chat.PRICE_OUT} out (CHAT_PRICE_IN_PER_MTOK, CHAT_PRICE_OUT_PER_MTOK).</p>
 <h2>Spend by model</h2>
 {_table(["Model", "Calls", "Tokens", "Cost"], [[escape(x["model"] or "—"), x["calls"], f"{x['tokens']:,}", _usd(x["cost"])] for x in r["by_model"]])}
+<h2>Spend per day (last 30 days)</h2>
+{_spend_chart(r["spend_days"])}
+<h2>Spend by account</h2>
+<p class="mono">An account is a person with their Ledger and agents; a key in no account is its own row.</p>
+{_table(["Account", "Keys", "Calls", "Embeddings", "Chat", "Last 30 days", "All time"],
+        [[_who(x["pubkey"], x["name"]), x["keys"], x["calls"], _usd(x["embed"]), _usd(x["chat"]), _usd(x["last_30_days"]), _usd(x["cost"])]
+         for x in r["by_account"]])}
 <h2>Spend by pubkey</h2>
 {_table(["Who", "Calls", "Tokens", "Cost"], [[_who(x["pubkey"], x["name"]), x["calls"], f"{x['tokens']:,}", _usd(x["cost"])] for x in r["by_pubkey"]])}
 <h2>Spend by collection</h2>

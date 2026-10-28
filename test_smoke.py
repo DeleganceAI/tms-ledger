@@ -899,6 +899,15 @@ def signup(client, W, S) -> None:
         client.cookies.set(W.COOKIE, W.make_cookie(PK[OWNER]))  # OWNER is the admin
         page = client.get("/admin").text
         assert "Free accounts" in page and E.bech32_encode("npub", vpk) in page and "Access requests" not in page
+        assert "Spend by account" in page and "Spend per day (last 30 days)" in page and 'aria-label="Spend per day' in page
+        assert client.get("/api/me").json()["is_admin"], "admins get the header's Admin link"
+        from tms import admin as A
+        with L.connect() as conn:
+            rep = A.report(conn, PK[OWNER])
+        total = float(rep["spend"]["all_time"])
+        assert abs(sum(float(x["cost"]) for x in rep["by_account"]) - total) < 1e-9, "accounts add up to all spend"
+        assert all(abs(float(x["embed"]) + float(x["chat"]) - float(x["cost"])) < 1e-9 for x in rep["by_account"])
+        assert len(rep["spend_days"]) == 30
         assert client.post(f"/admin/lift/{vpk}", headers={"Origin": "https://evil.example"}).status_code == 403
         assert client.post("/admin/lift", data={"npub": "nope"}).status_code == 400
         client.cookies.set(W.COOKIE, W.make_cookie(PK[BOB]))
