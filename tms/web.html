@@ -17,7 +17,7 @@ label.check{display:flex;align-items:center;gap:8px;margin-top:10px}label.check 
 @media(max-width:640px){.aboutrow{grid-template-columns:1fr auto auto}.aboutrow b{grid-column:1/-1}}
 .cgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}.cgrid>p{grid-column:1/-1;margin:0}
 .ccard{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px 12px;display:grid;gap:4px}
-.ccard b{font:600 14px var(--mono)}.ccard .counts{color:var(--ink3);font-size:12.5px}.ccard .counts b{font:600 13px var(--sans);color:var(--ink)}
+.ccard b{font:600 14px var(--mono)}.ccard .join{margin-top:6px;font-size:13px}.ccard .counts{color:var(--ink3);font-size:12.5px}.ccard .counts b{font:600 13px var(--sans);color:var(--ink)}
 .pubtag{font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:#1e1826;background:var(--accent);border-radius:999px;padding:1px 6px;margin-left:4px}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}@media(max-width:640px){.grid2{grid-template-columns:1fr}}
 .row{display:grid;grid-template-columns:2fr 130px 2fr 2fr 28px;gap:6px;align-items:start;margin-bottom:6px}@media(max-width:720px){.row{grid-template-columns:1fr}}
@@ -97,9 +97,10 @@ details.connect{margin-top:14px;border-top:1px solid var(--line);padding-top:10p
     <label class="check"><input type="checkbox" id="aPublic"> Public: show its name, topic and record counts on Communities (its records stay private)</label>
     <div class="actions"><button id="aSave">Sign and save</button><span id="aMsg"></span></div></section>
   <section id="communities" hidden><h2>Communities</h2>
-    <p class="muted" style="margin-top:0">Collections whose owners chose to show them. You see each one's name, topic and record counts; the records themselves stay private to its members. To join one, ask its owner.</p>
+    <p class="muted" style="margin-top:0">Collections whose owners chose to show them. You see each one's name, topic and record counts; the records themselves stay private to its members. Ask to join one and its owner decides.</p>
     <div id="cList" class="cgrid"></div></section>
   <section id="members" hidden><h2>Members of <span id="mSlug"></span></h2><table id="mTable"></table>
+    <div id="reqBox" hidden><h2 style="margin-top:18px">Asking to join</h2><div id="reqList"></div></div>
     <h2 style="margin-top:18px">People</h2>
     <p class="muted" style="margin:0">Add people, not their bots: each person picks which of their own agents work here. Removing someone removes their agents with them. The owner always stays, and admins stay members.</p>
     <div id="mList"></div>
@@ -487,6 +488,18 @@ async function renderMembers(slug) {
       m.ledger && `Ledger: ${who(m.ledger)}`, m.agents?.length && `Agents: ${m.agents.map(who).join(', ')}`].filter(Boolean).join(' · ')}</div>` : ''
     $('mTable').innerHTML = '<tr><th>Name</th><th>npub</th></tr>' + d.members.map(m =>
       `<tr><td>${esc(m.name || '—')}${roleLabel(m)}<div class="muted">${esc(m.about || '')}</div>${bots(m)}</td><td class="mono">${esc(m.npub)}</td></tr>`).join('')
+    // Requests from Communities: accepting signs the members list with them added; dismissing hides it.
+    $('reqBox').hidden = !d.requests.length
+    $('reqList').innerHTML = `<ul class="keys">${d.requests.map(r => `<li style="flex-wrap:wrap"><span class="nm"><b>${esc(r.name || 'No profile yet')}</b>
+        <code title="${esc(r.npub)}">${esc(shortNpub(r.npub))}</code>${r.note ? `<div class="muted" style="white-space:normal">“${esc(r.note)}”</div>` : ''}</span>
+        <button data-pk="${esc(r.pubkey)}" class="acc">Accept</button><button class="ghost dis" data-pk="${esc(r.pubkey)}">Dismiss</button></li>`).join('')}</ul><span class="msg muted"></span>`
+    const reqMsg = $('reqList').querySelector('.msg'), people = d.members.filter(m => m.role === 'member').map(m => m.pubkey)
+    $('reqList').querySelectorAll('.acc').forEach(b => b.onclick = async () => {
+      try { await publish([await sign(4705, {collection: slug, members: [...people, b.dataset.pk]})]); renderMembers(slug) }
+      catch (e) { reqMsg.className = 'msg err'; reqMsg.textContent = e.message } })
+    $('reqList').querySelectorAll('.dis').forEach(b => b.onclick = async () => {
+      try { await post(`/api/c/${encodeURIComponent(slug)}/join/${b.dataset.pk}/dismiss`, {}); renderMembers(slug) }
+      catch (e) { reqMsg.className = 'msg err'; reqMsg.textContent = e.message } })
     keyList('mList', d.members.filter(m => m.role === 'member'), async members => {
       await publish([await sign(4705, {collection: slug, members})]); renderMembers(slug) }, {what: "a person", none: 'Only the owner and admins so far.'})
     $('adminBox').hidden = d.caller_role !== 'owner'
@@ -506,15 +519,33 @@ async function renderMembers(slug) {
 async function renderCommunities() {
   $('communities').hidden = false
   const n = (v, one, many) => `<b>${Number(v).toLocaleString('en-US')}</b> ${v === 1 ? one : many}`
+  // Each card's way in: open it if you're a member, ask to join if you're signed in, or log in first.
+  const join = c => !ME ? `<a href="/connect?next=/communities">Log in to ask to join</a>`
+    : ME.collections.some(x => x.slug === c.slug) ? `<a href="/?c=${encodeURIComponent(c.slug)}">You're a member: open it</a>`
+    : ME.requested?.includes(c.slug) ? '<span class="ok">Asked. The owner will see your request.</span>'
+    : `<button class="ghost ask" data-slug="${esc(c.slug)}">Ask to join</button>`
   try {
     const d = await api('/showcase.json')
     $('cList').innerHTML = d.collections.length ? d.collections.map(c => `<div class="ccard"><b>${esc(c.slug)}</b><span>${esc(c.topic)}</span>
-      <span class="counts">${n(c.evidence, 'evidence', 'evidence')} · ${n(c.claims, 'claim', 'claims')} · ${n(c.links, 'link', 'links')} · ${n(c.contradictions, 'contradiction', 'contradictions')}</span></div>`).join('')
-      : '<p class="muted">No collections are public yet. Owners can make theirs public under Topic and visibility on <a href="/connect">Login</a>.</p>'
+      <span class="counts">${n(c.evidence, 'evidence', 'evidence')} · ${n(c.claims, 'claim', 'claims')} · ${n(c.links, 'link', 'links')} · ${n(c.contradictions, 'contradiction', 'contradictions')}</span>
+      <div class="join">${join(c)}</div></div>`).join('')
+      : '<p class="muted">No collections are public yet. Owners can make theirs public under Topic and visibility on their <a href="/connect">Account</a> page.</p>'
   } catch (e) { $('cList').innerHTML = `<p class="err">${esc(e.message)}</p>` }
+  $('cList').querySelectorAll('button.ask').forEach(b => b.onclick = () => {
+    const box = b.parentNode, slug = b.dataset.slug
+    box.innerHTML = `<label>A note for the owner (optional)<textarea maxlength="280" placeholder="Who you are and why you'd like to join" style="min-height:60px;font-family:var(--sans)"></textarea></label>
+      <div class="actions" style="margin-top:6px"><button>Send request</button><span class="msg muted"></span></div>`
+    box.querySelector('textarea').focus()
+    box.querySelector('button').onclick = async () => {
+      const msg = box.querySelector('.msg')
+      try { await post(`/api/c/${encodeURIComponent(slug)}/join`, {note: box.querySelector('textarea').value}); (ME.requested ||= []).push(slug)
+        box.innerHTML = '<span class="ok">Asked. The owner will see your request.</span>' }
+      catch (e) { msg.className = 'msg err'; msg.textContent = e.message }
+    }
+  })
 }
 if (location.pathname === '/communities') {  // public: no login needed
-  renderCommunities()
+  api('/api/me').then(d => { ME = d }).catch(() => {}).finally(renderCommunities)
 } else api('/api/me').then(d => { ME = d; if (!(location.pathname === '/connect' && goNext())) show(null) }).catch(() => {
   $('connect').hidden = false; botCheck('eCheck')
   if (NEXT) $('why').textContent = WHY.find(([re]) => re.test(NEXT))[1]

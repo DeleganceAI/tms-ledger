@@ -388,6 +388,19 @@ CREATE TABLE signups (
     at     timestamptz NOT NULL DEFAULT now()
 );
 
+-- Requests to join a public collection, from Communities (operational, not ledger data). An owner
+-- or admin accepts one by signing a members list that names the requester, so a request is pending
+-- while its key is not a member and nobody dismissed it. One per key and collection.
+CREATE TABLE join_requests (
+    collection   text NOT NULL REFERENCES collections (slug),
+    pubkey       text NOT NULL CHECK (pubkey ~ '^[0-9a-f]{64}$'),
+    note         text NOT NULL DEFAULT '' CHECK (char_length(note) <= 280),
+    at           timestamptz NOT NULL DEFAULT now(),
+    dismissed_by text,
+    dismissed_at timestamptz,
+    PRIMARY KEY (collection, pubkey)
+);
+
 -- Admins added in /admin by a site admin (TMS_ADMINS). Same powers as a site admin, except
 -- adding and removing admins. Rows are deleted on removal: this is access control, not ledger data.
 CREATE TABLE admins (

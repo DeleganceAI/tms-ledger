@@ -934,6 +934,35 @@ def showcase() -> None:
         page = client.get("/communities")  # public page, no login
         assert page.status_code == 200 and 'id="communities"' in page.text and "/showcase.json" in page.text
         assert 'href="/communities"' in client.get("/").text and "tab-communities" not in client.get("/").text
+        # Ask to join: a signed-in key with an account asks; the owner sees it, and accepting is a members list.
+        from tms import web as W
+        sent = []
+        from tms import email_login as EL
+        real_send, EL.send = EL.send, lambda *a, **k: sent.append(a)
+        try:
+            assert client.post("/api/c/smoke/join", json={}).status_code == 401
+            client.cookies.set(W.COOKIE, W.make_cookie(PK[STRANGER]))  # no account: can't ask
+            assert client.post("/api/c/smoke/join", json={}).status_code == 403
+            client.cookies.set(W.COOKIE, W.make_cookie(PK[BOB]))
+            assert "already a member" in client.post("/api/c/smoke/join", json={}).json()["error"]
+            client.cookies.set(W.COOKIE, W.make_cookie(PK[OUTSIDER]))
+            assert client.post("/api/c/other/join", json={}).status_code == 403, "private collections take no requests"
+            r = client.post("/api/c/smoke/join", json={"note": "Let me in " + "x" * 400})
+            assert r.json() == {"ok": True, "status": "asked"} and client.post("/api/c/smoke/join", json={}).json()["status"] == "already asked"
+            assert "smoke" in client.get("/api/me").json()["requested"]
+            client.cookies.set(W.COOKIE, W.make_cookie(PK[BOB]))  # a plain member sees no requests and can't dismiss
+            assert client.get("/api/c/smoke").json()["requests"] == []
+            assert client.post(f"/api/c/smoke/join/{PK[OUTSIDER]}/dismiss").status_code == 403
+            client.cookies.set(W.COOKIE, W.make_cookie(PK[OWNER]))
+            reqs = client.get("/api/c/smoke").json()["requests"]
+            assert [q["pubkey"] for q in reqs] == [PK[OUTSIDER]] and len(reqs[0]["note"]) == 280 and reqs[0]["npub"].startswith("npub1")
+            assert next(c for c in client.get("/api/me").json()["collections"] if c["slug"] == "smoke")["requests"] == 1
+            assert client.post(f"/api/c/smoke/join/{PK[OUTSIDER]}/dismiss").json() == {"ok": True}
+            assert client.get("/api/c/smoke").json()["requests"] == [], "dismissed"
+            assert not sent, "the smoke owner has no email account, so no email"
+        finally:
+            EL.send = real_send
+            client.cookies.clear()
         with L.connect() as conn:
             L.publish(conn, [sign(OWNER, E.ABOUT, {"collection": "smoke", "topic": "Histamine intolerance and MCAS", "public": False},
                                   created_at=int(time.time()) + 1)])
