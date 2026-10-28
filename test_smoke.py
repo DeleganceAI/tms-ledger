@@ -658,11 +658,18 @@ def server(ids) -> None:
 
         # Web pages: Bob is a member of smoke, not its owner; the owner manages members; export verifies.
         from tms import web as W
-        assert "Login" in client.get("/").text and client.get("/submit").status_code == 200
+        home = client.get("/").text  # signed in, home is your collections as pin boards
+        assert 'id="boardwrap"' in home and "<title>Paranoy · Collections</title>" in home and client.get("/submit").status_code == 200
+        assert "Log in or sign up" in client.get("/connect").text
         me = client.get("/api/me").json()
         assert me["pubkey"] == PK[BOB] and [c["slug"] for c in me["collections"]] == ["smoke"] and "Version" in me["terms_text"]
         assert {m["name"] for m in client.get("/api/c/smoke").json()["members"]} == {"Owner", "Bob"}
         assert client.get("/api/c/outside").status_code == 403
+        b = client.get("/api/c/smoke/board").json()  # the pin board: records and the strings between them
+        pins = {r["id"] for r in b["evidence"] + b["claims"]}
+        assert b["evidence"] and b["claims"] and b["links"] and all(x["from"] in pins and x["to"] in pins for x in b["links"]), b
+        assert b["totals"]["evidence"] >= len(b["evidence"]) and all(len(e["excerpt"]) <= 280 for e in b["evidence"])
+        assert client.get("/api/c/outside/board").status_code == 403
         assert client.get("/c/smoke/members").status_code == 403
         lines = client.get("/c/smoke/export.jsonl").text.splitlines()
         assert lines and all(E.verify(json.loads(x)) for x in lines)

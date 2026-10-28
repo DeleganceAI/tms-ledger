@@ -1,7 +1,7 @@
 """Browser side (EVENTS.md section 6): NIP-07 login cookie, the pages, and their JSON.
 
-    /                       logged out: the office, totals and Sign up; logged in: as /connect
-    /connect                log in or sign up, profile, terms, your collections
+    /                       logged out: the office, totals and Sign up; logged in: your collections as pin boards
+    /connect                log in or sign up; then your account: profile, terms, collection settings, agents
     /submit                 sign and publish evidence, claims and links
     /office                 ambient animation; no ledger data
     /favicon.*              the Paranoy icons in tms/brand
@@ -37,6 +37,7 @@ from . import site
 COOKIE = "tms"
 COOKIE_TTL = 12 * 3600
 PAGE_FILE = Path(__file__).with_name("web.html")
+COLLECTIONS_FILE = Path(__file__).with_name("collections.html")
 OFFICE_FILE = Path(__file__).with_name("office.html")
 DOCS_FILE = Path(__file__).resolve().parent.parent / "DOCS.md"
 # Extra docs pages, served at /docs/<name> with the same template.
@@ -229,8 +230,9 @@ async def page(request: Request):
 
 
 async def home(request: Request):
-    """Logged out, the landing page is the office; logged in, the connect and collections page."""
-    resp = await page(request) if cookie_pubkey(request) else await office(request)
+    """Logged out, the landing page is the office; logged in, your collections and their pin boards."""
+    resp = (HTMLResponse(with_header(request, COLLECTIONS_FILE.read_text(encoding="utf-8"))) if cookie_pubkey(request)
+            else await office(request))
     resp.headers["Cache-Control"] = "private, no-store"  # the page depends on the cookie
     return resp
 
@@ -344,6 +346,38 @@ async def collection(request: Request) -> JSONResponse:
                          "topic": about["topic"] if about else None, "public": bool(about and about["public"])})
 
 
+BOARD_MAX = 300  # per kind; ponytail: the newest 300 evidence and claims, paging if a board ever needs more
+
+
+def board(conn, pubkey: str, slug: str) -> dict:
+    """One collection as a pin board: its newest evidence and claims, the links between them and its
+    contradictions. Members only. The page lays it out; nothing about the layout is stored."""
+    L.require_member(conn, pubkey, slug)
+    who = "coalesce((SELECT p.name FROM profiles p WHERE p.pubkey = x.pubkey), left(x.pubkey, 12)) AS author"
+    evidence = [L._clean(r) for r in conn.execute(f"""SELECT x.id, x.pubkey, {who}, x.title, x.source, x.url, x.received_at,
+            left(x.text, 280) AS excerpt FROM evidence x WHERE x.collection = %s ORDER BY x.received_at DESC, x.id LIMIT %s""", (slug, BOARD_MAX))]
+    claims = [L._clean(r) for r in conn.execute(f"""SELECT x.id, x.pubkey, {who}, x.text, x.received_at
+            FROM claims x WHERE x.collection = %s ORDER BY x.received_at DESC, x.id LIMIT %s""", (slug, BOARD_MAX))]
+    shown = [r["id"] for r in evidence + claims]
+    links = [L._clean(r) for r in conn.execute("""SELECT x.id, x.from_id AS "from", x.to_id AS "to", x.relation
+            FROM links x WHERE x.collection = %s AND x.from_id = ANY(%s) AND x.to_id = ANY(%s)""", (slug, shown, shown))]
+    contradictions = [L._clean(r) for r in conn.execute("""SELECT x.id, x.reason, x.claim_ids AS claims FROM contradictions x
+            WHERE x.collection = %s AND x.claim_ids && %s::text[] ORDER BY x.received_at DESC LIMIT %s""", (slug, shown, BOARD_MAX))]
+    totals = L._clean(conn.execute("""SELECT count(*) FILTER (WHERE kind = 4701) AS evidence, count(*) FILTER (WHERE kind = 4702) AS claims
+            FROM events WHERE collection = %s""", (slug,)).fetchone())
+    return {"slug": slug, "evidence": evidence, "claims": claims, "links": links, "contradictions": contradictions, "totals": totals}
+
+
+async def board_json(request: Request) -> JSONResponse:
+    pubkey = cookie_pubkey(request)
+    if pubkey is None:
+        return JSONResponse({"error": "not logged in"}, status_code=401)
+    try:
+        return JSONResponse(await db(board, pubkey, request.path_params["slug"]))
+    except ValueError as err:
+        return _error(err)
+
+
 async def publish(request: Request) -> JSONResponse:
     """Signed events need no cookie: each one is its own proof."""
     def run(body):
@@ -427,6 +461,7 @@ routes = [
     Route("/logout", logout, methods=["POST"]),
     Route("/api/me", me),
     Route("/api/c/{slug}", collection),
+    Route("/api/c/{slug}/board", board_json),
     Route("/api/publish", publish, methods=["POST"]),
     Route("/api/fetch", fetch),
 ]

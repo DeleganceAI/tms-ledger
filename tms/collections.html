@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Paranoy · Collections</title>
+<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/site.css?v=SITE_V">
+<style>
+*{box-sizing:border-box}html,body{height:100%}body{margin:0;font:14px/1.45 var(--sans);display:flex;flex-direction:column}
+a{color:var(--accent)}[hidden]{display:none!important}
+.muted{color:var(--ink3)}.mono{font-family:var(--mono)}
+#main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(260px,330px) 1fr}
+/* left: one card per collection */
+#side{border-right:1px solid var(--line2);overflow:auto;padding:14px;display:flex;flex-direction:column;gap:10px}
+#side h1{font:600 12px var(--sans);letter-spacing:.06em;text-transform:uppercase;color:var(--ink3);margin:2px 2px 2px}
+.ccard{display:block;width:100%;text-align:left;font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:11px 13px;cursor:pointer}
+.ccard:hover{border-color:var(--ink3)}.ccard[aria-pressed="true"]{border-color:var(--brand);box-shadow:0 0 0 1px var(--brand) inset}
+.ccard .t{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.ccard b{font:600 14px var(--mono);overflow-wrap:anywhere}
+.ccard .topic{color:var(--ink2);font-size:13px;margin:3px 0 6px}.ccard .counts{color:var(--ink3);font-size:12px}.ccard .counts b{font:600 12.5px var(--sans);color:var(--ink)}
+.tag{font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;border-radius:999px;padding:1px 7px;background:var(--line2);color:var(--ink2)}
+.tag.pub{background:var(--accent);color:#1e1826}
+.acts{display:flex;gap:12px;flex-wrap:wrap;margin:2px 4px 0;font-size:12.5px}
+.new{display:flex;align-items:center;justify-content:center;gap:8px;border:1px dashed var(--line);border-radius:10px;padding:14px;color:var(--ink3);text-decoration:none}
+.new:hover{color:var(--ink);border-color:var(--ink3)}.new b{font-size:22px;font-weight:300;color:var(--brand);line-height:1}
+.note{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;font-size:13px}
+/* right: the pin board */
+#boardwrap{position:relative;min-width:0;min-height:0;display:flex;flex-direction:column}
+.bar{display:flex;align-items:center;gap:8px 14px;flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid var(--line2);font-size:12.5px}
+.bar h2{margin:0;font:600 14px var(--mono)}.bar .grow{flex:1}
+.zoom{display:flex;gap:4px}.zoom button{font:inherit;min-width:30px;height:28px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--ink);cursor:pointer}
+.legend{display:flex;gap:10px;color:var(--ink3);font-size:11.5px;flex-wrap:wrap}.legend i{display:inline-block;width:14px;height:3px;border-radius:2px;margin-right:4px;vertical-align:3px}
+#board{position:relative;flex:1;min-height:0;overflow:hidden;cursor:grab;touch-action:none;outline:none;
+  background:radial-gradient(circle at 1px 1px,rgba(255,255,255,.07) 1px,transparent 1.5px) 0 0/22px 22px,#3b3036}
+#board.drag{cursor:grabbing}#board:focus-visible{box-shadow:inset 0 0 0 2px var(--brand)}
+#world{position:absolute;left:0;top:0;transform-origin:0 0}
+#world svg{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}
+.pin{position:absolute;width:190px;padding:10px 11px 9px;border:0;border-radius:3px;text-align:left;font:12px/1.35 var(--sans);cursor:pointer;
+  box-shadow:1px 3px 8px rgba(20,10,10,.4);transition:opacity .15s,box-shadow .15s}
+.pin::before{content:"";position:absolute;left:50%;top:-5px;width:10px;height:10px;margin-left:-5px;border-radius:50%;background:var(--brand);box-shadow:inset -1px -1px 0 rgba(0,0,0,.3),0 1px 2px rgba(0,0,0,.4)}
+.pin.evidence{background:#fbf8f2;color:#3a3144}.pin.claim{background:#fdeeb2;color:#3a2f10;width:170px}
+.pin.claim::before{background:#8ab6f9}
+.pin b{display:block;font-size:12.5px;margin-bottom:3px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}
+.pin .s{color:#7a6f84;font-size:11px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.pin.claim span{overflow:hidden;display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical}
+.pin:hover,.pin.sel{box-shadow:0 0 0 2px var(--brand),2px 6px 14px rgba(20,10,10,.5);z-index:2}
+#world.focus .pin:not(.near){opacity:.25}#world.focus line:not(.near),#world.focus path:not(.near){opacity:.12}
+.empty{position:absolute;inset:0;display:grid;place-items:center;color:var(--ink2);text-align:center;padding:24px}
+/* the record a pin stands for */
+#detail{position:absolute;top:52px;right:12px;bottom:12px;width:min(380px,calc(100% - 24px));background:var(--bg2);border:1px solid var(--line);border-radius:10px;
+  box-shadow:0 12px 32px rgba(0,0,0,.4);display:flex;flex-direction:column;z-index:5}
+#detail .dh{display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--line2)}#detail .dh b{flex:1;font-size:13px}
+#detail .dh button{font:inherit;background:none;border:1px solid var(--line);color:var(--ink2);border-radius:5px;padding:0 8px;height:24px;cursor:pointer}
+#detail .db{padding:12px 14px;overflow:auto;font-size:13px}#detail .db p{margin:0 0 10px}
+#detail h3{font:600 11px var(--sans);letter-spacing:.06em;text-transform:uppercase;color:var(--ink3);margin:14px 0 4px}
+#detail .li{padding:6px 0;border-top:1px solid var(--line2)}#detail .q{font-style:italic;color:var(--ink2)}
+.rel{font:600 10.5px var(--mono);padding:0 5px;border-radius:3px}.rel.SUPPORTS{color:#1d3b2e;background:var(--good)}.rel.REBUTS{color:#fff;background:var(--crit)}.rel.QUALIFIES{color:#3a2a00;background:var(--warn)}
+@media(max-width:760px){
+  body{height:auto}#main{display:block}
+  #side{border-right:0;border-bottom:1px solid var(--line2);flex-direction:row;overflow-x:auto;padding:10px 12px}
+  #side h1{display:none}#side>div,#side>.new{flex:0 0 240px}#side>.note{flex:0 0 260px}.legend{display:none}
+  #boardwrap{height:72dvh}#detail{top:auto;left:8px;right:8px;width:auto;height:55%}
+}
+</style></head><body>
+<!--HEADER-->
+<div id="main">
+  <section id="side" aria-label="Your collections"><h1>Your collections</h1><div class="note muted">Loading…</div></section>
+  <section id="boardwrap" aria-label="Pin board">
+    <div class="bar"><h2 id="bTitle">&nbsp;</h2><span class="muted" id="bNote"></span><span class="grow"></span>
+      <span class="legend" aria-hidden="true"><span><i style="background:var(--good)"></i>supports</span><span><i style="background:var(--warn)"></i>qualifies</span><span><i style="background:var(--crit)"></i>rebuts</span><span><i style="background:repeating-linear-gradient(90deg,var(--bad) 0 4px,transparent 4px 6px)"></i>contradiction</span></span>
+      <span class="zoom"><button id="zOut" type="button" aria-label="Zoom out">−</button><button id="zFit" type="button" aria-label="Fit the board to the view">Fit</button><button id="zIn" type="button" aria-label="Zoom in">+</button></span></div>
+    <div id="board" tabindex="0" aria-label="Pin board: drag or use the arrow keys to pan, scroll or + and − to zoom. Tab to a pin and press Enter to open it.">
+      <div id="world"><svg id="strings" width="1" height="1"></svg></div>
+    </div>
+    <aside id="detail" hidden aria-live="polite"><div class="dh"><b id="dTitle"></b><button id="dClose" type="button" aria-label="Close (Esc)">✕</button></div><div class="db" id="dBody"></div></aside>
+  </section>
+</div>
+<script>
+const $ = id => document.getElementById(id)
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))
+const n = (v, one, many = one + 's') => `<b>${Number(v).toLocaleString('en-US')}</b> ${v === 1 ? one : many}`
+async function api(path) {
+  const r = await fetch(path), d = await r.json().catch(() => ({}))
+  if (r.status === 401) { location.href = '/connect?next=' + encodeURIComponent(location.pathname + location.search); throw new Error('not logged in') }
+  if (!r.ok) throw new Error(d.error || `${r.status} ${r.statusText}`)
+  return d
+}
+let ME = null, current = null
+
+// ------------------------------------------------------------ the cards
+function renderSide() {
+  const cs = ME.collections, pick = new URLSearchParams(location.search).get('c')
+  const cards = cs.map(c => `<div><button class="ccard" type="button" data-slug="${esc(c.slug)}" aria-pressed="false">
+      <span class="t"><b>${esc(c.slug)}</b>${c.role === 'owner' || c.role === 'admin' ? `<span class="tag">${c.role}</span>` : ''}${c.public ? '<span class="tag pub">public</span>' : ''}</span>
+      ${c.topic ? `<div class="topic">${esc(c.topic)}</div>` : '<div class="topic muted">No topic yet</div>'}
+      <div class="counts">${n(c.evidence, 'evidence', 'evidence')} · ${n(c.claims, 'claim')} · ${n(c.links, 'link')} · ${n(c.contradictions, 'contradiction')} · ${n(c.members.length, 'member')}</div></button>
+    <div class="acts">${c.role === 'owner' || c.role === 'admin' ? `<a href="/c/${esc(c.slug)}/members">Members</a>` : ''}<a href="/c/${esc(c.slug)}/export.jsonl">Export</a></div></div>`).join('')
+  $('side').innerHTML = '<h1>Your collections</h1>' + (cs.length ? cards : '<div class="note">You are not in any collection yet. Create one, or ask an owner to add you.</div>')
+    + (ME.can_create ? '<a class="new" href="/connect#new"><b>+</b>New collection</a>' : '')
+    + (ME.terms_signed ? '' : '<div class="note">Before you write, read and sign the terms on your <a href="/connect">Account</a> page.</div>')
+  $('side').querySelectorAll('.ccard').forEach(b => b.onclick = () => select(b.dataset.slug))
+  const first = cs.find(c => c.slug === pick) || cs[0]
+  if (first) select(first.slug, true)
+  else { $('bTitle').textContent = ''; $('board').insertAdjacentHTML('beforeend', '<div class="empty">Your collections show here as pin boards.</div>') }
+}
+
+async function select(slug, initial) {
+  current = slug
+  $('side').querySelectorAll('.ccard').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.slug === slug)))
+  if (!initial) history.replaceState(null, '', '/?c=' + encodeURIComponent(slug))
+  $('bTitle').textContent = slug; $('bNote').textContent = 'loading…'; closeDetail()
+  try {
+    const d = await api(`/api/c/${encodeURIComponent(slug)}/board`)
+    if (current !== slug) return
+    const more = d.totals.evidence > d.evidence.length || d.totals.claims > d.claims.length
+    $('bNote').textContent = more ? `newest ${d.evidence.length} of ${d.totals.evidence} evidence, ${d.claims.length} of ${d.totals.claims} claims` : ''
+    draw(d)
+  } catch (e) { $('bNote').textContent = e.message }
+}
+
+// ------------------------------------------------------------ the board
+// Layout is computed on every load and never stored: a force layout (strings pull linked pins
+// together, every pin pushes the others away), then a pass that separates overlapping pins.
+const W = {evidence: 190, claim: 170}, H = {evidence: 92, claim: 96}
+const hash = s => { let h = 2166136261; for (const c of s) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return (h >>> 0) / 4294967296 }
+function layout(nodes, edges) {
+  const N = nodes.length, idx = new Map(nodes.map((v, i) => [v.id, i]))
+  nodes.forEach((v, i) => { const a = hash(v.id) * Math.PI * 2, r = 120 + Math.sqrt(i) * 70
+    v.x = Math.cos(a) * r + (v.kind === 'evidence' ? -150 : 150); v.y = Math.sin(a) * r })
+  const E = edges.map(e => [idx.get(e.a), idx.get(e.b), e.len]).filter(([a, b]) => a != null && b != null)
+  // ponytail: O(n²) repulsion, fine for the 600 pins a board holds; Barnes-Hut if boards grow
+  for (let it = 0, t = 40; it < 260; it++, t *= 0.985) {
+    const fx = new Float64Array(N), fy = new Float64Array(N)
+    for (let i = 0; i < N; i++) for (let j = i + 1; j < N; j++) {
+      let dx = nodes[i].x - nodes[j].x, dy = nodes[i].y - nodes[j].y, d2 = dx * dx + dy * dy + 1
+      const f = 60000 / d2, d = Math.sqrt(d2); dx /= d; dy /= d
+      fx[i] += dx * f; fy[i] += dy * f; fx[j] -= dx * f; fy[j] -= dy * f
+    }
+    for (const [a, b, len] of E) {
+      const dx = nodes[b].x - nodes[a].x, dy = nodes[b].y - nodes[a].y, d = Math.hypot(dx, dy) || 1, f = (d - len) * 0.06
+      fx[a] += dx / d * f; fy[a] += dy / d * f; fx[b] -= dx / d * f; fy[b] -= dy / d * f
+    }
+    for (let i = 0; i < N; i++) {
+      fx[i] -= nodes[i].x * 0.004; fy[i] -= nodes[i].y * 0.004  // a little gravity keeps loners near
+      const m = Math.hypot(fx[i], fy[i]) || 1, s = Math.min(m, t) / m
+      nodes[i].x += fx[i] * s; nodes[i].y += fy[i] * s
+    }
+  }
+  for (let pass = 0; pass < 40; pass++) {  // no pin covers another
+    let moved = false
+    for (let i = 0; i < N; i++) for (let j = i + 1; j < N; j++) {
+      const a = nodes[i], b = nodes[j], ox = (W[a.kind] + W[b.kind]) / 2 + 18 - Math.abs(a.x - b.x), oy = (H[a.kind] + H[b.kind]) / 2 + 18 - Math.abs(a.y - b.y)
+      if (ox > 0 && oy > 0) { moved = true
+        if (ox < oy) { const s = (a.x < b.x ? -1 : 1) * ox / 2; a.x += s; b.x -= s } else { const s = (a.y < b.y ? -1 : 1) * oy / 2; a.y += s; b.y -= s } }
+    }
+    if (!moved) break
+  }
+}
+
+let V = {x: 0, y: 0, k: 1}, NODES = [], byId = new Map()
+const COLOR = {SUPPORTS: 'var(--good)', QUALIFIES: 'var(--warn)', REBUTS: 'var(--crit)'}
+function draw(d) {
+  const world = $('world'); world.querySelectorAll('.pin').forEach(p => p.remove()); world.classList.remove('focus')
+  $('board').querySelector('.empty')?.remove()
+  NODES = [...d.evidence.map(e => ({...e, kind: 'evidence'})), ...d.claims.map(c => ({...c, kind: 'claim'}))]
+  byId = new Map(NODES.map(v => [v.id, v]))
+  const pairs = []
+  for (const k of d.contradictions) for (let i = 0; i < k.claims.length; i++) for (let j = i + 1; j < k.claims.length; j++)
+    if (byId.has(k.claims[i]) && byId.has(k.claims[j])) pairs.push({id: k.id, a: k.claims[i], b: k.claims[j], reason: k.reason})
+  const links = d.links.filter(l => byId.has(l.from) && byId.has(l.to))
+  if (!NODES.length) { $('strings').innerHTML = ''; $('board').insertAdjacentHTML('beforeend',
+    `<div class="empty"><div>Nothing pinned to <b class="mono">${esc(d.slug)}</b> yet.<br><span class="muted">Add evidence on <a href="/submit">Submit</a>, or let your agents work here.</span></div></div>`); return }
+  layout(NODES, [...links.map(l => ({a: l.from, b: l.to, len: 260})), ...pairs.map(p => ({a: p.a, b: p.b, len: 300}))])
+  const near = new Map(NODES.map(v => [v.id, new Set([v.id])]))
+  for (const e of [...links.map(l => [l.from, l.to]), ...pairs.map(p => [p.a, p.b])]) { near.get(e[0]).add(e[1]); near.get(e[1]).add(e[0]) }
+  const c = v => [v.x, v.y]
+  $('strings').innerHTML = links.map(l => { const [x1, y1] = c(byId.get(l.from)), [x2, y2] = c(byId.get(l.to))
+      return `<line data-a="${l.from}" data-b="${l.to}" x1="${x1}" y1="${y1 - H.evidence / 2 + 4}" x2="${x2}" y2="${y2 - H.claim / 2 + 4}" stroke="${COLOR[l.relation] || 'var(--ink3)'}" stroke-width="2.2" stroke-linecap="round" opacity=".9"/>` }).join('')
+    + pairs.map(p => { const [x1, y1] = c(byId.get(p.a)), [x2, y2] = c(byId.get(p.b))
+      return `<path data-a="${p.a}" data-b="${p.b}" d="${zigzag(x1, y1, x2, y2)}" fill="none" stroke="var(--bad)" stroke-width="2" stroke-dasharray="5 3"/>` }).join('')
+  for (const v of NODES) {
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'pin ' + v.kind; b.dataset.id = v.id
+    b.style.left = v.x - W[v.kind] / 2 + 'px'; b.style.top = v.y - H[v.kind] / 2 + 'px'
+    b.style.transform = `rotate(${(hash(v.id + 'r') - 0.5) * 5}deg)`
+    b.innerHTML = v.kind === 'evidence' ? `<b>${esc(v.title || v.url || v.excerpt)}</b><div class="s">${esc(v.source || (v.url ? new URL(v.url).host : '') || v.author)}</div>`
+      : `<span>${esc(v.text)}</span>`
+    b.setAttribute('aria-label', `${v.kind}: ${v.kind === 'evidence' ? v.title || v.url || v.excerpt : v.text}`)
+    b.onclick = e => { e.stopPropagation(); focusPin(v.id, near.get(v.id)) }
+    world.append(b)
+  }
+  fit()
+}
+function zigzag(x1, y1, x2, y2) {  // the office's red zigzag for a contradiction
+  const dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy) || 1, nx = -dy / len * 7, ny = dx / len * 7, steps = Math.max(4, Math.round(len / 28))
+  let d = `M${x1} ${y1}`
+  for (let i = 1; i < steps; i++) { const t = i / steps, s = i % 2 ? 1 : -1; d += ` L${x1 + dx * t + nx * s} ${y1 + dy * t + ny * s}` }
+  return d + ` L${x2} ${y2}`
+}
+
+// ------------------------------------------------------------ pan and zoom
+const apply = () => { $('world').style.transform = `translate(${V.x}px,${V.y}px) scale(${V.k})` }
+function zoomAt(f, cx, cy) {
+  const k = Math.min(2.5, Math.max(0.15, V.k * f)); f = k / V.k
+  V.x = cx - (cx - V.x) * f; V.y = cy - (cy - V.y) * f; V.k = k; apply()
+}
+function fit() {
+  if (!NODES.length) return
+  const r = $('board').getBoundingClientRect(), pad = 40
+  const xs = NODES.flatMap(v => [v.x - W[v.kind] / 2, v.x + W[v.kind] / 2]), ys = NODES.flatMap(v => [v.y - H[v.kind] / 2, v.y + H[v.kind] / 2])
+  const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)]
+  V.k = Math.min(1.2, Math.max(0.15, Math.min((r.width - pad * 2) / (x1 - x0), (r.height - pad * 2) / (y1 - y0))))
+  V.x = r.width / 2 - (x0 + x1) / 2 * V.k; V.y = r.height / 2 - (y0 + y1) / 2 * V.k; apply()
+}
+const board = $('board'), mid = () => { const r = board.getBoundingClientRect(); return [r.width / 2, r.height / 2] }
+board.addEventListener('wheel', e => { e.preventDefault(); const r = board.getBoundingClientRect()
+  zoomAt(Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015)), e.clientX - r.left, e.clientY - r.top) }, {passive: false})
+const ptrs = new Map(); let last = null, moved = 0
+board.addEventListener('pointerdown', e => { if (e.target.closest('.pin, #detail')) return
+  board.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, [e.clientX, e.clientY]); board.classList.add('drag'); moved = 0; last = null })
+board.addEventListener('pointermove', e => {
+  if (!ptrs.has(e.pointerId)) return
+  const [px, py] = ptrs.get(e.pointerId); ptrs.set(e.pointerId, [e.clientX, e.clientY])
+  if (ptrs.size === 2) {  // pinch: zoom around the fingers' midpoint
+    const [[ax, ay], [bx, by]] = [...ptrs.values()], dist = Math.hypot(ax - bx, ay - by), r = board.getBoundingClientRect()
+    if (last) zoomAt(dist / last, (ax + bx) / 2 - r.left, (ay + by) / 2 - r.top)
+    last = dist; return
+  }
+  V.x += e.clientX - px; V.y += e.clientY - py; moved += Math.abs(e.clientX - px) + Math.abs(e.clientY - py); apply()
+})
+const up = e => { ptrs.delete(e.pointerId); last = null; if (!ptrs.size) board.classList.remove('drag') }
+board.addEventListener('pointerup', e => { up(e); if (moved < 4 && !e.target.closest('.pin, #detail')) unfocus() })
+board.addEventListener('pointercancel', up)
+board.addEventListener('keydown', e => {
+  if (e.target.closest('#detail')) return
+  const step = 60, keys = {ArrowLeft: [step, 0], ArrowRight: [-step, 0], ArrowUp: [0, step], ArrowDown: [0, -step]}
+  if (keys[e.key]) { e.preventDefault(); V.x += keys[e.key][0]; V.y += keys[e.key][1]; apply() }
+  else if (e.key === '+' || e.key === '=') zoomAt(1.2, ...mid())
+  else if (e.key === '-') zoomAt(1 / 1.2, ...mid())
+  else if (e.key === '0') fit()
+})
+$('zIn').onclick = () => zoomAt(1.25, ...mid()); $('zOut').onclick = () => zoomAt(0.8, ...mid()); $('zFit').onclick = fit
+addEventListener('resize', () => { clearTimeout(fit.t); fit.t = setTimeout(fit, 150) })
+
+// ------------------------------------------------------------ one pin's record
+function focusPin(id, near) {
+  const world = $('world'); world.classList.add('focus')
+  world.querySelectorAll('.pin').forEach(p => { p.classList.toggle('near', near.has(p.dataset.id)); p.classList.toggle('sel', p.dataset.id === id) })
+  world.querySelectorAll('line, path').forEach(l => l.classList.toggle('near', l.dataset.a === id || l.dataset.b === id))
+  openDetail(id)
+}
+function unfocus() { $('world').classList.remove('focus'); $('world').querySelectorAll('.sel').forEach(p => p.classList.remove('sel')); closeDetail() }
+async function openDetail(id) {
+  const v = byId.get(id); $('detail').hidden = false; $('dTitle').textContent = v.kind === 'evidence' ? 'Evidence' : 'Claim'
+  $('dBody').innerHTML = '<p class="muted">Loading…</p>'
+  try {
+    const r = await api('/dashboard/api/record/' + id), c = r.content || {}
+    const line = l => `<div class="li"><span class="rel ${esc(l.relation)}">${esc(l.relation)}</span> <a href="#" data-go="${esc(v.kind === 'evidence' ? l.to_id : l.from_id)}">${esc(byId.get(v.kind === 'evidence' ? l.to_id : l.from_id)?.title || byId.get(v.kind === 'evidence' ? l.to_id : l.from_id)?.text || 'open')}</a>
+      <div class="q">“${esc(l.quote)}”</div><div class="muted">${esc(l.reason)} · ${esc(l.author)}</div></div>`
+    $('dBody').innerHTML = (v.kind === 'evidence'
+        ? `<p><b>${esc(c.title || '(untitled)')}</b></p>${c.url ? `<p><a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.url)}</a></p>` : ''}<p class="muted">${esc(c.source || '')}${c.source ? ' · ' : ''}${esc(r.chars)} characters · filed by ${esc(r.author)}</p>`
+          + (r.links_from?.length ? `<h3>Bears on ${r.links_from.length}</h3>${r.links_from.map(line).join('')}` : '<p class="muted">No links from this evidence yet.</p>')
+          + `<h3>Text</h3><p style="white-space:pre-wrap">${esc((c.text || '').slice(0, 1500))}${(c.text || '').length > 1500 ? '…' : ''}</p>`
+        : `<p><b>${esc(c.text)}</b></p><p class="muted">Claimed by ${esc(r.author)}</p>`
+          + (r.links?.length ? `<h3>Evidence ${r.links.length}</h3>${r.links.map(line).join('')}` : '<p class="muted">No evidence linked yet.</p>')
+          + (r.contradictions?.length ? `<h3>Contradictions ${r.contradictions.length}</h3>${r.contradictions.map(k => `<div class="li">${esc(k.reason)}</div>`).join('')}` : ''))
+      + `<h3>Record</h3><p><a href="/dashboard#record=${id}">Open in the dashboard</a> · <span class="mono muted" title="${id}">${id.slice(0, 12)}…</span></p>`
+    $('dBody').querySelectorAll('[data-go]').forEach(a => a.onclick = e => { e.preventDefault()
+      const p = $('world').querySelector(`.pin[data-id="${a.dataset.go}"]`); if (p) p.click() })
+  } catch (e) { $('dBody').innerHTML = `<p class="muted">${esc(e.message)}</p>` }
+}
+function closeDetail() { $('detail').hidden = true }
+$('dClose').onclick = unfocus
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('detail').hidden) { unfocus(); board.focus() } })
+
+api('/api/me').then(d => { ME = d; renderSide() }).catch(e => { $('side').innerHTML = `<div class="note">${esc(e.message)}</div>` })
+</script></body></html>
