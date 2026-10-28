@@ -3,6 +3,9 @@
 (() => {
   const $ = id => document.getElementById(id), header = $('site-header'), sub = $('subnav'), dd = header.querySelector('.dd-btn')
   const setMenu = open => { header.classList.toggle('open', open); $('menu-btn').setAttribute('aria-expanded', String(open)) }
+  // The header sticks to the top; the second bar sits just under it, so it needs the header's height.
+  const hh = () => document.documentElement.style.setProperty('--hh', header.offsetHeight + 'px')
+  hh(); addEventListener('resize', hh)
   $('menu-btn').onclick = () => setMenu(!header.classList.contains('open'))
   // Off the dashboard, the ▾ next to Dashboard (or hovering it) pops the second bar up under the header.
   const setSub = open => { if (!sub || sub.classList.contains('pinned')) return

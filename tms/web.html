@@ -29,7 +29,14 @@ td.n{font-family:var(--mono);text-align:right}.actions{display:flex;gap:8px;flex
 ul.keys{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:4px}ul.keys li{display:flex;align-items:center;gap:10px;padding:5px 8px;background:var(--bg);border:1px solid var(--line);border-radius:6px}
 ul.keys .nm{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}ul.keys code{font:11.5px var(--mono);color:var(--ink3)}
 ul.keys li.none{color:var(--ink3);background:none;border-style:dashed}
-main button.x{padding:0 8px;line-height:22px;font-size:15px}.addkey{display:flex;gap:6px;margin-top:6px}.addkey input{max-width:440px;font:12.5px var(--mono)}
+.panes{display:grid;grid-template-columns:minmax(220px,320px) 1fr;gap:14px;align-items:start;margin-top:8px}.panes ul.keys{margin-top:0;max-height:520px;overflow:auto}
+main button.pick{flex:1;min-width:0;text-align:left;background:none;border:0;color:var(--ink);padding:0;font-weight:400;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+main button.pick small,.places small{display:block;color:var(--ink3);font-size:11.5px;overflow:hidden;text-overflow:ellipsis}
+ul.keys li.on{border-color:var(--brand);box-shadow:inset 3px 0 var(--brand)}ul.keys li:has(.pick):hover{border-color:var(--ink3)}
+#acPlaces{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px 14px;min-height:120px}#acPlaces h3{margin:0;font-size:14px;font-weight:400}
+.places{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:2px 14px;max-height:420px;overflow:auto}.places label.check{margin:0;padding:5px 0;align-items:flex-start}.places label.check input{margin-top:3px}
+@media(max-width:640px){.panes{grid-template-columns:1fr}.panes ul.keys{max-height:260px}}
+main button.x{padding:0 8px;line-height:22px;font-size:15px}.addkey{display:flex;gap:6px;margin-top:6px}.addkey input{max-width:440px;min-width:0;flex:1;font:12.5px var(--mono)}.addkey button{white-space:nowrap}
 .meter{display:grid;gap:8px;margin-top:4px}.meter div{display:grid;grid-template-columns:110px 1fr auto;gap:10px;align-items:center;font-size:13px}
 .meter i{display:block;height:7px;border-radius:4px;background:var(--line2);overflow:hidden}.meter i b{display:block;height:100%;background:var(--good);border-radius:4px}.meter i b.hi{background:var(--warn)}.meter i b.full{background:var(--crit)}
 pre.copy{position:relative;white-space:pre-wrap;word-break:break-word;padding-right:70px}pre.copy button{position:absolute;top:6px;right:6px;padding:2px 8px;font-size:12px}
@@ -74,8 +81,8 @@ details.connect{margin-top:14px;border-top:1px solid var(--line);padding-top:10p
   <section id="agentsBox" hidden><h2>Your agents</h2>
     <p class="muted" style="margin-top:0">Your account is you, one <b>Ledger</b> agent that acts for you (it can create collections, manage members and pick agents, but cannot change which key is the Ledger), and your other agents. Each key belongs to one account. Agents work only in the collections you pick for them below.</p>
     <label>Ledger<div class="addkey"><input id="acLedger" placeholder="npub1… or hex; empty for none" aria-label="Your Ledger's npub"><button id="acSave" class="ghost">Save Ledger</button></div></label><span id="acMsg"></span>
-    <h2 style="margin-top:16px">Agents</h2><div id="acAgents"></div>
-    <div id="acPlaces"></div>
+    <h2 style="margin-top:16px">Agents</h2>
+    <div class="panes"><div id="acAgents"></div><div id="acPlaces" aria-live="polite"></div></div>
     <details class="connect" id="connectAgent"><summary>Connect an agent</summary>
       <p class="muted">An agent is any program that holds its own Nostr key and calls Paranoy's MCP tools, signing each call. Your Ledger is one; add others for each job.</p>
       <ol><li>Make the agent a key: <code>uv run tms-sign keygen</code> in a checkout of <a href="https://github.com/DeleganceAI/tms-ledger" target="_blank" rel="noopener">the repo</a>, or any Nostr library. Keep its <code>nsec</code> in the agent's own config; never paste it here.</li>
@@ -164,9 +171,11 @@ function toHex(s) {
 // A list of keys: each with its name and a remove button, and a + to add one. Every change signs the
 // whole new list at once, since these events always carry the full list. save(hexes) publishes it.
 const shortNpub = n => n.slice(0, 12) + '…' + n.slice(-6)
-function keyList(el, items, save, {what = "a key", none = 'None yet.'} = {}) {
+function keyList(el, items, save, {what = "a key", none = 'None yet.', pick = null, picked = null, note = () => ''} = {}) {
   el = $(el)
-  el.innerHTML = `<ul class="keys">${items.length ? items.map(k => `<li><span class="nm">${esc(k.name || 'No profile yet')}</span>
+  const nm = k => pick ? `<button class="nm pick" type="button" data-pk="${esc(k.pubkey)}" aria-pressed="${k.pubkey === picked}">${esc(k.name || 'No profile yet')}${note(k)}</button>`
+    : `<span class="nm">${esc(k.name || 'No profile yet')}</span>`
+  el.innerHTML = `<ul class="keys">${items.length ? items.map(k => `<li${k.pubkey === picked ? ' class="on"' : ''}>${nm(k)}
       <code title="${esc(k.npub)}">${esc(shortNpub(k.npub))}</code><button class="ghost x" type="button" data-pk="${esc(k.pubkey)}" aria-label="Remove ${esc(k.name || k.npub)}">×</button></li>`).join('')
       : `<li class="none">${esc(none)}</li>`}</ul>
     <div class="addkey"><input placeholder="npub1… or hex pubkey" aria-label="Add ${esc(what)} by npub"><button class="ghost" type="button">+ Add</button></div><span class="msg muted"></span>`
@@ -182,6 +191,7 @@ function keyList(el, items, save, {what = "a key", none = 'None yet.'} = {}) {
   }
   el.querySelector('.addkey button').onclick = add
   input.onkeydown = e => { if (e.key === 'Enter') add() }
+  if (pick) el.querySelectorAll('button.pick').forEach(b => b.onclick = () => pick(b.dataset.pk))
   el.querySelectorAll('button.x').forEach(b => b.onclick = () => {
     const k = items.find(i => i.pubkey === b.dataset.pk)
     if (confirm(`Remove ${k.name || k.npub}?`)) run(have.filter(h => h !== k.pubkey))
@@ -290,19 +300,44 @@ function renderAgents() {
   $('agentsBox').hidden = !A || A.role === 'agent'
   if ($('agentsBox').hidden) return
   $('acLedger').value = A.ledger?.npub || ''; $('acLedger').disabled = $('acSave').disabled = A.role === 'ledger'
+  if (!A.agents.some(a => a.pubkey === picked)) picked = A.agents[0]?.pubkey || null
+  const cols = ME.collections.filter(c => c.role), where = pk => cols.filter(c => (A.collection_agents[c.slug] || []).includes(pk))
   keyList('acAgents', A.agents, async agents => { await publish([await sign(4713, {ledger: A.ledger?.pubkey || null, agents})]); await refresh() },
-    {what: "an agent", none: 'No agents yet. Add one by its npub.'})
+    {what: "an agent", none: 'No agents yet. Add one by its npub.', picked, pick: pk => { picked = pk; renderAgents() },
+     note: k => `<small>${where(k.pubkey).length ? `${where(k.pubkey).length} of ${cols.length} collections` : 'not working anywhere yet'}</small>`})
   renderConnect()
   $('newAgents').innerHTML = A.agents.length ? '<span class="muted">Agents that may work here:</span>' + checklist('na') : ''
-  const cols = ME.collections.filter(c => c.role)
-  $('acPlaces').innerHTML = A.agents.length && cols.length ? '<h2 style="margin-top:16px">Where they work</h2>' + cols.map(c => `<div class="aboutrow" data-slug="${esc(c.slug)}"><b class="mono">${esc(c.slug)}</b>
-    <div class="actions" style="margin:0">${checklist('pick', A.collection_agents[c.slug] || [])}</div><button class="ghost save">Save</button><span class="msg muted"></span></div>`).join('') : ''
-  for (const row of $('acPlaces').querySelectorAll('.aboutrow')) {
-    const msg = row.querySelector('.msg')
-    row.querySelector('.save').onclick = async () => {
-      try { await publish([await sign(4714, {collection: row.dataset.slug, agents: checked(row)})]); msg.className = 'msg ok'; msg.textContent = 'Saved.' }
-      catch (e) { msg.className = 'msg err'; msg.textContent = e.message }
-    }
+  renderPlaces(A, cols)
+}
+
+// The right pane: where the picked agent works. Each collection keeps its own list of agents (kind
+// 4714), so saving signs one new list for each collection whose box changed, all in one batch.
+let picked = null
+function renderPlaces(A, cols) {
+  const a = A.agents.find(x => x.pubkey === picked)
+  if (!a) { $('acPlaces').innerHTML = A.agents.length ? '' : '<p class="muted">Add an agent, then pick where it works.</p>'; return }
+  if (!cols.length) { $('acPlaces').innerHTML = '<p class="muted">You are in no collections yet.</p>'; return }
+  const on = slug => (A.collection_agents[slug] || []).includes(a.pubkey)
+  $('acPlaces').innerHTML = `<h3>Where <b>${esc(a.name || shortNpub(a.npub))}</b> works</h3>
+    <div class="actions" style="margin:4px 0 6px"><button class="ghost" type="button" id="plAll">All</button><button class="ghost" type="button" id="plNone">None</button></div>
+    <div class="places">${cols.map(c => `<label class="check"><input type="checkbox" value="${esc(c.slug)}"${on(c.slug) ? ' checked' : ''}>
+      <span><b class="mono">${esc(c.slug)}</b>${c.topic ? `<small>${esc(c.topic)}</small>` : ''}</span></label>`).join('')}</div>
+    <div class="actions"><button id="plSave">Save</button><span class="msg muted" id="plMsg"></span></div>`
+  const boxes = [...$('acPlaces').querySelectorAll('.places input')]
+  $('plAll').onclick = () => boxes.forEach(b => { b.checked = true })
+  $('plNone').onclick = () => boxes.forEach(b => { b.checked = false })
+  $('plSave').onclick = async () => {
+    const changed = boxes.filter(b => b.checked !== on(b.value))
+    if (!changed.length) return say('plMsg', 'Nothing to change.')
+    try {
+      say('plMsg', `Signing ${changed.length} collection${changed.length === 1 ? '' : 's'}…`)
+      const batch = []
+      for (const b of changed) {
+        const now = (A.collection_agents[b.value] || []).filter(x => x !== a.pubkey)
+        batch.push(await sign(4714, {collection: b.value, agents: b.checked ? [...now, a.pubkey] : now}))
+      }
+      await publish(batch); await refresh(); say('plMsg', 'Saved.', 'ok')
+    } catch (e) { say('plMsg', e.message, 'err') }
   }
 }
 $('acSave').onclick = async () => {
