@@ -4,7 +4,7 @@ The 2026-10-28 polish list. Each item is a stacked PR off `main`, merged in orde
 
 ## Checklist
 
-- [x] 1. Rename "TMS ledger" to Paranoy in user-facing text (#PR1)
+- [x] 1. Rename "TMS ledger" to Paranoy in user-facing text ([#68](https://github.com/DeleganceAI/tms-ledger/pull/68))
 
 ## Decisions
 
