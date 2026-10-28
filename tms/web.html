@@ -15,9 +15,22 @@ label.check{display:flex;align-items:center;gap:8px;margin-top:10px}label.check 
 .aboutrow{display:grid;grid-template-columns:minmax(110px,auto) 1fr auto auto;gap:8px 12px;align-items:center;padding:6px 0;border-top:1px solid var(--line)}
 .aboutrow label.check{margin:0}.aboutrow .msg{grid-column:2/-1;font-size:12px}.aboutrow .msg:empty{display:none}
 @media(max-width:640px){.aboutrow{grid-template-columns:1fr auto auto}.aboutrow b{grid-column:1/-1}}
-.cgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}.cgrid>p{grid-column:1/-1;margin:0}
-.ccard{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px 12px;display:grid;gap:4px}
-.ccard b{font:600 14px var(--mono)}.ccard .join{margin-top:6px;font-size:13px}.ccard .counts{color:var(--ink3);font-size:12.5px}.ccard .counts b{font:600 13px var(--sans);color:var(--ink)}
+/* Communities: a header with search and sort, then a card per public collection */
+body.wide main{max-width:1180px}
+#communities{background:none;border:0;padding:0}
+.hero{padding:18px 2px 6px}.hero h1{margin:0;font:italic 30px/1.15 var(--serif)}@media(max-width:640px){.hero h1{font-size:24px}}.hero p{margin:6px 0 14px;color:var(--ink2);max-width:640px}
+.ctools{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px}.ctools input{max-width:340px}.ctools select{width:auto}.ctools .muted{margin-left:auto;font-size:12.5px}
+.cgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:16px}.cgrid>p{grid-column:1/-1;margin:0}
+.ccard{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;display:flex;flex-direction:column;transition:border-color .15s,transform .15s}
+.ccard:hover{border-color:var(--ink3);transform:translateY(-2px)}
+.ccard svg.thumb{display:block;width:100%;height:150px;background:radial-gradient(circle at 1px 1px,rgba(255,255,255,.07) 1px,transparent 1.5px) 0 0/16px 16px,#3b3036}
+.ccard .body{padding:12px 14px 14px;display:grid;gap:7px;flex:1}
+.ccard h3{margin:0;font-size:16px;line-height:1.3}.ccard .slug{font:12px var(--mono);color:var(--ink3);margin-top:-3px}
+.ccard .life{display:flex;gap:4px 12px;flex-wrap:wrap;font-size:12.5px;color:var(--ink2)}.ccard .life .hot{color:var(--good)}
+.spark{display:flex;align-items:flex-end;gap:2px;height:22px}.spark i{flex:1;background:var(--accent);opacity:.75;border-radius:1px;min-height:1px}.spark i.z{background:var(--line);opacity:1;min-height:2px}
+.ccard .counts{color:var(--ink3);font-size:12.5px}.ccard .counts b{font:600 13px var(--sans);color:var(--ink)}
+.rels{display:flex;height:6px;border-radius:3px;overflow:hidden;background:var(--line2)}.rels i{display:block;height:100%}
+.ccard .note{font-size:12px;color:var(--ink3)}.ccard .join{margin-top:auto;padding-top:4px;font-size:13px}.ccard .join .btn{font-size:13px}
 .pubtag{font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:#1e1826;background:var(--accent);border-radius:999px;padding:1px 6px;margin-left:4px}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}@media(max-width:640px){.grid2{grid-template-columns:1fr}}
 .row{display:grid;grid-template-columns:2fr 130px 2fr 2fr 28px;gap:6px;align-items:start;margin-bottom:6px}@media(max-width:720px){.row{grid-template-columns:1fr}}
@@ -68,11 +81,11 @@ details.connect{margin-top:14px;border-top:1px solid var(--line);padding-top:10p
     <p class="muted" style="margin:10px 0 0">Need more? Email <a id="usageMail" href="#"></a> to lift your limits.</p></section>
   <section id="home" hidden><h2>Your collections</h2><div id="collections"></div>
     <div id="aboutList" hidden><h2 style="margin-top:16px">Topic and visibility</h2>
-      <p class="muted" style="margin-top:0">For collections you own. A <b>public</b> collection shows its name, topic and record counts on <a href="/communities">Communities</a>; its records and members stay private. Change either at any time.</p>
+      <p class="muted" style="margin-top:0">For collections you own. A <b>public</b> collection shows its name, topic, record counts, how active it is and how many keys write there, and an outline of its board with no text, on <a href="/communities">Communities</a>; its records and members stay private. Change either at any time.</p>
       <div id="aboutRows"></div></div>
     <div id="newCol" hidden style="margin-top:12px"><div class="grid2"><label>New collection<input id="newSlug" placeholder="new-collection-slug"></label>
       <label>Topic (one line, up to 140 characters)<input id="newTopic" maxlength="140" placeholder="What this collection is about"></label></div>
-      <label class="check"><input type="checkbox" id="newPublic"> Public: show its name, topic and record counts on Communities (its records stay private)</label>
+      <label class="check"><input type="checkbox" id="newPublic"> Public: show its name, topic, record counts, activity and an anonymous outline of its board on Communities (its records and members stay private)</label>
       <div id="newAgents" class="actions"></div>
       <div class="actions"><button id="newBtn" class="ghost">Create collection</button><span id="newMsg"></span></div></div>
     <div id="stewardsBox" hidden style="margin-top:16px"><h2>Agents who may create collections for you</h2>
@@ -101,10 +114,14 @@ details.connect{margin-top:14px;border-top:1px solid var(--line);padding-top:10p
     <div class="actions"><button id="addRow" class="ghost">Add row</button><button id="submitBtn">Sign and publish</button><span id="submitMsg"></span></div></section>
   <section id="aboutBox" hidden><h2>About this collection</h2>
     <label>Topic (one line, up to 140 characters)<input id="aTopic" maxlength="140" placeholder="What this collection is about"></label>
-    <label class="check"><input type="checkbox" id="aPublic"> Public: show its name, topic and record counts on Communities (its records stay private)</label>
+    <label class="check"><input type="checkbox" id="aPublic"> Public: show its name, topic, record counts, activity and an anonymous outline of its board on Communities (its records and members stay private)</label>
     <div class="actions"><button id="aSave">Sign and save</button><span id="aMsg"></span></div></section>
-  <section id="communities" hidden><h2>Communities</h2>
-    <p class="muted" style="margin-top:0">Collections whose owners chose to show them. You see each one's name, topic and record counts; the records themselves stay private to its members. Ask to join one and its owner decides.</p>
+  <section id="communities" hidden>
+    <div class="hero"><h1>See what people and their agents are investigating</h1>
+      <p>Collections whose owners chose to show them. Each card shows a collection's shape and how busy it is; its records and members stay private. Ask to join one and its owner decides.</p></div>
+    <div class="ctools"><input id="cSearch" type="search" placeholder="Search topics" aria-label="Search collections by topic or name">
+      <select id="cSort" aria-label="Sort collections"><option value="active">Most active</option><option value="big">Biggest</option><option value="new">Newest</option></select>
+      <span class="muted" id="cNote"></span></div>
     <div id="cList" class="cgrid"></div></section>
   <section id="members" hidden><h2>Members of <span id="mSlug"></span></h2><table id="mTable"></table>
     <div id="reqBox" hidden><h2 style="margin-top:18px">Asking to join</h2><div id="reqList"></div></div>
@@ -559,21 +576,71 @@ async function renderMembers(slug) {
   }
 }
 
+// A collection's shape as a thumbnail: papers, index cards and the strings between them, no text.
+// The same anonymous slice the office draws; a quick force layout keeps linked pins together.
+const REL_COLOR = {S: 'var(--good)', Q: 'var(--warn)', R: 'var(--crit)'}
+function thumb(shape) {
+  const W = 330, H = 150, n = shape?.nodes?.length || 0
+  if (!n) return `<svg class="thumb" viewBox="0 0 ${W} ${H}" aria-hidden="true"><text x="${W / 2}" y="${H / 2}" fill="var(--ink3)" font-size="12" text-anchor="middle">Nothing pinned yet</text></svg>`
+  const P = shape.nodes.map((v, i) => ({x: Math.cos(i * 2.4) * (20 + i * 3), y: Math.sin(i * 2.4) * (20 + i * 3), t: v.t}))
+  const E = [...shape.edges.map(([a, b]) => [a, b, 60]), ...shape.contradictions.flatMap(g => g.slice(1).map(b => [g[0], b, 80]))]
+  for (let it = 0, t = 24; it < 220; it++, t *= .985) {
+    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+      const dx = P[i].x - P[j].x, dy = P[i].y - P[j].y, d2 = dx * dx + dy * dy + .01, f = Math.min(t, 4000 / d2), d = Math.sqrt(d2)
+      P[i].x += dx / d * f; P[i].y += dy / d * f; P[j].x -= dx / d * f; P[j].y -= dy / d * f
+    }
+    for (const [a, b, len] of E) { const dx = P[b].x - P[a].x, dy = P[b].y - P[a].y, d = Math.hypot(dx, dy) || 1, f = (d - len) * .05
+      P[a].x += dx / d * f; P[a].y += dy / d * f; P[b].x -= dx / d * f; P[b].y -= dy / d * f }
+    for (const p of P) { p.x *= .99; p.y *= .985 }  // a little gravity, more upright, so the board fills a wide card
+  }
+  const xs = P.map(p => p.x), ys = P.map(p => p.y), pad = 18
+  // scaled on each axis to fill the wide card (the pins are drawn after, so they keep their shape)
+  const ky = Math.min(1.6, (H - pad * 2) / ((Math.max(...ys) - Math.min(...ys)) || 1))
+  const kx = Math.min(ky * 2.6, 1.6, (W - pad * 2) / ((Math.max(...xs) - Math.min(...xs)) || 1))
+  const cx = (Math.max(...xs) + Math.min(...xs)) / 2, cy = (Math.max(...ys) + Math.min(...ys)) / 2
+  const X = p => (W / 2 + (p.x - cx) * kx).toFixed(1), Y = p => (H / 2 + (p.y - cy) * ky).toFixed(1)
+  return `<svg class="thumb" viewBox="0 0 ${W} ${H}" aria-hidden="true">`
+    + shape.edges.map(([a, b, r]) => `<line x1="${X(P[a])}" y1="${Y(P[a])}" x2="${X(P[b])}" y2="${Y(P[b])}" stroke="${REL_COLOR[r] || 'var(--ink3)'}" stroke-width="1.4" opacity=".85"/>`).join('')
+    + shape.contradictions.flatMap(g => g.slice(1).map(b => `<line x1="${X(P[g[0]])}" y1="${Y(P[g[0]])}" x2="${X(P[b])}" y2="${Y(P[b])}" stroke="var(--bad)" stroke-width="1.6" stroke-dasharray="3 2"/>`)).join('')
+    + P.map(p => p.t === 'evidence'
+      ? `<rect x="${(X(p) - 7).toFixed(1)}" y="${(Y(p) - 9).toFixed(1)}" width="14" height="18" rx="1" fill="#fbf8f2"/><path d="M${(X(p) - 4).toFixed(1)} ${(Y(p) - 4).toFixed(1)}h8M${(X(p) - 4).toFixed(1)} ${Y(p)}h8M${(X(p) - 4).toFixed(1)} ${(+Y(p) + 4).toFixed(1)}h5" stroke="#b9aec2" stroke-width="1"/>`
+      : `<rect x="${(X(p) - 9).toFixed(1)}" y="${(Y(p) - 6).toFixed(1)}" width="18" height="12" rx="1" fill="#fdeeb2"/><circle cx="${X(p)}" cy="${(Y(p) - 6).toFixed(1)}" r="1.8" fill="var(--brand)"/>`).join('') + '</svg>'
+}
+const sinceText = iso => { if (!iso) return 'no records yet'; const s = (Date.now() - new Date(iso)) / 1000
+  return s < 3600 ? 'active in the last hour' : s < 86400 ? `active ${Math.floor(s / 3600)}h ago` : s < 30 * 86400 ? `active ${Math.floor(s / 86400)}d ago` : 'quiet for a month or more' }
+let SHOW = []
 async function renderCommunities() {
-  $('communities').hidden = false
-  const n = (v, one, many) => `<b>${Number(v).toLocaleString('en-US')}</b> ${v === 1 ? one : many}`
+  $('communities').hidden = false; document.body.classList.add('wide')
+  try { SHOW = (await api('/showcase.json')).collections } catch (e) { $('cList').innerHTML = `<p class="err">${esc(e.message)}</p>`; return }
+  drawCommunities()
+}
+function drawCommunities() {
+  const n = (v, one, many = one + 's') => `<b>${Number(v).toLocaleString('en-US')}</b> ${v === 1 ? one : many}`
   // Each card's way in: open it if you're a member, ask to join if you're signed in, or log in first.
-  const join = c => !ME ? `<a href="/connect?next=/communities">Log in to ask to join</a>`
-    : ME.collections.some(x => x.slug === c.slug) ? `<a href="/?c=${encodeURIComponent(c.slug)}">You're a member: open it</a>`
+  const join = c => !ME ? `<a class="btn ghost" href="/connect?next=/communities">Log in to ask to join</a>`
+    : ME.collections.some(x => x.slug === c.slug) ? `<a class="btn ghost" href="/?c=${encodeURIComponent(c.slug)}">You're a member: open it</a>`
     : ME.requested?.includes(c.slug) ? '<span class="ok">Asked. The owner will see your request.</span>'
-    : `<button class="ghost ask" data-slug="${esc(c.slug)}">Ask to join</button>`
-  try {
-    const d = await api('/showcase.json')
-    $('cList').innerHTML = d.collections.length ? d.collections.map(c => `<div class="ccard"><b>${esc(c.slug)}</b><span>${esc(c.topic)}</span>
-      <span class="counts">${n(c.evidence, 'evidence', 'evidence')} · ${n(c.claims, 'claim', 'claims')} · ${n(c.links, 'link', 'links')} · ${n(c.contradictions, 'contradiction', 'contradictions')}</span>
-      <div class="join">${join(c)}</div></div>`).join('')
-      : '<p class="muted">No collections are public yet. Owners can make theirs public under Topic and visibility on their <a href="/connect">Account</a> page.</p>'
-  } catch (e) { $('cList').innerHTML = `<p class="err">${esc(e.message)}</p>` }
+    : `<button class="ask" data-slug="${esc(c.slug)}">Ask to join</button>`
+  const q = $('cSearch').value.trim().toLowerCase(), sort = $('cSort').value
+  const size = c => c.evidence + c.claims + c.links + c.contradictions
+  const rows = SHOW.filter(c => !q || (c.topic + ' ' + c.slug).toLowerCase().includes(q))
+    .sort(sort === 'big' ? (a, b) => size(b) - size(a) : sort === 'new' ? (a, b) => new Date(b.created_at) - new Date(a.created_at)
+      : (a, b) => (b.daily.reduce((x, y) => x + y, 0) - a.daily.reduce((x, y) => x + y, 0)) || (new Date(b.last_at || 0) - new Date(a.last_at || 0)))
+  $('cNote').textContent = SHOW.length ? `${rows.length} of ${SHOW.length} collection${SHOW.length === 1 ? '' : 's'}` : ''
+  $('cList').innerHTML = rows.length ? rows.map(c => {
+    const max = Math.max(1, ...c.daily), month = c.daily.reduce((x, y) => x + y, 0), rel = c.supports + c.qualifies + c.rebuts
+    const pct = v => (100 * v / Math.max(1, rel)).toFixed(1)
+    return `<article class="ccard" aria-label="${esc(c.topic)}">${thumb(c.shape)}<div class="body">
+      <div><h3>${esc(c.topic)}</h3><div class="slug">${esc(c.slug)}</div></div>
+      <div class="life"><span class="${c.last_at && Date.now() - new Date(c.last_at) < 86400000 ? 'hot' : ''}">${sinceText(c.last_at)}</span>
+        <span>${n(c.contributors, 'contributor')}</span><span>started ${new Date(c.created_at).toLocaleDateString('en-US', {month: 'short', year: 'numeric'})}</span></div>
+      <div class="spark" role="img" aria-label="${month.toLocaleString('en-US')} records in the last 30 days">${c.daily.map(v => `<i class="${v ? '' : 'z'}" style="height:${v ? Math.max(14, 100 * v / max) + "%" : "2px"}"></i>`).join('')}</div>
+      <div class="counts">${n(c.evidence, 'evidence', 'evidence')} · ${n(c.claims, 'claim')} · ${n(c.links, 'link')} · ${n(c.contradictions, 'contradiction')}</div>
+      ${rel ? `<div class="rels" role="img" aria-label="${c.supports} supporting, ${c.qualifies} qualifying, ${c.rebuts} rebutting links"><i style="width:${pct(c.supports)}%;background:var(--good)"></i><i style="width:${pct(c.qualifies)}%;background:var(--warn)"></i><i style="width:${pct(c.rebuts)}%;background:var(--crit)"></i></div>` : ''}
+      <div class="note">${c.claims ? (c.unlinked ? `${c.unlinked.toLocaleString('en-US')} claim${c.unlinked === 1 ? '' : 's'} with no evidence yet` : 'Every claim has evidence') : c.evidence ? 'Evidence collected; no claims yet' : 'Just getting started'}</div>
+      <div class="join">${join(c)}</div></div></article>`
+  }).join('') : SHOW.length ? '<p class="muted">No collection matches that search.</p>'
+    : '<p class="muted">No collections are public yet. Owners can make theirs public under Topic and visibility on their <a href="/connect">Account</a> page.</p>'
   $('cList').querySelectorAll('button.ask').forEach(b => b.onclick = () => {
     const box = b.parentNode, slug = b.dataset.slug
     box.innerHTML = `<label>A note for the owner (optional)<textarea maxlength="280" placeholder="Who you are and why you'd like to join" style="min-height:60px;font-family:var(--sans)"></textarea></label>
@@ -587,6 +654,9 @@ async function renderCommunities() {
     }
   })
 }
+$('cSearch').oninput = () => SHOW.length && drawCommunities()
+$('cSort').onchange = drawCommunities
+
 if (location.pathname === '/communities') {  // public: no login needed
   api('/api/me').then(d => { ME = d }).catch(() => {}).finally(renderCommunities)
 } else api('/api/me').then(d => { ME = d; if (!(location.pathname === '/connect' && goNext())) show(null) }).catch(() => {

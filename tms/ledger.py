@@ -679,13 +679,26 @@ def list_delegations(conn, pubkey: str) -> dict:
 
 
 def showcase(conn) -> list[dict]:
-    """Collections whose owner made them public: name, topic and record counts only."""
+    """Collections whose owner made them public: name, topic, record counts, and how lively they are
+    (when they last changed, how many keys write there, records per day for 30 days, links by
+    relation, claims no evidence touches yet). Never a record, a key or any text but the topic."""
     return [_clean(r) for r in conn.execute(
-        """SELECT a.collection AS slug, a.topic,
+        """SELECT a.collection AS slug, a.topic, c.created_at,
                   count(*) FILTER (WHERE e.kind = 4701) AS evidence, count(*) FILTER (WHERE e.kind = 4702) AS claims,
-                  count(*) FILTER (WHERE e.kind = 4703) AS links, count(*) FILTER (WHERE e.kind = 4704) AS contradictions
-           FROM collection_about a LEFT JOIN events e ON e.collection = a.collection
-           WHERE a.public GROUP BY a.collection, a.topic
+                  count(*) FILTER (WHERE e.kind = 4703) AS links, count(*) FILTER (WHERE e.kind = 4704) AS contradictions,
+                  max(e.received_at) FILTER (WHERE e.kind BETWEEN 4701 AND 4704) AS last_at,
+                  count(DISTINCT e.pubkey) FILTER (WHERE e.kind BETWEEN 4701 AND 4704) AS contributors,
+                  ARRAY(SELECT count(x.id) FROM generate_series(current_date - 29, current_date, interval '1 day') d
+                        LEFT JOIN events x ON x.collection = a.collection AND x.kind BETWEEN 4701 AND 4704
+                                          AND x.received_at >= d AND x.received_at < d + interval '1 day'
+                        GROUP BY d ORDER BY d) AS daily,
+                  (SELECT count(*) FROM links l WHERE l.collection = a.collection AND l.relation = 'SUPPORTS') AS supports,
+                  (SELECT count(*) FROM links l WHERE l.collection = a.collection AND l.relation = 'QUALIFIES') AS qualifies,
+                  (SELECT count(*) FROM links l WHERE l.collection = a.collection AND l.relation = 'REBUTS') AS rebuts,
+                  (SELECT count(*) FROM claims k WHERE k.collection = a.collection
+                     AND NOT EXISTS (SELECT 1 FROM links l WHERE l.to_id = k.id)) AS unlinked
+           FROM collection_about a JOIN collections c ON c.slug = a.collection LEFT JOIN events e ON e.collection = a.collection
+           WHERE a.public GROUP BY a.collection, a.topic, c.created_at
            ORDER BY count(*) FILTER (WHERE e.kind BETWEEN 4701 AND 4704) DESC, a.collection""")]
 
 

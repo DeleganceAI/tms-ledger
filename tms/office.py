@@ -224,15 +224,44 @@ async def stats_json(request) -> JSONResponse:
 
 
 _showcase: dict = {}
+_shapes: dict = {}
+
+
+def shape(conn, slug: str) -> dict:
+    """A public collection's board as the office draws it: one slice from its most recent claims,
+    node kinds, local indices, relation letters and contradiction groups only. Anonymous like
+    /office.json: no ids, text, keys or times."""
+    nodes, recent, links, groups = {}, {}, [], []
+    for r in conn.execute("SELECT id, kind, received_at FROM events WHERE collection = %s AND kind IN (4701, 4702)", (slug,)):
+        nodes[r["id"]] = "claim" if r["kind"] == 4702 else "evidence"
+        if r["kind"] == 4702:
+            recent[r["id"]] = r["received_at"]
+    for r in conn.execute("SELECT from_id, to_id, relation FROM links WHERE collection = %s", (slug,)):
+        if r["relation"] in REL:
+            links.append((r["from_id"], r["to_id"], REL[r["relation"]]))
+    for r in conn.execute("SELECT claim_ids FROM contradictions WHERE collection = %s", (slug,)):
+        groups.append(r["claim_ids"])
+    roots = sorted(recent, key=recent.get, reverse=True)[:1] or list(nodes)[:1]
+    sl = Graph(nodes, links, groups).slice(roots, random.Random(slug))[0]
+    return {k: sl[k] for k in ("nodes", "edges", "contradictions")}
 
 
 def showcase() -> list[dict]:
-    """Collections their owners made public: name, topic and counts, at most a minute old."""
-    minute = int(time.time() // 60)
+    """Collections their owners made public, at most a minute old; each with its board's shape,
+    redrawn hourly (it reads every node and link of the collection)."""
+    minute, hour = int(time.time() // 60), int(time.time() // 3600)
     with _stats_lock:
         if _showcase.get("minute") != minute:
             with L.connect() as conn:
-                _showcase.update(minute=minute, body=L.showcase(conn))
+                rows = L.showcase(conn)
+                for r in rows:
+                    key = (r["slug"], hour)
+                    if key not in _shapes:
+                        _shapes[key] = shape(conn, r["slug"])
+                    r["shape"] = _shapes[key]
+            for k in [k for k in _shapes if k[1] != hour]:
+                del _shapes[k]
+            _showcase.update(minute=minute, body=rows)
         return _showcase["body"]
 
 
