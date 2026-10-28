@@ -932,7 +932,7 @@ def email_signin() -> None:
     from tms import server as S
     from tms import web as W
     sent = []
-    EL.send = lambda to, subject, text: sent.append((to, (_re.search(r"\b(\d{6})\b", text) or _re.search("", "")).group(1) if "code" in text else text))
+    EL.send = lambda to, subject, text, html=None: sent.append((to, (_re.search(r"\b(\d{6})\b", text) or _re.search("", "")).group(1) if "code" in text else text))
     EL.KEY_SECRET, EL.RESEND_API_KEY = "smoke-key-secret", "test"
     code = lambda: sent[-1][1]  # noqa: E731
     with TestClient(S.http_app()) as client:

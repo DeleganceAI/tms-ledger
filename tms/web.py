@@ -398,7 +398,7 @@ routes = [
     Route("/communities", page),
     Route("/office", office),
     *[Route("/" + f.name, lambda r, f=f: FileResponse(f, headers={"Cache-Control": "public, max-age=86400"}))
-      for f in Path(__file__).with_name("brand").iterdir()],  # favicon.svg, favicon.ico, apple-touch-icon.png
+      for f in Path(__file__).with_name("brand").iterdir()],  # favicon.svg, favicon.ico, apple-touch-icon.png, logo.png (emails)
     Route("/c/{slug}/members", members_page),
     Route("/c/{slug}/export.jsonl", export),
     Route("/login", login, methods=["POST"]),
