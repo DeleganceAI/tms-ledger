@@ -38,7 +38,7 @@ TOOLS = ["search_claims", "list_claims", "get_links", "list_evidence", "search_c
 TYPES = {"str": "string", "int": "integer", "bool": "boolean"}
 
 SYSTEM = """\
-You answer an admin's questions from the '{collection}' collection of the TMS ledger, and only
+You answer an admin's questions from the '{collection}' collection of the Paranoy ledger, and only
 from it. The ledger stores evidence (documents), claims, links (evidence that SUPPORTS, REBUTS or
 QUALIFIES a target, with a verbatim quote) and contradictions between claims. It never decides
 what is true; you report what the records say and mark your own reading as yours.

@@ -1,4 +1,4 @@
-"""MCP surface for the TMS v2 ledger, plus the web pages and dashboard over HTTP.
+"""MCP surface for the Paranoy ledger, plus the web pages and dashboard over HTTP.
 
 Run over stdio (Claude Code):    TMS_NSEC=nsec1... tms-server
 Run over HTTP (everyone else):   TMS_SECRET=... tms-server --http --host 0.0.0.0 --port 8080
@@ -34,7 +34,7 @@ LOCAL_SECRET = os.environ.get("TMS_NSEC") or None  # stdio only; main() clears i
 REQUEST_WINDOW = 60  # seconds either side of server time
 
 INSTRUCTIONS = """\
-Append-only evidence ledger of signed Nostr-shaped events. It stores evidence (documents),
+Paranoy: an append-only evidence ledger of signed Nostr-shaped events. It stores evidence (documents),
 claims, links (evidence bearing on a claim, link, contradiction or evidence, with a verbatim
 quote) and contradictions, each signed by its author. It never decides what is true; readers do.
 Every collection is private to its members. Work in one collection at a time.
@@ -299,7 +299,7 @@ def check_proof(request: dict | None = None, collection: str = "", proof: dict |
 # ------------------------------------------------------------------ prompts
 
 BRIEFING = """\
-You are answering questions from the '{collection}' collection of the TMS ledger, and only from it.
+You are answering questions from the '{collection}' collection of the Paranoy ledger, and only from it.
 Every tool except publish takes a fresh signed request (kind 4707); sign one per call.
 
 For each question:
@@ -322,7 +322,7 @@ nothing relevant, say so; that is a complete and honest answer.
 """
 
 CLAIMS_PASS = """\
-You are extracting claims from evidence in the '{collection}' collection of the TMS ledger.
+You are extracting claims from evidence in the '{collection}' collection of the Paranoy ledger.
 You sign everything with your own key (tms-sign, or any Nostr library). Before your first write,
 publish a profile (kind 0, say in "about" that you are an agent) and the terms (kind 4706).
 Every tool except publish takes a fresh signed request (kind 4707); sign one per call.

@@ -1,6 +1,6 @@
 # tms bot prompt templates
 
-Templates for agents that work a tms ledger. Anyone running their own ledger can copy one, fill in the placeholders, and use it. They are not tied to a particular operator, collection, or machine. They are not the MCP prompts the server serves (`briefing`, `claims_pass`). Those, and the protocol, live at `/docs` on the server.
+Templates for agents that work a Paranoy ledger. Anyone running their own ledger can copy one, fill in the placeholders, and use it. They are not tied to a particular operator, collection, or machine. They are not the MCP prompts the server serves (`briefing`, `claims_pass`). Those, and the protocol, live at `/docs` on the server.
 
 ## How to adapt one
 

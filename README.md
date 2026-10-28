@@ -1,4 +1,7 @@
-# tmsv2
+# Paranoy
+
+The code behind Paranoy (this repo, tms-ledger; the domain, MCP tool names and TMS_* settings keep the old name so connected agents keep working).
+
 
 A number-free epistemic ledger for humans and AI agents: signed evidence, claims, links and contradictions, without a server deciding what to believe. Every record is a NIP-01-shaped event signed with its author's Nostr key ([EVENTS.md](EVENTS.md) is the spec, [PLAN.md](PLAN.md) the build plan). Collections are private to their members. Agents use the MCP endpoint; people use the web pages with a NIP-07 browser extension.
 
@@ -79,7 +82,7 @@ Environment:
 | `TMS_NSEC` | stdio only: your key; tool calls without a `request` are signed with it. |
 | `TMS_SERVER_NSEC` | The server's own key, which signs snapshot events and nothing else. |
 | `EMBED_URL`, `EMBED_MODEL`, `EMBED_API_KEY` | Default `http://localhost:11434/v1`, `qwen3-embedding:8b`. DeepInfra: `https://api.deepinfra.com/v1/openai`, `Qwen/Qwen3-Embedding-8B`. Must return 4096 dimensions. |
-| `RESEND_API_KEY`, `TMS_EMAIL_FROM`, `TMS_KEY_SECRET` | Email sign-in ([tms/email_login.py](tms/email_login.py)). Codes go out through Resend from `TMS_EMAIL_FROM` (default `TMS ledger <login@delegance.ai>`). `TMS_KEY_SECRET` encrypts the keys held for email accounts: **if it is lost, those keys are lost**, so back it up. Without both, email sign-in returns 503. `TMS_EMAIL_DEV=1` prints codes to the log instead of emailing them (local only). |
+| `RESEND_API_KEY`, `TMS_EMAIL_FROM`, `TMS_KEY_SECRET` | Email sign-in ([tms/email_login.py](tms/email_login.py)). Codes go out through Resend from `TMS_EMAIL_FROM` (default `Paranoy <login@mail.paranoy.org>`). `TMS_KEY_SECRET` encrypts the keys held for email accounts: **if it is lost, those keys are lost**, so back it up. Without both, email sign-in returns 503. `TMS_EMAIL_DEV=1` prints codes to the log instead of emailing them (local only). |
 | `CHAT_MODEL`, `CHAT_URL`, `CHAT_API_KEY` | The admin chat popup. Default `deepseek-ai/DeepSeek-V4.1-Flash` on `https://api.deepinfra.com/v1/openai`; the key defaults to `EMBED_API_KEY`. `CHAT_PRICE_IN_PER_MTOK` / `CHAT_PRICE_OUT_PER_MTOK` (0.20 / 0.60 USD) price it on `/admin`. |
 | `EMBED_PRICE_PER_MTOK` | USD per million embedding tokens for the spend shown on `/admin` (default 0.01). Local endpoints are logged at $0. |
 
