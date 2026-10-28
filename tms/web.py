@@ -153,7 +153,7 @@ def _account(conn, pubkey: str) -> dict:
     for c in acct["collections"]:
         c["requests"] = waiting.get(c["slug"], 0)
     asked = [r["collection"] for r in conn.execute("SELECT collection FROM join_requests WHERE pubkey = %s", (pubkey,))]
-    return {**acct, "terms_text": L.TERMS_TEXT.decode(), "requested": asked,
+    return {**acct, "terms_text": L.TERMS_TEXT.decode(), "requested": asked, "is_admin": L.is_admin(conn, pubkey),
             "email": email["email"] if email else None, "custodial": bool(email and email["held"])}
 
 
