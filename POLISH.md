@@ -14,7 +14,7 @@ Seven stacked PRs, each based on the one before. Merge them in order, starting w
 | 4 | [#71](https://github.com/DeleganceAI/tms-ledger/pull/71) | Chat page per collection, approved accounts only |
 | 5 | [#72](https://github.com/DeleganceAI/tms-ledger/pull/72) | + buttons, login and back, first-run guide, Connect an agent, usage meter |
 | 6 | [#73](https://github.com/DeleganceAI/tms-ledger/pull/73) | Ask to join (**needs `db/migrate_join_requests.sql` first**) |
-| 7 | Polish 7 | Names not hex, Agents by account, error breakdown, accessibility |
+| 7 | [#74](https://github.com/DeleganceAI/tms-ledger/pull/74) | Names not hex, Agents by account, error breakdown, accessibility |
 
 Every PR passed `test_smoke.py` and `test_events.py` and was checked in a local preview at desktop and phone widths; screenshots are in each PR (stored on the `polish-screenshots` branch, which can be deleted after merging).
 
@@ -30,9 +30,9 @@ Every PR passed `test_smoke.py` and `test_events.py` and was checked in a local 
 - [x] 8. First-run guide on the collections page, and a Connect an agent panel with MCP config and a starter prompt ([#72](https://github.com/DeleganceAI/tms-ledger/pull/72))
 - [x] 9. Usage meter for free accounts ([#72](https://github.com/DeleganceAI/tms-ledger/pull/72))
 - [x] 10. Request-to-join on Communities; the owner sees it and accepts it in the app ([#73](https://github.com/DeleganceAI/tms-ledger/pull/73))
-- [x] 11. Names instead of hex keys, npub on hover with a copy button; the dashboard's Agents table grouped by account (Polish 7)
-- [x] 12. Why ledger-grokbot errors: the dashboard now lists each key's error messages, and auth failures count against the key that signed them (Polish 7; see below)
-- [x] 13. Small fixes: the Ledger box ([#72](https://github.com/DeleganceAI/tms-ledger/pull/72)); chat.js only for signed-in people ([#69](https://github.com/DeleganceAI/tms-ledger/pull/69)); keyboard and screen-reader pass (every PR, finished in Polish 7)
+- [x] 11. Names instead of hex keys, npub on hover with a copy button; the dashboard's Agents table grouped by account ([#74](https://github.com/DeleganceAI/tms-ledger/pull/74))
+- [x] 12. Why ledger-grokbot errors: the dashboard now lists each key's error messages, and auth failures count against the key that signed them ([#74](https://github.com/DeleganceAI/tms-ledger/pull/74); see below)
+- [x] 13. Small fixes: the Ledger box ([#72](https://github.com/DeleganceAI/tms-ledger/pull/72)); chat.js only for signed-in people ([#69](https://github.com/DeleganceAI/tms-ledger/pull/69)); keyboard and screen-reader pass (every PR, finished in #74)
 
 ## Decisions
 
