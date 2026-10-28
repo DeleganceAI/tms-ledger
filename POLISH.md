@@ -8,7 +8,11 @@ The 2026-10-28 polish list. Each item is a stacked PR off `main`, merged in orde
 - [x] 2. One shared header on every page, the dashboard's sections as a second bar, a ☰ menu on phones ([#69](https://github.com/DeleganceAI/tms-ledger/pull/69))
 - [x] 3. One visual system and consistent page titles ([#69](https://github.com/DeleganceAI/tms-ledger/pull/69))
 - [x] 4. Collections page as the signed-in home: cards on the left, a zoomable pin board on the right ([#70](https://github.com/DeleganceAI/tms-ledger/pull/70))
-- [x] 5. Full-page chat per collection, approved accounts only, with the records it reads beside it (Polish 4)
+- [x] 5. Full-page chat per collection, approved accounts only, with the records it reads beside it ([#71](https://github.com/DeleganceAI/tms-ledger/pull/71))
+- [x] 6. A + button to add an npub (members, admins, agents, stewards) instead of editing a text list (Polish 5)
+- [x] 7. Signed-out visitors to signed-in pages go to Login with a reason, and come back after (Polish 5)
+- [x] 8. First-run guide on the collections page, and a Connect an agent panel with MCP config and a starter prompt (Polish 5)
+- [x] 9. Usage meter for free accounts (Polish 5)
 - [x] 13a. chat.js only for signed-in people; no 404 in the console ([#69](https://github.com/DeleganceAI/tms-ledger/pull/69))
 
 ## Decisions
@@ -24,6 +28,12 @@ The 2026-10-28 polish list. Each item is a stacked PR off `main`, merged in orde
 7. **Pin board.** Evidence is a paper, a claim an index card. Links are strings coloured by relation (green supports, amber qualifies, red rebuts), and a contradiction is the office's red zigzag. The layout is a force layout computed in the browser on every load: strings pull linked pins together, pins push each other apart, and a last pass stops them overlapping. Nothing is stored and there are no new tables. The board shows the newest 300 evidence and 300 claims and says so when there are more (the layout takes 0.3 s for 600 pins). Click a pin to open its record beside the board, dim everything unrelated, and step along its links. You can pan by dragging or with the arrow keys, zoom with the wheel, a pinch, +/−, or Fit, and press 0 to fit.
 
 8. **Chat.** `/c/<slug>/chat` replaces the admin popup (`chat.js` is gone): one page per collection, with the conversation on the left and the records the agent reads on the right. The server pulls those records out of each tool result before truncating it and streams them as a `records` event. Records the answer cites by id get a **cited** mark and move to the top, and clicking an id in the answer jumps to its card. Any member can open the page. Only approved accounts (TMS_APPROVED, admins, limits lifted in /admin) can send, because every turn costs model calls. Everyone else sees the chat greyed out with "Email dustin@delegance.ai for access to the chat" (`TMS_CONTACT`), and the API refuses them before any model call. Collections get a Chat link on their card and a "Chat with it" button over the board. Conversations still stay in the browser tab only.
+
+9. **+ buttons.** Every key list (a collection's people and admins, your agents, your stewards) is now a list of names with a × each and a "+ Add" field that takes an npub or hex key. Each change still signs the whole new list, because that is what those events carry, so nothing changes on the server. Removing asks first. The Ledger stays a single field with its own Save. Its row is now full width, which also fixes the Ledger box sitting lower than the Agents box (item 13).
+10. **Login and back.** `/dashboard`, `/submit`, `/c/<slug>/members` and `/c/<slug>/chat` send signed-out visitors to `/connect?next=<path>`. The page says why ("Log in to see your dashboard.") and returns there after an extension, sign-up or email login. `next` must be a path on this site.
+11. **First run.** A "Getting started" card tops the collections page for human accounts until its five steps are done (sign the terms, create a collection, connect your Ledger, add agents, pick where they work) or it is hidden. Each step ticks itself off from the account as it stands, and nothing new is stored.
+12. **Connect an agent.** This panel under Your agents gives the key step (`tms-sign keygen`), the MCP config (`{"mcpServers": {"paranoy": {"type": "http", "url": "<base>/mcp"}}}`) and a starter prompt naming your collections, with copy buttons and links to the bot templates and the signing docs. The panel says plainly that every call is signed, since a bare MCP client can list tools but not call them.
+13. **Usage meter.** `/api/me` now has `usage` for free accounts: records, collections and agents against their limits. It uses the same counts the write path checks. The Account page shows three bars, and the collections page shows a one-line summary with a mailto to `TMS_CONTACT`. At the collection limit, the New collection card turns into that note. Approved accounts see no meter.
 
 ## SQL to apply
 

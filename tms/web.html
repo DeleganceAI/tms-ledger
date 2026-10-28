@@ -4,7 +4,7 @@
 <link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/site.css?v=SITE_V">
 <style>
 a{color:var(--accent)}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 var(--sans)}
-main{max-width:860px;margin:0 auto;padding:16px;display:grid;gap:14px}
+main{max-width:860px;margin:0 auto;padding:16px;display:grid;grid-template-columns:minmax(0,1fr);gap:14px}#collections{overflow-x:auto}#collections table{min-width:520px}
 section{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px 16px}
 h2{margin:0 0 10px;font-size:13px;letter-spacing:.05em;text-transform:uppercase;color:var(--ink3)}
 main button{font:inherit;padding:6px 12px;border-radius:6px;border:1px solid var(--brand);background:var(--brand);color:var(--brand-ink);font-weight:600;cursor:pointer}
@@ -26,11 +26,20 @@ label.check{display:flex;align-items:center;gap:8px;margin-top:10px}label.check 
 pre{white-space:pre-wrap;background:var(--bg);padding:10px;border-radius:6px;font:12.5px/1.5 var(--mono);margin:0 0 10px}
 table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:6px 4px;border-top:1px solid var(--line);vertical-align:top}th{font-size:11.5px;color:var(--ink3);font-weight:600;border-top:0}
 td.n{font-family:var(--mono);text-align:right}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center}
+ul.keys{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:4px}ul.keys li{display:flex;align-items:center;gap:10px;padding:5px 8px;background:var(--bg);border:1px solid var(--line);border-radius:6px}
+ul.keys .nm{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}ul.keys code{font:11.5px var(--mono);color:var(--ink3)}
+ul.keys li.none{color:var(--ink3);background:none;border-style:dashed}
+main button.x{padding:0 8px;line-height:22px;font-size:15px}.addkey{display:flex;gap:6px;margin-top:6px}.addkey input{max-width:440px;font:12.5px var(--mono)}
+.meter{display:grid;gap:8px;margin-top:4px}.meter div{display:grid;grid-template-columns:110px 1fr auto;gap:10px;align-items:center;font-size:13px}
+.meter i{display:block;height:7px;border-radius:4px;background:var(--line2);overflow:hidden}.meter i b{display:block;height:100%;background:var(--good);border-radius:4px}.meter i b.hi{background:var(--warn)}.meter i b.full{background:var(--crit)}
+pre.copy{position:relative;white-space:pre-wrap;word-break:break-word;padding-right:70px}pre.copy button{position:absolute;top:6px;right:6px;padding:2px 8px;font-size:12px}
+details.connect{margin-top:14px;border-top:1px solid var(--line);padding-top:10px}details.connect summary{cursor:pointer;font-weight:600}details.connect ol{padding-left:20px}details.connect li{margin:6px 0}
+#why:empty{display:none}#why{background:var(--accent2);border-radius:6px;padding:6px 10px;margin:0 0 10px}
 [hidden]{display:none!important}
 </style></head><body>
 <!--HEADER-->
 <main id="main">
-  <section id="connect" hidden><h2>Log in or sign up</h2>
+  <section id="connect" hidden><h2>Log in or sign up</h2><p id="why"></p>
     <p>Every record here is signed by its author's Nostr key. Log in with a NIP-07 browser extension (Alby, nos2x, Keys.band) to read and write the collections you belong to. New here? Logging in with a new key, or a new email address below, creates a free account.</p>
     <button id="connectBtn">Log in</button> <span id="connectMsg" class="muted"></span>
     <div id="signupBox" hidden><p>This key has no account yet. Sign up to get a free account: one collection of your own, and 10,000 records.</p>
@@ -48,6 +57,8 @@ td.n{font-family:var(--mono);text-align:right}.actions{display:flex;gap:8px;flex
   <section id="profileBox" hidden><h2>Profile</h2><div id="profile"></div></section>
   <section id="termsBox" hidden><h2>Terms</h2><pre id="termsText"></pre>
     <button id="termsBtn">I agree: sign the terms</button> <span id="termsMsg"></span></section>
+  <section id="usageBox" hidden><h2>Free account</h2><div class="meter" id="meter"></div>
+    <p class="muted" style="margin:10px 0 0">Need more? Email <a id="usageMail" href="#"></a> to lift your limits.</p></section>
   <section id="home" hidden><h2>Your collections</h2><div id="collections"></div>
     <div id="aboutList" hidden><h2 style="margin-top:16px">Topic and visibility</h2>
       <p class="muted" style="margin-top:0">For collections you own. A <b>public</b> collection shows its name, topic and record counts on <a href="/communities">Communities</a>; its records and members stay private. Change either at any time.</p>
@@ -58,15 +69,20 @@ td.n{font-family:var(--mono);text-align:right}.actions{display:flex;gap:8px;flex
       <div id="newAgents" class="actions"></div>
       <div class="actions"><button id="newBtn" class="ghost">Create collection</button><span id="newMsg"></span></div></div>
     <div id="stewardsBox" hidden style="margin-top:16px"><h2>Agents who may create collections for you</h2>
-      <p class="muted" style="margin-top:0">One npub or hex pubkey per line. This is the full list: anyone left out can no longer create collections owned by you. Opening a collection makes that agent its admin. It does not make them an admin of collections you already have — do that on the collection's members page.</p>
-      <textarea id="sList" placeholder="npub1…"></textarea>
-      <div class="actions"><button id="sSave" class="ghost">Sign steward list</button><span id="sMsg"></span></div></div></section>
+      <p class="muted" style="margin-top:0">Opening a collection makes that agent its admin. It does not make them an admin of collections you already have — do that on the collection's members page. Removing one stops it opening new collections for you.</p>
+      <div id="sList"></div></div></section>
   <section id="agentsBox" hidden><h2>Your agents</h2>
     <p class="muted" style="margin-top:0">Your account is you, one <b>Ledger</b> agent that acts for you (it can create collections, manage members and pick agents, but cannot change which key is the Ledger), and your other agents. Each key belongs to one account. Agents work only in the collections you pick for them below.</p>
-    <div class="grid2"><label>Ledger (one npub or hex pubkey; empty for none)<input id="acLedger" placeholder="npub1…"></label>
-      <label>Agents, one npub or hex pubkey per line (the full list)<textarea id="acAgents" placeholder="npub1…"></textarea></label></div>
-    <div class="actions"><button id="acSave" class="ghost">Sign account</button><span id="acMsg"></span></div>
-    <div id="acPlaces"></div></section>
+    <label>Ledger<div class="addkey"><input id="acLedger" placeholder="npub1… or hex; empty for none" aria-label="Your Ledger's npub"><button id="acSave" class="ghost">Save Ledger</button></div></label><span id="acMsg"></span>
+    <h2 style="margin-top:16px">Agents</h2><div id="acAgents"></div>
+    <div id="acPlaces"></div>
+    <details class="connect" id="connectAgent"><summary>Connect an agent</summary>
+      <p class="muted">An agent is any program that holds its own Nostr key and calls Paranoy's MCP tools, signing each call. Your Ledger is one; add others for each job.</p>
+      <ol><li>Make the agent a key: <code>uv run tms-sign keygen</code> in a checkout of <a href="https://github.com/DeleganceAI/tms-ledger" target="_blank" rel="noopener">the repo</a>, or any Nostr library. Keep its <code>nsec</code> in the agent's own config; never paste it here.</li>
+        <li>Add its <code>npub</code> above with <b>+ Add</b> (or as your Ledger), then tick the collections it works in.</li>
+        <li>Point the agent at the MCP endpoint. Most MCP clients take a config like this:<pre class="copy" id="mcpConfig"></pre></li>
+        <li>Give it instructions. This starter prompt names your collections; the <a href="https://github.com/DeleganceAI/tms-ledger/tree/main/docs/bots" target="_blank" rel="noopener">bot templates</a> have fuller ones for each job:<pre class="copy" id="starter"></pre></li></ol>
+      <p class="muted">Listing tools needs no signature. Every other call carries a signed request; <a href="/docs#for-bots-and-agents">the docs</a> show how, with Python and JavaScript examples.</p></details></section>
   <section id="submit" hidden><h2>Submit evidence</h2>
     <div class="grid2"><label>Collection<select id="sCol"></select></label>
       <label>URL<div style="display:flex;gap:6px"><input id="sUrl" placeholder="https://..."><button id="fetchBtn" class="ghost">Fetch</button></div></label>
@@ -84,11 +100,13 @@ td.n{font-family:var(--mono);text-align:right}.actions{display:flex;gap:8px;flex
     <p class="muted" style="margin-top:0">Collections whose owners chose to show them. You see each one's name, topic and record counts; the records themselves stay private to its members. To join one, ask its owner.</p>
     <div id="cList" class="cgrid"></div></section>
   <section id="members" hidden><h2>Members of <span id="mSlug"></span></h2><table id="mTable"></table>
-    <div id="adminBox" hidden><label style="margin-top:12px">Admins, one npub or hex pubkey per line (the full list; the owner is never an admin)<textarea id="admList" placeholder="npub1…"></textarea></label>
-      <p class="muted" style="margin:6px 0 0">Admins can change members and the topic. They cannot change this list. Someone removed here keeps access only if they are still on the member list below.</p>
-      <div class="actions"><button id="admSave" class="ghost">Sign admin list</button><span id="admMsg"></span></div></div>
-    <label style="margin-top:12px">People besides the owner, one npub or hex pubkey per line (the full list: anyone left out is removed, and their agents with them). Add people, not their bots: each person picks which of their own agents work here. The owner always stays. Admins stay members even if left off this list.<textarea id="mList"></textarea></label>
-    <div class="actions"><button id="mSave">Sign members list</button><a id="mExport" href="#">Download export (JSONL)</a><span id="mMsg"></span></div></section>
+    <h2 style="margin-top:18px">People</h2>
+    <p class="muted" style="margin:0">Add people, not their bots: each person picks which of their own agents work here. Removing someone removes their agents with them. The owner always stays, and admins stay members.</p>
+    <div id="mList"></div>
+    <div id="adminBox" hidden><h2 style="margin-top:18px">Admins</h2>
+      <p class="muted" style="margin:0">Admins can change members and the topic, but not this list. The owner is never an admin. Someone removed here keeps access only if they are still on the list of people above.</p>
+      <div id="admList"></div></div>
+    <div class="actions"><a id="mExport" href="#">Download export (JSONL)</a><span id="mMsg"></span></div></section>
 </main>
 <script>
 const $ = id => document.getElementById(id)
@@ -141,6 +159,39 @@ function toHex(s) {
   if (out.length !== 32) throw new Error(`not a 32-byte key: ${s}`)
   return out.map(b => b.toString(16).padStart(2, '0')).join('')
 }
+
+// A list of keys: each with its name and a remove button, and a + to add one. Every change signs the
+// whole new list at once, since these events always carry the full list. save(hexes) publishes it.
+const shortNpub = n => n.slice(0, 12) + '…' + n.slice(-6)
+function keyList(el, items, save, {what = "a key", none = 'None yet.'} = {}) {
+  el = $(el)
+  el.innerHTML = `<ul class="keys">${items.length ? items.map(k => `<li><span class="nm">${esc(k.name || 'No profile yet')}</span>
+      <code title="${esc(k.npub)}">${esc(shortNpub(k.npub))}</code><button class="ghost x" type="button" data-pk="${esc(k.pubkey)}" aria-label="Remove ${esc(k.name || k.npub)}">×</button></li>`).join('')
+      : `<li class="none">${esc(none)}</li>`}</ul>
+    <div class="addkey"><input placeholder="npub1… or hex pubkey" aria-label="Add ${esc(what)} by npub"><button class="ghost" type="button">+ Add</button></div><span class="msg muted"></span>`
+  const input = el.querySelector('input'), msg = el.querySelector('.msg'), have = items.map(k => k.pubkey)
+  const run = async next => {
+    try { msg.className = 'msg muted'; msg.textContent = 'Signing…'; await save([...new Set(next)]) }
+    catch (e) { msg.className = 'msg err'; msg.textContent = e.message }
+  }
+  const add = () => {
+    let hex; try { hex = toHex(input.value) } catch (e) { msg.className = 'msg err'; msg.textContent = e.message; return }
+    if (have.includes(hex)) { msg.className = 'msg muted'; msg.textContent = 'Already on the list.'; return }
+    run([...have, hex])
+  }
+  el.querySelector('.addkey button').onclick = add
+  input.onkeydown = e => { if (e.key === 'Enter') add() }
+  el.querySelectorAll('button.x').forEach(b => b.onclick = () => {
+    const k = items.find(i => i.pubkey === b.dataset.pk)
+    if (confirm(`Remove ${k.name || k.npub}?`)) run(have.filter(h => h !== k.pubkey))
+  })
+}
+
+// After logging in, go back to the page that sent you here (?next=, a path on this site).
+const NEXT = new URLSearchParams(location.search).get('next')
+const goNext = () => { if (NEXT && /^\/(?!\/)/.test(NEXT)) { location.href = NEXT; return true } return false }
+const WHY = [[/^\/dashboard/, 'Log in to see your dashboard.'], [/^\/submit/, 'Log in to submit evidence.'],
+  [/^\/c\/[^/]+\/chat/, 'Log in to chat with this collection.'], [/^\/c\/[^/]+\/members/, "Log in to manage this collection's members."], [/^\//, 'Log in to continue.']]
 
 // Cloudflare Turnstile on sign-up and on every email code request. interaction-only: most people never
 // see it; it shows a challenge only when Cloudflare wants one. With no site key there is no check.
@@ -201,7 +252,9 @@ function renderHome() {
   $('newCol').hidden = !ME.can_create
   renderAgents()
   $('stewardsBox').hidden = !ME.approved
-  if (ME.approved) $('sList').value = (ME.stewards || []).map(s => s.npub).join('\n')
+  if (ME.approved) keyList('sList', ME.stewards || [], async stewards => { await publish([await sign(4711, {stewards})]); await refresh() },
+    {what: "a steward", none: 'No agents may create collections for you.'})
+  renderUsage()
   if (ME.can_create && location.hash === '#new') { $('newCol').scrollIntoView({block: 'center'}); $('newSlug').focus() }  // from the dashboard's + card
 }
 
@@ -235,8 +288,10 @@ function renderAgents() {
   const A = ME.account
   $('agentsBox').hidden = !A || A.role === 'agent'
   if ($('agentsBox').hidden) return
-  $('acLedger').value = A.ledger?.npub || ''; $('acLedger').disabled = A.role === 'ledger'
-  $('acAgents').value = A.agents.map(a => a.npub).join('\n')
+  $('acLedger').value = A.ledger?.npub || ''; $('acLedger').disabled = $('acSave').disabled = A.role === 'ledger'
+  keyList('acAgents', A.agents, async agents => { await publish([await sign(4713, {ledger: A.ledger?.pubkey || null, agents})]); await refresh() },
+    {what: "an agent", none: 'No agents yet. Add one by its npub.'})
+  renderConnect()
   $('newAgents').innerHTML = A.agents.length ? '<span class="muted">Agents that may work here:</span>' + checklist('na') : ''
   const cols = ME.collections.filter(c => c.role)
   $('acPlaces').innerHTML = A.agents.length && cols.length ? '<h2 style="margin-top:16px">Where they work</h2>' + cols.map(c => `<div class="aboutrow" data-slug="${esc(c.slug)}"><b class="mono">${esc(c.slug)}</b>
@@ -252,8 +307,7 @@ function renderAgents() {
 $('acSave').onclick = async () => {
   try {
     const ledger = $('acLedger').value.trim() ? toHex($('acLedger').value) : null
-    const agents = [...new Set($('acAgents').value.split(/[\s,]+/).filter(Boolean).map(toHex))]
-    await publish([await sign(4713, {ledger, agents})]); say('acMsg', 'Saved.', 'ok'); await refresh()
+    await publish([await sign(4713, {ledger, agents: ME.account.agents.map(a => a.pubkey)})]); say('acMsg', 'Saved.', 'ok'); await refresh()
   } catch (e) { say('acMsg', e.message, 'err') }
 }
 
@@ -270,11 +324,32 @@ $('newBtn').onclick = async () => {  // an empty members list names the collecti
     await publish(batch); await refresh()
   } catch (e) { say('newMsg', e.message, 'err') }
 }
-$('sSave').onclick = async () => {
-  try {
-    const stewards = [...new Set($('sList').value.split(/[\s,]+/).filter(Boolean).map(toHex))]
-    await publish([await sign(4711, {stewards})]); say('sMsg', 'Saved.', 'ok'); await refresh()
-  } catch (e) { say('sMsg', e.message, 'err') }
+
+// A free account's use of its limits; approved accounts have none and see no meter.
+function renderUsage() {
+  const u = ME.usage
+  $('usageBox').hidden = !u
+  if (!u) return
+  const row = (k, n, max) => { const pct = Math.min(100, 100 * n / max)
+    return `<div><span>${k}</span><i role="progressbar" aria-label="${k}" aria-valuemin="0" aria-valuemax="${max}" aria-valuenow="${n}"><b class="${pct >= 100 ? 'full' : pct >= 80 ? 'hi' : ''}" style="width:${pct}%"></b></i><span class="mono">${n.toLocaleString('en-US')} / ${max.toLocaleString('en-US')}</span></div>` }
+  $('meter').innerHTML = row('Records', u.records, u.records_limit) + row('Collections', u.collections, u.collections_limit) + row('Agents', u.agents, u.agents_limit)
+  $('usageMail').textContent = ME.contact; $('usageMail').href = 'mailto:' + ME.contact + '?subject=Paranoy%20limits'
+}
+
+// The Connect an agent panel: a config any MCP client reads, and a starter prompt naming your collections.
+function renderConnect() {
+  const base = location.origin, cols = ME.collections.map(c => c.slug), name = ME.profile?.name || 'me'
+  const cfg = JSON.stringify({mcpServers: {paranoy: {type: 'http', url: base + '/mcp'}}}, null, 2)
+  const prompt = `You are an agent working for ${name} on the Paranoy evidence ledger at ${base}.
+Read ${base}/docs.md first: it defines evidence, claims, links and contradictions, and shows how to sign.
+Your Nostr key is in the BOT_SECRET_HEX environment variable. Never print it. Sign every tool call with it.
+Before your first write, publish a profile (kind 0) that says you are an agent, and sign the terms (kind 4706).
+Work only in ${cols.length ? cols.map(c => '"' + c + '"').join(', ') : 'the collections you are added to'}. Search for existing claims before adding one.
+Never edit or delete: dispute a record by linking to it. The ledger never decides what is true; you report what the records say.`
+  const fill = (id, text) => { $(id).textContent = text; const b = document.createElement('button'); b.type = 'button'; b.className = 'ghost'; b.textContent = 'Copy'
+    b.onclick = async () => { await navigator.clipboard.writeText(text); b.textContent = 'Copied' }; $(id).append(b) }
+  fill('mcpConfig', cfg); fill('starter', prompt)
+  if (location.hash === '#agents') { $('connectAgent').open = true; $('agentsBox').scrollIntoView() }
 }
 
 $('termsBtn').onclick = async () => {
@@ -290,6 +365,7 @@ async function connect() {
     const relay = await relayProfile(pk)
     say('connectMsg', 'Sign the login request in your extension…')
     ME = await post('/login', await sign(4707, {tool: 'login', args: {}}))
+    if (goNext()) return
     $('connect').hidden = true
     show(relay)
   } catch (e) {
@@ -304,6 +380,7 @@ $('signupBtn').onclick = async () => {
     say('connectMsg', 'Sign the sign-up request in your extension…')
     const event = await sign(4707, {tool: 'login', args: {}})
     ME = await post('/api/signup', {event, turnstile: await checkToken('signupCheck')})
+    if (goNext()) return
     $('connect').hidden = true
     show(await relayProfile(ME.pubkey))
   } catch (e) { say('connectMsg', e.message, 'err'); resetCheck('signupCheck') }
@@ -316,7 +393,7 @@ $('eSend').onclick = async () => {
   finally { resetCheck('eCheck') }  // tokens work once
 }
 $('eVerify').onclick = async () => {
-  try { ME = await post('/api/email/verify', {email: $('eAddr').value, code: $('eCode').value}); $('connect').hidden = true; show(null) }
+  try { ME = await post('/api/email/verify', {email: $('eAddr').value, code: $('eCode').value}); if (goNext()) return; $('connect').hidden = true; show(null) }
   catch (e) { say('eMsg', e.message, 'err') }
 }
 $('eCode').onkeydown = e => { if (e.key === 'Enter') $('eVerify').click() }
@@ -410,9 +487,11 @@ async function renderMembers(slug) {
       m.ledger && `Ledger: ${who(m.ledger)}`, m.agents?.length && `Agents: ${m.agents.map(who).join(', ')}`].filter(Boolean).join(' · ')}</div>` : ''
     $('mTable').innerHTML = '<tr><th>Name</th><th>npub</th></tr>' + d.members.map(m =>
       `<tr><td>${esc(m.name || '—')}${roleLabel(m)}<div class="muted">${esc(m.about || '')}</div>${bots(m)}</td><td class="mono">${esc(m.npub)}</td></tr>`).join('')
-    $('mList').value = d.members.filter(m => m.role === 'member').map(m => m.npub).join('\n')
+    keyList('mList', d.members.filter(m => m.role === 'member'), async members => {
+      await publish([await sign(4705, {collection: slug, members})]); renderMembers(slug) }, {what: "a person", none: 'Only the owner and admins so far.'})
     $('adminBox').hidden = d.caller_role !== 'owner'
-    if (d.caller_role === 'owner') $('admList').value = d.members.filter(m => m.role === 'admin').map(m => m.npub).join('\n')
+    if (d.caller_role === 'owner') keyList('admList', d.members.filter(m => m.role === 'admin'), async admins => {
+      await publish([await sign(4710, {collection: slug, admins})]); renderMembers(slug) }, {what: "an admin", none: 'No admins.'})
     $('aboutBox').hidden = false; $('aTopic').value = d.topic || ''; $('aPublic').checked = d.public
   } catch (e) { say('mMsg', e.message, 'err') }
   $('aSave').onclick = async () => {
@@ -421,18 +500,6 @@ async function renderMembers(slug) {
       if (!topic) throw new Error('write a topic first')
       await publish([await sign(4709, {collection: slug, topic, public: $('aPublic').checked})]); say('aMsg', 'Saved.', 'ok')
     } catch (e) { say('aMsg', e.message, 'err') }
-  }
-  $('admSave').onclick = async () => {
-    try {
-      const admins = [...new Set($('admList').value.split(/[\s,]+/).filter(Boolean).map(toHex))]
-      await publish([await sign(4710, {collection: slug, admins})]); say('admMsg', 'Saved.', 'ok'); renderMembers(slug)
-    } catch (e) { say('admMsg', e.message, 'err') }
-  }
-  $('mSave').onclick = async () => {
-    try {
-      const members = [...new Set($('mList').value.split(/[\s,]+/).filter(Boolean).map(toHex))]
-      await publish([await sign(4705, {collection: slug, members})]); say('mMsg', 'Saved.', 'ok'); renderMembers(slug)
-    } catch (e) { say('mMsg', e.message, 'err') }
   }
 }
 
@@ -448,8 +515,9 @@ async function renderCommunities() {
 }
 if (location.pathname === '/communities') {  // public: no login needed
   renderCommunities()
-} else api('/api/me').then(d => { ME = d; show(null) }).catch(() => {
+} else api('/api/me').then(d => { ME = d; if (!(location.pathname === '/connect' && goNext())) show(null) }).catch(() => {
   $('connect').hidden = false; botCheck('eCheck')
+  if (NEXT) $('why').textContent = WHY.find(([re]) => re.test(NEXT))[1]
   if (location.hash === '#signup') $('eAddr').focus()  // the header's Sign up
 })
 </script></body></html>

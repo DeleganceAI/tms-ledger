@@ -384,10 +384,19 @@ def account(conn, pubkey: str) -> dict:
     role = "ledger" if human and ledger_human(conn, pubkey) else "agent" if human else (
         "human" if approved or _is_human(conn, pubkey) else None)
     human = human or (pubkey if role == "human" else None)
+    keys = _account_keys(conn, human, role) if human else None
     return {"pubkey": pubkey, "npub": E.bech32_encode("npub", pubkey), "approved": approved,
             "allowed": allowed(conn, pubkey), "can_create": role in ("human", "ledger"),
-            "account": _account_keys(conn, human, role) if human else None, "terms_signed": signed_terms(conn, pubkey), "terms": TERMS,
-            "profile": profile, "collections": list_collections(conn, pubkey), "stewards": stewards}
+            "account": keys, "terms_signed": signed_terms(conn, pubkey), "terms": TERMS,
+            "profile": profile, "collections": list_collections(conn, pubkey), "stewards": stewards,
+            "usage": usage(conn, human, keys) if keys and not keys["approved"] else None, "contact": CONTACT}
+
+
+def usage(conn, human: str, keys: dict) -> dict:
+    """A free account's use of its limits, for the meter on its pages. The write path checks the same counts."""
+    owned = conn.execute("SELECT count(*) AS n FROM collections WHERE owner = %s", (human,)).fetchone()["n"]
+    return {"records": _records(conn, human), "records_limit": FREE_RECORDS, "collections": owned,
+            "collections_limit": FREE_COLLECTIONS, "agents": len(keys["agents"]), "agents_limit": FREE_AGENTS}
 
 
 def _account_keys(conn, human: str, role: str) -> dict:
