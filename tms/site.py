@@ -39,9 +39,8 @@ def header(signed_in: bool, path: str) -> str:
                  + f'<span class="end">{GITHUB}<a class="btn ghost" href="/connect">Log in</a><a class="btn" href="/connect#signup">Sign up</a></span>')
     subnav = (f'<nav class="subnav{" pinned" if on_dash else ""}" id="subnav" aria-label="Dashboard sections">{sub}</nav>'
               if signed_in else "")
-    chat = '<script src="/chat.js" defer></script>' if signed_in else ""  # the chat is for signed-in people only
     cta = "" if signed_in else '<a class="btn cta-m" href="/connect#signup">Sign up</a>'  # phones: outside the menu
     return (f'<a class="skip" href="#main">Skip to content</a><header class="site" id="site-header">{LOGO}{cta}'
             f'<button id="menu-btn" type="button" aria-label="Menu" aria-expanded="false" aria-controls="site-nav">☰</button>'
             f'<nav id="site-nav" aria-label="Main">{links}</nav></header>{subnav}'
-            f'<script src="/site.js?v={VERSION}" defer></script>{chat}')
+            f'<script src="/site.js?v={VERSION}" defer></script>')

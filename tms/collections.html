@@ -23,7 +23,7 @@ a{color:var(--accent)}[hidden]{display:none!important}
 /* right: the pin board */
 #boardwrap{position:relative;min-width:0;min-height:0;display:flex;flex-direction:column}
 .bar{display:flex;align-items:center;gap:8px 14px;flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid var(--line2);font-size:12.5px}
-.bar h2{margin:0;font:600 14px var(--mono)}.bar .grow{flex:1}
+.bar h2{margin:0;font:600 14px var(--mono)}.bar .btn{padding:3px 10px;font-size:12px}.bar .grow{flex:1}
 .zoom{display:flex;gap:4px}.zoom button{font:inherit;min-width:30px;height:28px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--ink);cursor:pointer}
 .legend{display:flex;gap:10px;color:var(--ink3);font-size:11.5px;flex-wrap:wrap}.legend i{display:inline-block;width:14px;height:3px;border-radius:2px;margin-right:4px;vertical-align:3px}
 #board{position:relative;flex:1;min-height:0;overflow:hidden;cursor:grab;touch-action:none;outline:none;
@@ -62,7 +62,7 @@ a{color:var(--accent)}[hidden]{display:none!important}
 <div id="main">
   <section id="side" aria-label="Your collections"><h1>Your collections</h1><div class="note muted">Loading…</div></section>
   <section id="boardwrap" aria-label="Pin board">
-    <div class="bar"><h2 id="bTitle">&nbsp;</h2><span class="muted" id="bNote"></span><span class="grow"></span>
+    <div class="bar"><h2 id="bTitle">&nbsp;</h2><a class="btn ghost" id="bChat" href="#" hidden>Chat with it</a><span class="muted" id="bNote"></span><span class="grow"></span>
       <span class="legend" aria-hidden="true"><span><i style="background:var(--good)"></i>supports</span><span><i style="background:var(--warn)"></i>qualifies</span><span><i style="background:var(--crit)"></i>rebuts</span><span><i style="background:repeating-linear-gradient(90deg,var(--bad) 0 4px,transparent 4px 6px)"></i>contradiction</span></span>
       <span class="zoom"><button id="zOut" type="button" aria-label="Zoom out">−</button><button id="zFit" type="button" aria-label="Fit the board to the view">Fit</button><button id="zIn" type="button" aria-label="Zoom in">+</button></span></div>
     <div id="board" tabindex="0" aria-label="Pin board: drag or use the arrow keys to pan, scroll or + and − to zoom. Tab to a pin and press Enter to open it.">
@@ -90,7 +90,7 @@ function renderSide() {
       <span class="t"><b>${esc(c.slug)}</b>${c.role === 'owner' || c.role === 'admin' ? `<span class="tag">${c.role}</span>` : ''}${c.public ? '<span class="tag pub">public</span>' : ''}</span>
       ${c.topic ? `<div class="topic">${esc(c.topic)}</div>` : '<div class="topic muted">No topic yet</div>'}
       <div class="counts">${n(c.evidence, 'evidence', 'evidence')} · ${n(c.claims, 'claim')} · ${n(c.links, 'link')} · ${n(c.contradictions, 'contradiction')} · ${n(c.members.length, 'member')}</div></button>
-    <div class="acts">${c.role === 'owner' || c.role === 'admin' ? `<a href="/c/${esc(c.slug)}/members">Members</a>` : ''}<a href="/c/${esc(c.slug)}/export.jsonl">Export</a></div></div>`).join('')
+    <div class="acts"><a href="/c/${esc(c.slug)}/chat">Chat</a>${c.role === 'owner' || c.role === 'admin' ? `<a href="/c/${esc(c.slug)}/members">Members</a>` : ''}<a href="/c/${esc(c.slug)}/export.jsonl">Export</a></div></div>`).join('')
   $('side').innerHTML = '<h1>Your collections</h1>' + (cs.length ? cards : '<div class="note">You are not in any collection yet. Create one, or ask an owner to add you.</div>')
     + (ME.can_create ? '<a class="new" href="/connect#new"><b>+</b>New collection</a>' : '')
     + (ME.terms_signed ? '' : '<div class="note">Before you write, read and sign the terms on your <a href="/connect">Account</a> page.</div>')
@@ -105,6 +105,7 @@ async function select(slug, initial) {
   $('side').querySelectorAll('.ccard').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.slug === slug)))
   if (!initial) history.replaceState(null, '', '/?c=' + encodeURIComponent(slug))
   $('bTitle').textContent = slug; $('bNote').textContent = 'loading…'; closeDetail()
+  $('bChat').href = `/c/${encodeURIComponent(slug)}/chat`; $('bChat').hidden = false
   try {
     const d = await api(`/api/c/${encodeURIComponent(slug)}/board`)
     if (current !== slug) return

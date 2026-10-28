@@ -742,13 +742,13 @@ def server(ids) -> None:
         assert client.post("/admin/admins", data={"npub": bob_npub}).status_code == 404, "only site admins manage admins"
         n = client.get("/dashboard/api/npubs")
         assert n.status_code == 200 and not n.json()["admin"] and "outside" not in n.text and "other" not in n.text
-        assert client.get("/dashboard/api/chat").json()["collections"] == ["smoke"]
+        assert client.get("/c/smoke/chat").status_code == 200, "members get the chat page"
         with L.connect() as conn:
             assert L.is_admin(conn, PK[BOB]) and L.is_approved(conn, PK[BOB])
         client.cookies.set(W.COOKIE, W.make_cookie(PK[OWNER]))
         assert client.post(f"/admin/admins/{PK[BOB]}/remove", follow_redirects=False).status_code == 303
         client.cookies.set(W.COOKIE, W.make_cookie(PK[BOB]))
-        assert client.get("/admin").status_code == 404 and client.get("/dashboard/api/chat").json() == {"enabled": False}
+        assert client.get("/admin").status_code == 404
         client.cookies.clear()
         # Docs are public, with the live base URL and terms hash filled in.
         r = client.get("/docs")
@@ -1010,7 +1010,7 @@ def email_signin() -> None:
 
 
 def chat_agent() -> None:
-    """Admin chat: a scripted model calls a read tool, then answers; tools stay in the chat's collection."""
+    """Chat page: approved members only; a scripted model calls a read tool, then answers; tools stay in the chat's collection."""
     from starlette.testclient import TestClient
 
     from tms import chat as C
@@ -1042,39 +1042,44 @@ def chat_agent() -> None:
     L.ADMINS = {PK[OWNER]}
     try:
         with TestClient(S.http_app()) as client:
-            assert client.get("/dashboard/api/chat").status_code == 404  # logged out
-            js = client.get("/chat.js")  # the launcher every page loads; it stays hidden unless the config answers
-            assert js.status_code == 200 and "javascript" in js.headers["content-type"] and "/dashboard/api/chat" in js.text
-            assert "marked@15.0.12" in js.text and "createElement('template')" in js.text, "answers render as markdown, cleaned in an inert template"
+            r = client.get("/c/smoke/chat", follow_redirects=False)  # logged out: to Login, and back after
+            assert r.status_code == 302 and r.headers["location"] == "/connect?next=/c/smoke/chat"
+            assert client.post("/api/c/smoke/chat", json={}).status_code == 401
+            assert client.get("/chat.js").status_code == 404, "the popup is gone: chat is a page per collection"
             pages = ("/", "/office", "/docs", "/docs/why-nostr", "/connect", "/communities", "/submit")
-            assert not any('src="/chat.js"' in client.get(p).text for p in pages), "no chat for visitors: no 404s in their console"
             for p in pages:  # one shared header, the same on every page
                 html = client.get(p).text
                 assert html.count('id="site-header"') == 1 and "<!--HEADER-->" not in html and 'href="/site.css?v=' in html, p
-                assert "github.com/DeleganceAI/tms-ledger" in html and 'href="/connect#signup"' in html, p
+                assert "github.com/DeleganceAI/tms-ledger" in html and 'href="/connect#signup"' in html and "chat.js" not in html, p
             assert client.get("/site.css").status_code == 200 and "nav.subnav" in client.get("/site.css").text
             assert "menu-btn" in client.get("/site.js").text
-            client.cookies.set(W.COOKIE, W.make_cookie(PK[BOB]))  # a member, not an admin
-            assert all('src="/chat.js"' in client.get(p).text for p in pages + ("/dashboard",)), "signed in: on every page"
+            client.cookies.set(W.COOKIE, W.make_cookie(PK[BOB]))  # a member, not approved: sees the page, can't chat
+            with L.connect() as conn:
+                assert not L.is_approved(conn, PK[BOB])
             dash = client.get("/dashboard").text  # the dashboard's sections are the header's second bar, pinned there
             assert 'class="subnav pinned"' in dash and 'href="/dashboard#activity"' in dash and "<title>Paranoy · Dashboard</title>" in dash
             assert 'class="subnav"' in client.get("/docs").text and 'aria-current="page">Docs' in client.get("/docs").text
             assert "<title>Paranoy · Submit</title>" in client.get("/submit").text
-            assert client.get("/dashboard/api/chat").json() == {"enabled": False}
-            assert client.post("/dashboard/api/chat", json={}).status_code == 404
+            page = client.get("/c/smoke/chat")
+            assert page.status_code == 200 and "The chat is for approved accounts" in page.text and L.CONTACT in page.text
+            assert C.CHAT_MODEL in page.text and "{{" not in page.text and "marked@15.0.12" in page.text
+            r = client.post("/api/c/smoke/chat", json={"messages": [{"role": "user", "content": "hi"}]})
+            assert r.status_code == 403 and L.CONTACT in r.json()["error"] and not seen, "no model call for an unapproved key"
+            assert client.get("/c/outside/chat").status_code == 403
             client.cookies.set(W.COOKIE, W.make_cookie(PK[OWNER]))
-            cfg = client.get("/dashboard/api/chat").json()
-            assert cfg["model"] == C.CHAT_MODEL and "smoke" in cfg["collections"], cfg
             ask = [{"role": "user", "content": "What causes HIT?"}]
-            assert client.post("/dashboard/api/chat", json={"collection": "outside", "messages": ask}).status_code == 403
-            assert client.post("/dashboard/api/chat", json={"collection": "smoke", "messages": []}).status_code == 400
-            r = client.post("/dashboard/api/chat", json={"collection": "smoke", "messages": ask})
+            assert client.post("/api/c/outside/chat", json={"messages": ask}).status_code == 403
+            assert client.post("/api/c/smoke/chat", json={"messages": []}).status_code == 400
+            r = client.post("/api/c/smoke/chat", json={"messages": ask})
             evs = [json.loads(x[6:]) for x in r.text.split("\n\n") if x.startswith("data: ")]
     finally:
         C.httpx.post = real
-    assert [e["type"] for e in evs] == ["tool_call", "tool_result", "tool_call", "tool_result", "answer", "messages"], evs
-    assert "Histamine intolerance" in evs[1]["result"] and evs[3]["result"] == "null", "pinned to the chat's collection"
-    assert evs[4]["content"].startswith("Reduced DAO") and [m["role"] for m in evs[5]["messages"]] == ["user", "assistant", "tool", "tool", "assistant"]
+    assert [e["type"] for e in evs] == ["tool_call", "tool_result", "records", "tool_call", "tool_result", "answer", "messages"], evs
+    assert "Histamine intolerance" in evs[1]["result"] and evs[4]["result"] == "null", "pinned to the chat's collection"
+    recs = evs[2]["records"]  # what the side panel shows: each record once, the claims and the links on them
+    assert len({r["id"] for r in recs}) == len(recs) and {"claim", "link"} <= {r["kind"] for r in recs}, recs
+    assert all(len(r.get("quote", "")) <= 400 for r in recs) and not any(r["id"] == other for r in recs)
+    assert evs[5]["content"].startswith("Reduced DAO") and [m["role"] for m in evs[6]["messages"]] == ["user", "assistant", "tool", "tool", "assistant"]
     tools = {t["function"]["name"] for t in seen[0]["tools"]}
     assert seen[0]["model"] == C.CHAT_MODEL and "publish" not in tools and "search_claims" in tools and seen[0]["messages"][0]["role"] == "system"
     with L.connect() as conn:

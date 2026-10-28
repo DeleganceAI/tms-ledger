@@ -29,7 +29,7 @@ The server enforces exactly two mechanical things beyond structure: a link's quo
 | [tms/web.py](tms/web.py), [tms/web.html](tms/web.html) | `/`, `/submit`, `/c/<slug>/members`, `/c/<slug>/export.jsonl`, `/login`. |
 | [tms/office.html](tms/office.html), [tms/office.py](tms/office.py) | The office ([OFFICE.md](OFFICE.md)): the logged-out home page and `/office`, driven by `/office.json`, anonymous slices of real collections and the last hour's events, recomputed hourly. |
 | [tms/ui.py](tms/ui.py), [tms/ui.html](tms/ui.html) | `/dashboard`, behind the login cookie, scoped to your collections. |
-| [tms/chat.py](tms/chat.py), [tms/chat.js](tms/chat.js) | The admin chat popup on every page: a read-only tool-calling agent over one collection, on DeepInfra; nothing stored. |
+| [tms/chat.py](tms/chat.py), [tms/chat.html](tms/chat.html) | `/c/<slug>/chat`: a read-only tool-calling agent over one collection, on DeepInfra, with the records it reads beside it; approved accounts only; nothing stored. |
 | [tms/admin.py](tms/admin.py) | `/admin` for admins: admins, DeepInfra spend (embeddings and chat), users, database size, events per day. |
 | [DOCS.md](DOCS.md) | The user and agent guide, served at `/docs` and `/docs.md`. |
 | [docs/bots/](docs/bots/README.md) | Templates for bots that collect evidence, mine claims, link them, look for gaps, argue for rejects, and manage a ledger. |
@@ -83,7 +83,7 @@ Environment:
 | `TMS_SERVER_NSEC` | The server's own key, which signs snapshot events and nothing else. |
 | `EMBED_URL`, `EMBED_MODEL`, `EMBED_API_KEY` | Default `http://localhost:11434/v1`, `qwen3-embedding:8b`. DeepInfra: `https://api.deepinfra.com/v1/openai`, `Qwen/Qwen3-Embedding-8B`. Must return 4096 dimensions. |
 | `RESEND_API_KEY`, `TMS_EMAIL_FROM`, `TMS_KEY_SECRET` | Email sign-in ([tms/email_login.py](tms/email_login.py)). Codes go out through Resend from `TMS_EMAIL_FROM` (default `Paranoy <login@mail.paranoy.org>`). `TMS_KEY_SECRET` encrypts the keys held for email accounts: **if it is lost, those keys are lost**, so back it up. Without both, email sign-in returns 503. `TMS_EMAIL_DEV=1` prints codes to the log instead of emailing them (local only). |
-| `CHAT_MODEL`, `CHAT_URL`, `CHAT_API_KEY` | The admin chat popup. Default `deepseek-ai/DeepSeek-V4.1-Flash` on `https://api.deepinfra.com/v1/openai`; the key defaults to `EMBED_API_KEY`. `CHAT_PRICE_IN_PER_MTOK` / `CHAT_PRICE_OUT_PER_MTOK` (0.20 / 0.60 USD) price it on `/admin`. |
+| `CHAT_MODEL`, `CHAT_URL`, `CHAT_API_KEY` | The collection chat. Default `deepseek-ai/DeepSeek-V4.1-Flash` on `https://api.deepinfra.com/v1/openai`; the key defaults to `EMBED_API_KEY`. `CHAT_PRICE_IN_PER_MTOK` / `CHAT_PRICE_OUT_PER_MTOK` (0.20 / 0.60 USD) price it on `/admin`. |
 | `EMBED_PRICE_PER_MTOK` | USD per million embedding tokens for the spend shown on `/admin` (default 0.01). Local endpoints are logged at $0. |
 
 ## Keys and signing
