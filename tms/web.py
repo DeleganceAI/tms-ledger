@@ -21,6 +21,7 @@ import sys
 import threading
 import time
 from collections import deque
+from html import escape
 from pathlib import Path
 
 import httpx
@@ -31,6 +32,7 @@ from starlette.routing import Route
 
 from . import events as E
 from . import ledger as L
+from . import site
 
 COOKIE = "tms"
 COOKIE_TTL = 12 * 3600
@@ -49,10 +51,10 @@ TURNSTILE_HOSTNAMES = {h for h in os.environ.get("TURNSTILE_HOSTNAMES", "").repl
 if not TURNSTILE_SECRET:
     print("TURNSTILE_SECRET is not set: sign-up is not checked for bots", file=sys.stderr)
 DOCS_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1"><title>Paranoy · Docs</title><style>
-:root{{color-scheme:dark;--bg:#2b2433;--panel:#342b3e;--line:#4a3f57;--ink:#f4efe6;--ink3:#9d91a8;--accent:#8ab6f9;--code:#241e2c}}
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>{title}</title>
+<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/site.css?v=SITE_V"><style>
+:root{{--code:#241e2c}}
 body{{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 system-ui,sans-serif}}
-header{{padding:10px 16px;border-bottom:1px solid var(--line);display:flex;flex-wrap:wrap;gap:4px 14px}}header a{{color:var(--ink3);text-decoration:none}}
 main{{max-width:860px;margin:0 auto;padding:8px 16px 40px;min-width:0}}a{{color:var(--accent)}}
 .wrap{{display:flex;justify-content:center;gap:28px}}
 #toc{{font-size:13px;line-height:1.4;padding:14px 0 0 16px}}#toc summary{{cursor:pointer;color:var(--ink3);font-weight:600}}
@@ -65,13 +67,11 @@ pre,code{{font:13px/1.5 ui-monospace,Menlo,monospace;background:var(--code);bord
 pre{{padding:10px 12px;overflow-x:auto;white-space:pre}}pre code{{padding:0;background:none}}#md{{white-space:pre-wrap}}
 table{{border-collapse:collapse;display:block;overflow-x:auto}}td,th{{border:1px solid var(--line);padding:5px 8px;text-align:left;vertical-align:top}}
 blockquote{{margin:0;padding:2px 14px;border-left:3px solid var(--line);color:var(--ink3)}}
-</style></head><body><header><b>Paranoy</b><a href="/">Home</a><a href="/submit">Submit</a><a href="/dashboard">Dashboard</a>
-<a href="/communities">Communities</a><a href="/office">Office</a><a href="/docs">Docs</a><a href="/docs/bitter-lesson">Bitter lesson</a><a href="/docs.md">Markdown</a><a href="https://github.com/DeleganceAI/tms-ledger" target="_blank" rel="noopener" title="Source on GitHub"><svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-2px;margin-right:4px"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>GitHub</a></header>
-<div class="wrap"><details id="toc" hidden><summary>Contents</summary><ol></ol></details><main><pre id="md">{md}</pre></main></div>
+</style></head><body>{header}
+<div class="wrap"><details id="toc" hidden><summary>Contents</summary><ol></ol></details><main id="main"><pre id="md">{md}</pre></main></div>
 <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"></script>
 <script>const el = document.getElementById('md'); if (window.marked) el.outerHTML = marked.parse(el.textContent)</script>
-<script>{toc_js}</script>
-<script src="/chat.js" defer></script></body></html>"""
+<script>{toc_js}</script></body></html>"""
 
 
 # The docs sidebar: a contents list from the rendered h2/h3, with the section in view highlighted.
@@ -90,7 +90,7 @@ TOC_JS = r"""(() => {
   const pages = [['/docs', 'Using Paranoy'], ['/docs/bitter-lesson', 'The Bitter Lesson Applied to Knowledge Graphs'], ['/docs/why-nostr', 'Why Nostr Keys for Login']];
   const group = document.createElement('li'); group.className = 'pages';
   group.innerHTML = '<b>Pages</b><ol>' + pages.map(([href, title]) =>
-    `<li><a href="${href}"${location.pathname === href ? ' class="here"' : ''}>${title}</a></li>`).join('') + '</ol>';
+    `<li><a href="${href}"${location.pathname === href ? ' class="here"' : ''}>${title}</a></li>`).join('') + '<li><a href="/docs.md">This guide as Markdown</a></li></ol>';
   list.prepend(group);
   toc.hidden = false; toc.open = matchMedia('(min-width: 1100px)').matches;
   toc.addEventListener('click', e => { if (e.target.closest('a') && !matchMedia('(min-width: 1100px)').matches) toc.open = false; });
@@ -210,9 +210,22 @@ async def logout(request: Request) -> JSONResponse:
     return resp
 
 
+TITLES = {"/": "Collections", "/connect": "Account", "/submit": "Submit", "/communities": "Communities"}
+
+
+def with_header(request: Request, html: str) -> str:
+    """A page with the shared header (tms/site.py) filled in for this visitor, and its title."""
+    path, signed_in = request.url.path, cookie_pubkey(request) is not None
+    title = "Members" if path.startswith("/c/") else TITLES.get(path, "")
+    if path == "/connect" and not signed_in:
+        title = "Log in"
+    return (html.replace("<!--HEADER-->", site.header(signed_in, path)).replace("?v=SITE_V", f"?v={site.VERSION}")
+            .replace("<title>Paranoy</title>", f"<title>Paranoy · {title}</title>" if title else "<title>Paranoy</title>"))
+
+
 async def page(request: Request):
-    return HTMLResponse(PAGE_FILE.read_text(encoding="utf-8")  # re-read so edits show on refresh
-                        .replace("{{TURNSTILE_SITE_KEY}}", TURNSTILE_SITE_KEY))
+    return HTMLResponse(with_header(request, PAGE_FILE.read_text(encoding="utf-8")  # re-read so edits show on refresh
+                                    .replace("{{TURNSTILE_SITE_KEY}}", TURNSTILE_SITE_KEY)))
 
 
 async def home(request: Request):
@@ -252,7 +265,7 @@ def _rate_limited(ip: str) -> bool:
 
 async def office(request: Request) -> HTMLResponse:
     """Ambient picture of the work. Papers are squiggles; nothing here is ledger data."""
-    return HTMLResponse(OFFICE_FILE.read_text(encoding="utf-8"))
+    return HTMLResponse(with_header(request, OFFICE_FILE.read_text(encoding="utf-8")))
 
 
 def _docs_text(request: Request, path: Path = DOCS_FILE) -> str:
@@ -263,17 +276,22 @@ def _docs_text(request: Request, path: Path = DOCS_FILE) -> str:
 
 async def docs(request: Request) -> HTMLResponse:
     """DOCS.md, rendered in the browser by a pinned marked; readable as plain text without JS."""
-    from html import escape
-    return HTMLResponse(DOCS_PAGE.format(md=escape(_docs_text(request)), toc_js=TOC_JS))
+    return _docs_html(request, DOCS_FILE)
+
+
+def _docs_html(request: Request, path: Path) -> HTMLResponse:
+    title = "Paranoy · Docs" if path == DOCS_FILE else f"Paranoy · {path.read_text(encoding='utf-8').split(chr(10), 1)[0].lstrip('# ')}"
+    return HTMLResponse(DOCS_PAGE.format(md=escape(_docs_text(request, path)), toc_js=TOC_JS, title=escape(title),
+                                         header=site.header(cookie_pubkey(request) is not None, request.url.path))
+                        .replace("?v=SITE_V", f"?v={site.VERSION}"))
 
 
 async def docs_page(request: Request) -> HTMLResponse:
     """An extra docs page from DOCS_PAGES, same template as /docs."""
-    from html import escape
     path = DOCS_PAGES.get(request.path_params["name"])
     if path is None:
         return HTMLResponse("not found", status_code=404)
-    return HTMLResponse(DOCS_PAGE.format(md=escape(_docs_text(request, path)), toc_js=TOC_JS))
+    return _docs_html(request, path)
 
 
 async def docs_md(request: Request) -> PlainTextResponse:
@@ -397,6 +415,9 @@ routes = [
     Route("/submit", page),
     Route("/communities", page),
     Route("/office", office),
+    *[Route("/" + f.name, lambda r, f=f: FileResponse(f, headers={"Cache-Control": "public, max-age=86400"}))
+      for f in (Path(__file__).with_name("site.css"), Path(__file__).with_name("site.js"))],  # the shared header and styles; pages add ?v=
+
     *[Route("/" + f.name, lambda r, f=f: FileResponse(f, headers={"Cache-Control": "public, max-age=86400"}))
       for f in Path(__file__).with_name("brand").iterdir()],  # favicon.svg, favicon.ico, apple-touch-icon.png, logo.png (emails)
     Route("/c/{slug}/members", members_page),

@@ -741,7 +741,7 @@ def server(ids) -> None:
         client.cookies.set(W.COOKIE, W.make_cookie(PK[OWNER]))
         assert client.post(f"/admin/admins/{PK[BOB]}/remove", follow_redirects=False).status_code == 303
         client.cookies.set(W.COOKIE, W.make_cookie(PK[BOB]))
-        assert client.get("/admin").status_code == 404 and client.get("/dashboard/api/chat").status_code == 404
+        assert client.get("/admin").status_code == 404 and client.get("/dashboard/api/chat").json() == {"enabled": False}
         client.cookies.clear()
         # Docs are public, with the live base URL and terms hash filled in.
         r = client.get("/docs")
@@ -761,7 +761,7 @@ def server(ids) -> None:
         assert "smoke" not in office.text and ids[0] not in office.text
         landing = client.get("/")  # logged out: the office is the landing page
         assert landing.headers["cache-control"] == "private, no-store"
-        assert 'id="panel"' in landing.text and 'href="/connect">Sign up' in landing.text and client.get("/connect").status_code == 200
+        assert 'id="panel"' in landing.text and 'href="/connect#signup">Sign up' in landing.text and client.get("/connect").status_code == 200
         assert "<title>Paranoy · Your personal intelligence agency</title>" in landing.text
         assert 'property="og:title" content="Paranoy · Your personal intelligence agency"' in landing.text
         assert 'name="description" content="Your personal intelligence agency. A private evidence ledger for people and AI agents."' in landing.text
@@ -1039,10 +1039,21 @@ def chat_agent() -> None:
             js = client.get("/chat.js")  # the launcher every page loads; it stays hidden unless the config answers
             assert js.status_code == 200 and "javascript" in js.headers["content-type"] and "/dashboard/api/chat" in js.text
             assert "marked@15.0.12" in js.text and "createElement('template')" in js.text, "answers render as markdown, cleaned in an inert template"
-            assert all('src="/chat.js"' in client.get(p).text for p in ("/", "/office", "/docs", "/connect")), "on every page"
-            assert all("github.com/DeleganceAI/tms-ledger" in client.get(p).text for p in ("/", "/office", "/docs", "/connect", "/dashboard")), "GitHub link"
+            pages = ("/", "/office", "/docs", "/docs/why-nostr", "/connect", "/communities", "/submit")
+            assert not any('src="/chat.js"' in client.get(p).text for p in pages), "no chat for visitors: no 404s in their console"
+            for p in pages:  # one shared header, the same on every page
+                html = client.get(p).text
+                assert html.count('id="site-header"') == 1 and "<!--HEADER-->" not in html and 'href="/site.css?v=' in html, p
+                assert "github.com/DeleganceAI/tms-ledger" in html and 'href="/connect#signup"' in html, p
+            assert client.get("/site.css").status_code == 200 and "nav.subnav" in client.get("/site.css").text
+            assert "menu-btn" in client.get("/site.js").text
             client.cookies.set(W.COOKIE, W.make_cookie(PK[BOB]))  # a member, not an admin
-            assert client.get("/dashboard/api/chat").status_code == 404
+            assert all('src="/chat.js"' in client.get(p).text for p in pages + ("/dashboard",)), "signed in: on every page"
+            dash = client.get("/dashboard").text  # the dashboard's sections are the header's second bar, pinned there
+            assert 'class="subnav pinned"' in dash and 'href="/dashboard#activity"' in dash and "<title>Paranoy · Dashboard</title>" in dash
+            assert 'class="subnav"' in client.get("/docs").text and 'aria-current="page">Docs' in client.get("/docs").text
+            assert "<title>Paranoy · Submit</title>" in client.get("/submit").text
+            assert client.get("/dashboard/api/chat").json() == {"enabled": False}
             assert client.post("/dashboard/api/chat", json={}).status_code == 404
             client.cookies.set(W.COOKIE, W.make_cookie(PK[OWNER]))
             cfg = client.get("/dashboard/api/chat").json()

@@ -1,19 +1,15 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Paranoy · Dashboard</title>
+<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/site.css?v=SITE_V">
 <style>
-:root{color-scheme:dark;--bg:#2b2433;--panel:#342b3e;--line:#4a3f57;--line2:#3a3144;--ink:#f4efe6;--ink2:#cbbfd4;--ink3:#9d91a8;
-  --accent:#8ab6f9;--accent2:#2f3a5c;--bad:#f4a6a0;--new:#4a4220;
-  --good:#a9d6c4;--warn:#fab219;--crit:#d03b3b;
-  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;--sans:Inter,system-ui,-apple-system,"Segoe UI",sans-serif}
+:root{--new:#4a4220}
 *{box-sizing:border-box}html,body{height:100%}body{margin:0;background:var(--bg);color:var(--ink);font:12px/1.4 var(--sans);-webkit-font-smoothing:antialiased}
 button,select,input{font:11.5px var(--sans);color:var(--ink)}
-.top{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line);padding:8px 14px 0}
-.bar{display:flex;align-items:center;gap:14px;height:28px}.brand{font-weight:650;font-size:13px;letter-spacing:-.01em}.brand span{color:var(--ink3);font-weight:500}
-.tabs{display:flex;gap:2px}.tab{padding:3px 10px;border-radius:4px;border:1px solid transparent;background:none;color:var(--ink2);cursor:pointer}.tab.on{background:var(--panel);border-color:var(--line);color:var(--ink)}
+.top{display:flex;align-items:center;gap:8px 14px;flex-wrap:wrap;background:var(--bg);border-bottom:1px solid var(--line);padding:6px 14px}
 .live{display:flex;align-items:center;gap:6px;color:var(--ink3);font-family:var(--mono);font-size:11px;margin-left:auto}.dot{width:7px;height:7px;border-radius:50%;background:var(--good);animation:pulse 2s infinite}
 .live.err .dot{background:var(--bad);animation:none}@keyframes pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--good) 50%,transparent)}70%{box-shadow:0 0 0 6px transparent}100%{box-shadow:0 0 0 0 transparent}}
-.strip{display:flex;flex-wrap:wrap;padding:4px 0 8px}.kpi{display:flex;align-items:baseline;gap:5px;padding:2px 10px 2px 0;margin-right:8px;border-right:1px solid var(--line)}
+.strip{display:flex;flex-wrap:wrap;padding:2px 0}.kpi{display:flex;align-items:baseline;gap:5px;padding:2px 10px 2px 0;margin-right:8px;border-right:1px solid var(--line)}
 .kpi:last-child{border-right:0}.kpi .v{font-family:var(--mono);font-size:14px;font-weight:600;font-variant-numeric:tabular-nums}.kpi .k{color:var(--ink3);font-size:11px}
 .kpi.err .v{color:var(--bad)}.kpi.sep{border-right:0;width:10px;padding:0;margin:0}
 main{padding:10px 14px 18px;display:grid;gap:10px}main[hidden]{display:none}
@@ -40,6 +36,7 @@ tr.new td{animation:flash 5s ease-out}@keyframes flash{from{background:var(--new
 .cols{display:flex;flex-wrap:wrap;gap:4px 14px;font-family:var(--mono);font-size:10.5px;color:var(--ink3)}.cols b{color:var(--ink);font-weight:600}
 .tools{display:flex;gap:8px;align-items:center;padding:8px 10px;border-bottom:1px solid var(--line2);flex-wrap:wrap}.tools .grow{flex:1}
 .tools select,.tools input{background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:4px 7px}.tools input{min-width:280px}.tools label{display:flex;gap:4px;align-items:center;color:var(--ink2)}
+@media(max-width:600px){.tools input{min-width:0;flex:1 1 140px}}
 .pg{background:var(--panel);border:1px solid var(--line);border-radius:4px;width:24px;height:24px;cursor:pointer;color:var(--ink2)}.pg:disabled{opacity:.4;cursor:default}
 #drawer{position:fixed;top:0;right:0;height:100%;width:min(560px,100%);background:var(--panel);border-left:1px solid var(--line);box-shadow:-12px 0 32px rgba(0,0,0,.14);transform:translateX(100%);transition:transform .18s ease;z-index:10;display:flex;flex-direction:column}
 #drawer.open{transform:none}.dh{display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--line2);font-family:var(--mono);font-size:11.5px}
@@ -66,24 +63,13 @@ table.wide th.n{text-align:right}.spark{width:120px;height:18px;display:block}td
 .card .nm2{padding:8px 10px 0;color:var(--ink2);font-size:12px}.card .grid4{margin:8px 10px 10px}.card .grid4 .v{font-size:16px}
 .storage{max-width:560px}.bars.tbl{max-height:none}
 </style></head><body>
-<div class="top">
-  <div class="bar">
-    <div class="brand">Paranoy <span>dashboard</span></div>
-    <nav class="tabs"><button class="tab on" data-tab="collections">Collections</button><button class="tab" data-tab="activity">Activity</button><button class="tab" data-tab="browse">Browse</button><button class="tab" data-tab="agents">Agents</button><button class="tab" data-tab="npubs" hidden>Npubs</button><button class="tab" data-tab="sources">Sources</button></nav>
-    <a class="ext2" href="/" style="margin-left:auto;text-decoration:none">Home</a>
-    <a class="ext2" href="/office" style="text-decoration:none">Office</a>
-    <a class="ext2" href="/communities" style="text-decoration:none">Communities</a>
-    <a class="ext2" href="/docs" style="text-decoration:none">Docs</a>
-    <a class="ext2" style="text-decoration:none" href="https://github.com/DeleganceAI/tms-ledger" target="_blank" rel="noopener" title="Source on GitHub"><svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-2px;margin-right:4px"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>GitHub</a>
-    <div class="live" id="live" style="margin-left:0"><i class="dot"></i><span id="status">connecting</span></div>
-  </div>
-  <div class="strip" id="strip"></div>
-</div>
-<main id="collections">
+<!--HEADER-->
+<div class="top" id="main" tabindex="-1"><div class="strip" id="strip"></div><div class="live" id="live"><i class="dot"></i><span id="status">connecting</span></div></div>
+<main id="collections" class="tabpane">
   <section class="cards" id="ccards"></section>
   <section class="panel storage"><div class="ph"><h2>Storage <span style="text-transform:none;letter-spacing:0">· your collections</span></h2><span class="muted" id="dbsize"></span></div><div class="bars tbl" id="tables"></div></section>
 </main>
-<main id="activity" hidden>
+<main id="activity" class="tabpane" hidden>
   <section class="row charts">
     <div class="panel"><div class="ph"><h2>Calls per minute</h2><span class="legend"><span><i style="background:var(--accent)"></i>ok</span><span><i style="background:var(--bad)"></i>error</span></span></div>
       <div class="chart"><svg id="callsChart" preserveAspectRatio="none"></svg></div><div class="axis"><span>−60m</span><span>−30m</span><span>now</span></div></div>
@@ -97,7 +83,7 @@ table.wide th.n{text-align:right}.spark{width:120px;height:18px;display:block}td
     <div class="panel"><div class="ph"><h2>Recent calls</h2><span class="muted" id="callsNote"></span></div><div class="scroll"><table class="dense" id="calls"></table></div></div>
   </section>
 </main>
-<main id="browse" hidden>
+<main id="browse" class="tabpane" hidden>
   <section class="panel">
     <div class="tools">
       <select id="bkind"><option value="claim">claims</option><option value="evidence">evidence</option><option value="link">links</option><option value="contradiction">contradictions</option></select>
@@ -111,19 +97,19 @@ table.wide th.n{text-align:right}.spark{width:120px;height:18px;display:block}td
     <div class="scroll tall"><table class="dense" id="bresults"></table></div>
   </section>
 </main>
-<main id="agents" hidden>
+<main id="agents" class="tabpane" hidden>
   <section class="panel">
     <div class="ph"><h2>Agents</h2><span class="muted" id="anote"></span></div>
     <div class="scroll tall"><table class="dense wide" id="atable"></table></div>
   </section>
 </main>
-<main id="npubs" hidden>
+<main id="npubs" class="tabpane" hidden>
   <section class="panel">
     <div class="ph"><h2>Npubs</h2><span class="muted" id="nnote"></span></div>
     <div class="scroll tall"><table class="dense wide" id="ntable"></table></div>
   </section>
 </main>
-<main id="sources" hidden>
+<main id="sources" class="tabpane" hidden>
   <section class="strip2" id="sstrip"></section>
   <section class="row srow">
     <div class="panel"><div class="ph"><h2>Evidence by URL domain</h2><span class="muted" id="dnote"></span></div><div class="bars dom" id="domains"></div></div>
@@ -269,11 +255,15 @@ $('bsem').onchange = e => { B.sem = e.target.checked; rebrowse(); };
 $('bq').oninput = e => { B.q = e.target.value; clearTimeout(btimer); btimer = setTimeout(rebrowse, B.sem ? 600 : 250); };
 $('bprev').onclick = () => { if (B.page > 0) { B.page--; browse(); } };
 $('bnext').onclick = () => { B.page++; browse(); };
+// The sections are the header's second bar: /dashboard#activity and so on.
+const TABS = ['collections', 'activity', 'browse', 'agents', 'npubs', 'sources'];
 let activeTab = 'collections';
 function showTab(name) {
+  if (!TABS.includes(name)) name = 'collections';
   activeTab = name;
-  document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x.dataset.tab === name));
-  ['collections', 'activity', 'browse', 'agents', 'npubs', 'sources'].forEach(id => $(id).hidden = id !== name);
+  if ((location.hash.slice(1) || 'collections') !== name) history.replaceState(null, '', '#' + name);
+  document.querySelectorAll('a[data-tab]').forEach(a => a.dataset.tab === name ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current'));
+  TABS.forEach(id => $(id).hidden = id !== name);
   if (name === 'collections') loadCollections();
   if (name === 'activity') snapNow();
   if (name === 'browse' && !bshown) { bshown = true; browse(); }
@@ -281,7 +271,7 @@ function showTab(name) {
   if (name === 'npubs') loadNpubs();
   if (name === 'sources') loadSources();
 }
-document.querySelectorAll('.tab').forEach(t => t.onclick = () => showTab(t.dataset.tab));
+addEventListener('hashchange', () => { if (!location.hash.startsWith('#record=')) showTab(location.hash.slice(1)); });
 
 // ---- collections ----------------------------------------------------------
 const fmtB = b => b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(0)} KB` : b < 1073741824 ? `${(b / 1048576).toFixed(1)} MB` : `${(b / 1073741824).toFixed(2)} GB`;
@@ -343,7 +333,7 @@ async function loadNpubs() {
     : '<tr><td class="empty" colspan="7">no keys yet</td></tr>');
   return d;
 }
-fetch('/dashboard/api/npubs').then(r => { if (r.ok) document.querySelector('[data-tab="npubs"]').hidden = false; }).catch(() => {});
+fetch('/dashboard/api/npubs').then(r => { if (r.ok) document.querySelectorAll('[data-tab="npubs"]').forEach(a => a.hidden = false); }).catch(() => {});
 
 // ---- sources --------------------------------------------------------------
 const S = {q: '', sort: 'evidence'}; let stimer = null;
@@ -422,7 +412,8 @@ const snapNow = every(() => activeTab === 'activity' ? 2000 : 30000, poll);
 const tabNow = every(() => 30000, () => activeTab === 'collections' ? loadCollections() : activeTab === 'agents' ? loadAgents()
   : activeTab === 'sources' && !S.q ? loadSources() : null);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { snapNow(); tabNow(); } });
-showTab('collections'); snapNow();
 // /dashboard#record=<id> opens that record, for links from the chat on other pages.
-const deep = location.hash.match(/^#record=([0-9a-f]{64})$/); if (deep) showDetail(deep[1]);
-</script><script src="/chat.js" defer></script></body></html>
+const deep = location.hash.match(/^#record=([0-9a-f]{64})$/);
+showTab(deep ? 'collections' : location.hash.slice(1)); snapNow();
+if (deep) showDetail(deep[1]);
+</script></body></html>

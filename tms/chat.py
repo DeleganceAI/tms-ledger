@@ -167,11 +167,11 @@ def _admin(request: Request) -> str | None:
 
 def config(request: Request) -> JSONResponse:
     pk = _admin(request)
-    if pk is None:
-        return JSONResponse({"error": "not found"}, status_code=404)
+    if pk is None:  # signed-in non-admins get an answer too, so their console shows no 404
+        return JSONResponse({"enabled": False}, status_code=200 if cookie_pubkey(request) else 404)
     with L.connect() as conn:
         cols = L.my_collections(conn, pk)
-    return JSONResponse({"model": CHAT_MODEL, "configured": bool(CHAT_API_KEY), "collections": cols})
+    return JSONResponse({"enabled": True, "model": CHAT_MODEL, "configured": bool(CHAT_API_KEY), "collections": cols})
 
 
 async def chat(request: Request):
