@@ -29,7 +29,8 @@ from . import ledger as L
 from . import web as W
 
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
-EMAIL_FROM = os.environ.get("TMS_EMAIL_FROM", "TMS ledger <login@delegance.ai>")
+EMAIL_FROM = os.environ.get("TMS_EMAIL_FROM", "Paranoy <login@mail.paranoy.org>")
+EMAIL_LOGO = "https://paranoy.org/logo.png"  # tms/brand/logo.png; a PNG because mail clients drop SVG
 KEY_SECRET = os.environ.get("TMS_KEY_SECRET", "")
 DEV_PRINT = os.environ.get("TMS_EMAIL_DEV") == "1"  # local only: print codes instead of emailing them
 CODE_TTL = 600            # seconds a code stays valid
@@ -74,15 +75,15 @@ def _hash(email: str, purpose: str, code: str) -> str:
     return hmac.new(os.environ["TMS_SECRET"].encode(), f"{purpose}:{email}:{code}".encode(), hashlib.sha256).hexdigest()
 
 
-def send(email: str, subject: str, text: str) -> None:
-    """Send one email through Resend. Tests replace this."""
+def send(email: str, subject: str, text: str, html: str | None = None) -> None:
+    """Send one email through Resend, with an HTML version when given. Tests replace this."""
     if not RESEND_API_KEY:
         if DEV_PRINT:
             print(f"[email to {email}] {subject}\n{text}", file=sys.stderr)
             return
         raise Refused("email sign-in is not configured", 503)
     r = httpx.post("https://api.resend.com/emails", timeout=20, headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
-                   json={"from": EMAIL_FROM, "to": [email], "subject": subject, "text": text})
+                   json={"from": EMAIL_FROM, "to": [email], "subject": subject, "text": text} | ({"html": html} if html else {}))
     if r.status_code >= 400:
         raise Refused("the email could not be sent; try again in a minute", 502)
 
@@ -96,9 +97,23 @@ def issue(conn, email: str, purpose: str) -> None:
     conn.execute("""INSERT INTO email_codes (email, purpose, code_hash, expires_at)
                     VALUES (%s, %s, %s, now() + make_interval(secs => %s))""", (email, purpose, _hash(email, purpose, code), CODE_TTL))
     what = "sign in to" if purpose == "login" else "export your key from"
-    send(email, f"Your TMS code: {code}",
-         f"Your code to {what} the TMS ledger is:\n\n    {code}\n\nIt works once and expires in {CODE_TTL // 60} minutes. "
-         "If you didn't ask for it, ignore this email.")
+    send(email, f"Your Paranoy code: {code}",
+         f"Your code to {what} Paranoy is:\n\n    {code}\n\nIt works once and expires in {CODE_TTL // 60} minutes. "
+         "If you didn't ask for it, ignore this email.",
+         code_html(what, code))
+
+
+def code_html(what: str, code: str) -> str:
+    """The code email as HTML: the logo, the code in big type, one line of small print. Tables and
+    inline styles because that is what mail clients render; the light card keeps the logo PNG legible."""
+    return f"""<!doctype html><html><body style="margin:0;padding:24px 12px;background:#f1ede6">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:440px;background:#fbf8f2;border-radius:12px;font:15px/1.5 Georgia,serif;color:#1f1b16">
+<tr><td style="padding:28px 32px 8px"><a href="https://paranoy.org"><img src="{EMAIL_LOGO}" width="160" height="60" alt="Paranoy" style="display:block;border:0"></a></td></tr>
+<tr><td style="padding:12px 32px 0">Your code to {what} Paranoy is:</td></tr>
+<tr><td style="padding:16px 32px"><div style="display:inline-block;padding:12px 20px;border:2px solid #ef9f27;border-radius:10px;font:600 32px/1 ui-monospace,Menlo,Consolas,monospace;letter-spacing:6px">{code}</div></td></tr>
+<tr><td style="padding:0 32px 28px;font-size:13px;color:#6b6258">It works once and expires in {CODE_TTL // 60} minutes. If you didn't ask for it, ignore this email.</td></tr>
+</table></td></tr></table></body></html>"""
 
 
 def redeem(conn, email: str, purpose: str, code: str) -> None:
