@@ -2,6 +2,22 @@
 
 The 2026-10-28 polish list. Each item is a stacked PR off `main`, merged in order. A box is ticked when its PR is open.
 
+## What landed
+
+Seven stacked PRs, each based on the one before. Merge them in order, starting with #68 into `main`; when a PR merges and its branch is deleted, GitHub retargets the next one to `main`.
+
+| # | PR | Items |
+|---|---|---|
+| 1 | [#68](https://github.com/DeleganceAI/tms-ledger/pull/68) | Rename to Paranoy |
+| 2 | [#69](https://github.com/DeleganceAI/tms-ledger/pull/69) | Shared header, dashboard second bar, phone menu, one stylesheet, titles |
+| 3 | [#70](https://github.com/DeleganceAI/tms-ledger/pull/70) | Collections page with the pin board |
+| 4 | [#71](https://github.com/DeleganceAI/tms-ledger/pull/71) | Chat page per collection, approved accounts only |
+| 5 | [#72](https://github.com/DeleganceAI/tms-ledger/pull/72) | + buttons, login and back, first-run guide, Connect an agent, usage meter |
+| 6 | [#73](https://github.com/DeleganceAI/tms-ledger/pull/73) | Ask to join (**needs `db/migrate_join_requests.sql` first**) |
+| 7 | [#74](https://github.com/DeleganceAI/tms-ledger/pull/74) | Names not hex, Agents by account, error breakdown, accessibility |
+
+Every PR passed `test_smoke.py` and `test_events.py` and was checked in a local preview at desktop and phone widths; screenshots are in each PR (stored on the `polish-screenshots` branch, which can be deleted after merging).
+
 ## Checklist
 
 - [x] 1. Rename "TMS ledger" to Paranoy in user-facing text ([#68](https://github.com/DeleganceAI/tms-ledger/pull/68))
@@ -13,8 +29,10 @@ The 2026-10-28 polish list. Each item is a stacked PR off `main`, merged in orde
 - [x] 7. Signed-out visitors to signed-in pages go to Login with a reason, and come back after ([#72](https://github.com/DeleganceAI/tms-ledger/pull/72))
 - [x] 8. First-run guide on the collections page, and a Connect an agent panel with MCP config and a starter prompt ([#72](https://github.com/DeleganceAI/tms-ledger/pull/72))
 - [x] 9. Usage meter for free accounts ([#72](https://github.com/DeleganceAI/tms-ledger/pull/72))
-- [x] 10. Request-to-join on Communities; the owner sees it and accepts it in the app (Polish 6)
-- [x] 13a. chat.js only for signed-in people; no 404 in the console ([#69](https://github.com/DeleganceAI/tms-ledger/pull/69))
+- [x] 10. Request-to-join on Communities; the owner sees it and accepts it in the app ([#73](https://github.com/DeleganceAI/tms-ledger/pull/73))
+- [x] 11. Names instead of hex keys, npub on hover with a copy button; the dashboard's Agents table grouped by account ([#74](https://github.com/DeleganceAI/tms-ledger/pull/74))
+- [x] 12. Why ledger-grokbot errors: the dashboard now lists each key's error messages, and auth failures count against the key that signed them ([#74](https://github.com/DeleganceAI/tms-ledger/pull/74); see below)
+- [x] 13. Small fixes: the Ledger box ([#72](https://github.com/DeleganceAI/tms-ledger/pull/72)); chat.js only for signed-in people ([#69](https://github.com/DeleganceAI/tms-ledger/pull/69)); keyboard and screen-reader pass (every PR, finished in #74)
 
 ## Decisions
 
@@ -37,6 +55,16 @@ The 2026-10-28 polish list. Each item is a stacked PR off `main`, merged in orde
 13. **Usage meter.** `/api/me` now has `usage` for free accounts: records, collections and agents against their limits. It uses the same counts the write path checks. The Account page shows three bars, and the collections page shows a one-line summary with a mailto to `TMS_CONTACT`. At the collection limit, the New collection card turns into that note. Approved accounts see no meter.
 
 14. **Join requests.** A request is a note to an owner, not a ledger record, so it lives in a small operational table (`join_requests`, like `signups` and `approvals`) rather than as a new event kind. Accepting is the existing members list (kind 4705) with the person added, signed by the owner or an admin. A request counts as pending while its key is not a member and nobody has dismissed it, so accepting needs no second write. Only signed-in keys with an account can ask, only public collections take requests, and each key gets one request per collection, with a note of up to 280 characters. Owners and admins see requests on the members page, with Accept and Dismiss, and a badge on the collection's card. Owners who signed in by email also get an email (through the existing Resend sender). Extension-only owners have no address, so they see requests only in the app.
+
+15. **Names, not hex.** Everywhere a key shows (the dashboard's records, calls, agents, npubs and drawer, the members table, board pins), it is the profile name, or a short npub (`npub1abcd…wxyz`) when there is none; the full npub is on hover, and ⧉ copies it. Raw hex stays only inside the drawer's signed event. The dashboard turns hex into npubs in the browser (a small bech32 encoder), so the APIs are unchanged except `agents`, which now carries `npub`.
+16. **Agents by account.** The Agents tab groups keys under their account: the human first, then their Ledger and agents (tagged and indented), groups ordered by latest activity, keys in no account last. A signed-up human with no account event yet heads their own group.
+17. **ledger-grokbot's errors.** I could not look at production's numbers: reading the production database or dashboard was refused by the session's safety classifier, and the brief said not to touch production, so I left it. What the code shows instead: an auth failure (a stale request outside the 60-second window, or a replayed one) was logged with *no* pubkey, so those never counted against any agent. The 107 errors on ledger-grokbot are therefore all post-authentication failures: tool-level errors such as bad arguments (`limit must be an integer between 1 and 200` is the commonest in the tests), embedding rate limits (429), a quote not found in its evidence, or a collection it isn't in. Two changes: (a) each agent's error count on the Agents tab is now a button that lists its commonest messages (top six, with counts and when last seen; only from calls whose collections are all yours, as the calls feed already did), so the cause is one click away once this deploys; (b) a request whose signature checks out is now attributed to its signer even when it is then refused as stale or replayed, so clock-skew and retry bugs show up against the agent too. Whatever grokbot's top message turns out to be, it is almost certainly the bot's call shape (its prompt or client), not the server; if it is the 429s, the fix is on our side (a higher embedding rate limit or more keyword fallback) and worth a follow-up.
+18. **Accessibility.** A skip link and visible focus ring on every page; the header's menus are buttons with `aria-expanded`; current pages carry `aria-current`; reduced motion is honoured. New pages: pins are buttons with labels, the board pans and zooms from the keyboard, opening a pin moves focus into its panel and Esc returns it; chat is a labelled form with a live log; meters are `progressbar`s; key lists' add and remove controls are labelled. An automated pass over eight pages found unlabelled fields on Account (topic inputs) and Submit (claim rows); both now have labels.
+
+## Not done
+
+- Production numbers for ledger-grokbot (see 17): open the Agents tab after Polish 7 deploys, or ask me to read them with your go-ahead.
+- Admins have no Admin link in the header (it would need a database query on every page); `/admin` still works.
 
 ## SQL to apply
 

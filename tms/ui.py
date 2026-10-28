@@ -19,8 +19,8 @@ from . import events as E
 from . import ledger as L
 from .web import cookie_pubkey, to_login, with_header
 
-# Display name: the latest kind-0 profile, else the first 12 hex chars of the key.
-WHO = "coalesce((SELECT p.name FROM profiles p WHERE p.pubkey = {0}.pubkey), left({0}.pubkey, 12)) AS author"
+# Display name: the latest kind-0 profile; the page shows a short npub when there is none.
+WHO = "(SELECT p.name FROM profiles p WHERE p.pubkey = {0}.pubkey) AS author"
 # Calls the viewer may see. Publish logs join several collections with commas.
 CALLS = """(SELECT * FROM mcp_calls WHERE string_to_array(collection, ',') && %(cols)s::text[]
             OR (collection IS NULL AND pubkey = %(pk)s))"""
@@ -167,7 +167,8 @@ DOMAIN = r"lower(regexp_replace(%s, '^([a-z]+://)?(www\.)?([^/:]+).*$', '\3'))" 
 
 def agents(conn, pk: str, cols: list[str]) -> dict:
     """Every key the viewer can see (signers and members of their collections, plus callers in their
-    visible calls) with event counts by kind, call counts and a 60-minute series."""
+    visible calls) with event counts by kind, call counts, a 60-minute series, the account each key
+    belongs to (human, then its Ledger and agents) and its most common error messages."""
     p = {"pk": pk, "cols": cols}
     rows = _rows(conn, f"""
         WITH vis AS {CALLS},
@@ -184,19 +185,35 @@ def agents(conn, pk: str, cols: list[str]) -> dict:
                         count(*) FILTER (WHERE kind = 4705) AS members
                  FROM ev GROUP BY pubkey)
         SELECT k.pubkey AS id, pr.name, pr.about, pr.received_at AS profile_at,
+               coalesce(acc.human, su.pubkey) AS human, coalesce(acc.role, CASE WHEN su.pubkey IS NOT NULL THEN 'human' END) AS role,
                coalesce(r.records, 0) AS records, r.last_record_at, coalesce(r.evidence, 0) AS evidence,
                coalesce(r.claims, 0) AS claims, coalesce(r.links, 0) AS links,
                coalesce(r.contradictions, 0) AS contradictions, coalesce(r.members, 0) AS members,
                coalesce(c.calls, 0) AS calls, coalesce(c.writes, 0) AS writes, coalesce(c.reads, 0) AS reads,
                coalesce(c.errors, 0) AS errors, c.last_call, c.avg_ms
         FROM keys k LEFT JOIN profiles pr USING (pubkey) LEFT JOIN calls c USING (pubkey) LEFT JOIN recs r USING (pubkey)
+        LEFT JOIN LATERAL (SELECT a.human, CASE WHEN a.human = k.pubkey THEN 'human' WHEN a.ledger = k.pubkey THEN 'ledger' ELSE 'agent' END AS role
+                           FROM accounts a WHERE a.human = k.pubkey OR a.ledger = k.pubkey OR k.pubkey = ANY(a.agents) LIMIT 1) acc ON true
+        LEFT JOIN LATERAL (SELECT k.pubkey WHERE EXISTS (SELECT 1 FROM signups s WHERE s.pubkey = k.pubkey)
+                           OR EXISTS (SELECT 1 FROM email_accounts e WHERE e.pubkey = k.pubkey)) su ON true  -- signed up, no account event yet
         ORDER BY greatest(coalesce(c.last_call, 'epoch'), coalesce(r.last_record_at, 'epoch')) DESC, 1""", p)
     per_min: dict[str, list] = {}
     for r in conn.execute(f"""SELECT pubkey, date_trunc('minute', at) AS m, count(*) AS n, count(*) FILTER (WHERE NOT ok) AS errors
                               FROM {CALLS} c WHERE at > now() - interval '60 minutes' AND pubkey IS NOT NULL
                               GROUP BY 1, 2 ORDER BY 1, 2""", p):
         per_min.setdefault(r["pubkey"], []).append(L._clean(r))
-    return {"agents": rows, "per_min": per_min}
+    # Why calls fail, per key: the commonest messages, from rows whose collections are all the viewer's
+    # (CALL_COLS' rule: an error may quote IDs from a collection the viewer can't read).
+    errors: dict[str, list] = {}
+    for r in conn.execute(f"""SELECT pubkey, left(regexp_replace(error, '^Error executing tool \\w+: ', ''), 200) AS error, count(*) AS n, max(at) AS last_at FROM {CALLS} c
+                              WHERE NOT ok AND pubkey IS NOT NULL AND error IS NOT NULL
+                                AND (collection IS NULL OR string_to_array(collection, ',') <@ %(cols)s::text[])
+                              GROUP BY 1, 2 ORDER BY 1, n DESC, 2""", p):
+        if len(errors.setdefault(r["pubkey"], [])) < 6:
+            errors[r["pubkey"]].append(L._clean(r))
+    for r in rows:
+        r["npub"] = E.bech32_encode("npub", r["id"])
+    return {"agents": rows, "per_min": per_min, "errors": errors}
 
 
 def npubs(conn, pk: str, cols: list[str]):
@@ -272,7 +289,7 @@ def collections(conn, pk: str, cols: list[str]) -> dict:
     # Sized column by column: a whole-row pg_column_size(e.*) fetches every out-of-line (TOAST) document
     # and vector to build the row. Leaves out the tuple header and fixed-width columns, ~40 bytes a row.
     rows = _rows(conn, """
-        SELECT c.slug, c.owner, coalesce((SELECT p.name FROM profiles p WHERE p.pubkey = c.owner), left(c.owner, 12)) AS owner_name,
+        SELECT c.slug, c.owner, (SELECT p.name FROM profiles p WHERE p.pubkey = c.owner) AS owner_name,
                c.created_at, (SELECT count(*) FROM members m WHERE m.collection = c.slug) AS members,
                s.evidence, s.claims, s.links, s.contradictions, s.contributors, s.last_at, s.bytes,
                (SELECT coalesce(sum(pg_column_size(v.vector)), 0) FROM embeddings v JOIN events e ON e.id = v.event_id

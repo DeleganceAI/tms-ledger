@@ -51,6 +51,10 @@ details{margin-top:14px}summary{cursor:pointer;color:var(--ink3);font-size:11px}
 .seg.lg{width:160px;height:10px;margin:6px 0 10px}
 table.wide th{text-align:left;font-weight:600;font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:var(--ink3);padding:6px 8px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel);white-space:nowrap}
 table.wide th.n{text-align:right}.spark{width:120px;height:18px;display:block}td.sp{width:1%;padding:3px 8px}
+.cp{background:none;border:0;color:var(--ink3);cursor:pointer;padding:0 3px;font-size:11px}.cp:hover{color:var(--ink)}
+tr.grp td{background:var(--bg);color:var(--ink2);font-weight:600;font-size:11px;padding:7px 8px 4px;border-top:1px solid var(--line)}tr.grp td span{color:var(--ink3);font-weight:400}
+td.ind{padding-left:20px}.errbtn{background:none;border:0;color:var(--bad);cursor:pointer;font:inherit;text-decoration:underline dotted}
+tr.errs td{background:var(--bg);font-size:11px;color:var(--ink2)}tr.errs li{margin:2px 0}tr.errs b{color:var(--bad);font-family:var(--mono)}
 .kindtag{display:inline-block;padding:0 5px;border-radius:3px;font-family:var(--mono);font-size:10px;line-height:16px;background:var(--accent2);color:var(--accent)}.kindtag.human{background:color-mix(in srgb,var(--good) 18%,transparent);color:var(--good)}.kindtag.unreg{background:color-mix(in srgb,var(--bad) 16%,transparent);color:var(--bad)}
 .strip2{display:flex;flex-wrap:wrap}.srow{grid-template-columns:minmax(300px,1fr) 2.2fr}@media(max-width:1100px){.srow{grid-template-columns:1fr}}
 .bars.dom{grid-template-columns:max-content 1fr max-content max-content;max-height:calc(100vh - 230px)}
@@ -119,7 +123,7 @@ table.wide th.n{text-align:right}.spark{width:120px;height:18px;display:block}td
     </div>
   </section>
 </main>
-<aside id="drawer">
+<aside id="drawer" role="dialog" aria-label="Record">
   <div class="dh"><button id="dback" title="back">‹</button><span class="ttl" id="drawerTitle"></span><button onclick="hideDetail()" title="close (Esc)">×</button></div>
   <div class="dbody" id="dbody"></div>
 </aside>
@@ -131,8 +135,21 @@ const ago = iso => { if (!iso) return ''; const s = Math.max(0, (Date.now() - ne
 const hm = t => new Date(t).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
 // Event IDs are 64 hex chars; show the first 10, open the drawer with the whole one.
 const link = id => id ? `<a href="#" class="idl" data-id="${esc(id)}" title="${esc(id)}">${esc(String(id).slice(0, 10))}</a>` : '';
-const short = pk => String(pk || '').slice(0, 12);
-const who = (author, pk) => `<span title="${esc(pk || '')}">${esc(author || short(pk))}</span>`;
+// Keys show as names; with no profile, a short npub. Hover shows the whole npub, and ⧉ copies it.
+const B32 = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
+function npubOf(hex) {
+  if (!/^[0-9a-f]{64}$/.test(hex || '')) return String(hex || '');
+  const pm = v => { let c = 1; for (const x of v) { const t = c >>> 25; c = ((c & 0x1ffffff) << 5) ^ x;
+    [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3].forEach((g, i) => { if ((t >>> i) & 1) c ^= g; }); } return c >>> 0; };
+  const d = []; let acc = 0, bits = 0;
+  for (const b of hex.match(/../g).map(h => parseInt(h, 16))) { acc = (acc << 8) | b; bits += 8; while (bits >= 5) { bits -= 5; d.push((acc >> bits) & 31); } }
+  if (bits) d.push((acc << (5 - bits)) & 31);
+  const hrp = [3, 3, 3, 3, 0, 14, 16, 21, 2], m = pm([...hrp, ...d, 0, 0, 0, 0, 0, 0]) ^ 1;
+  return 'npub1' + [...d, ...[0, 1, 2, 3, 4, 5].map(i => (m >> (5 * (5 - i))) & 31)].map(v => B32[v]).join('');
+}
+const shortNpub = pk => { const n = npubOf(pk); return n.length > 20 ? n.slice(0, 12) + '…' + n.slice(-4) : n; };
+const who = (author, pk) => `<span title="${esc(npubOf(pk))}">${esc(author || shortNpub(pk))}</span>`;
+const copyBtn = pk => `<button class="cp" type="button" data-copy="${esc(npubOf(pk))}" aria-label="Copy npub" title="Copy npub">⧉</button>`;
 const seenRec = new Set(), seenCall = new Set(); let first = true, selected = null, colsKnown = '';
 async function api(path) {  // the cookie expired: back to the ledger home to log in again
   // A request that never settles would stall its polling loop, so give up after a minute.
@@ -280,7 +297,7 @@ async function loadCollections() {
   let d; try { d = await api('collections'); } catch (e) { $('ccards').innerHTML = `<div class="empty">${esc(e)}</div>`; return; }
   $('ccards').innerHTML = d.collections.length ? d.collections.map(c =>
     `<div class="panel card" data-col="${esc(c.slug)}" title="browse ${esc(c.slug)}"><div class="ph"><h2>${esc(c.slug)}</h2><span class="muted">${c.last_at ? 'last event ' + ago(c.last_at) + ' ago' : 'empty'}</span></div>` +
-    `<div class="nm2" title="${esc(c.owner)}">owner ${esc(c.owner_name)}</div><div class="grid4">${cell('members', c.members)}${cell('evidence', c.evidence)}${cell('contributors', c.contributors, 'distinct signing keys on its events')}${cell('row data', fmtB(c.bytes), 'event bytes as stored: compressed, without indexes')}` +
+    `<div class="nm2" title="${esc(npubOf(c.owner))}">owner ${esc(c.owner_name || shortNpub(c.owner))}</div><div class="grid4">${cell('members', c.members)}${cell('evidence', c.evidence)}${cell('contributors', c.contributors, 'distinct signing keys on its events')}${cell('row data', fmtB(c.bytes), 'event bytes as stored: compressed, without indexes')}` +
     `${cell('claims', c.claims)}${cell('links', c.links)}${cell('contradictions', c.contradictions)}${cell('created', ago(c.created_at) + ' ago', `${c.owner} · ${c.created_at}`)}</div></div>`).join('')
     : (d.can_create ? '' : '<div class="empty">you are not a member of any collection yet</div>');
   if (d.can_create) $('ccards').insertAdjacentHTML('beforeend', '<a class="panel card add" href="/connect#new" title="Create a collection"><b>+</b>New collection</a>');
@@ -301,20 +318,44 @@ function spark(rows) {
 // Human or agent is self-declared in the profile's about, not verified.
 const kindTag = a => a.name == null ? '<span class="kindtag unreg">no profile</span>'
   : a.about ? `<span class="kindtag ${/human/i.test(a.about) ? 'human' : ''}" title="${esc(a.about)}">${esc(a.about.slice(0, 24))}</span>` : '';
+const openErr = new Set();
+const ROLE = {human: 0, ledger: 1, agent: 2};
 async function loadAgents() {
   let d; try { d = await api('agents'); } catch (e) { $('atable').innerHTML = `<tr><td class="empty">${esc(e)}</td></tr>`; return; }
   $('anote').textContent = `${d.agents.length} · active ${d.agents.filter(a => a.last_call && Date.now() - new Date(a.last_call) < 300000).length} in last 5m`;
-  const th = '<tr><th>key</th><th>name</th><th>about</th><th>last seen</th><th>last hour</th><th class="n">calls</th><th class="n">writes</th><th class="n">reads</th><th class="n">errors</th><th class="n">avg</th>' +
+  const th = '<tr><th>name</th><th>npub</th><th>about</th><th>last seen</th><th>last hour</th><th class="n">calls</th><th class="n">writes</th><th class="n">reads</th><th class="n">errors</th><th class="n">avg</th>' +
     '<th class="n">evidence</th><th class="n">claims</th><th class="n">links</th><th class="n">contra.</th><th class="n">members</th></tr>';
-  $('atable').innerHTML = th + (d.agents.length ? d.agents.map(a => {
-    const last = a.last_call && a.last_record_at ? (new Date(a.last_call) > new Date(a.last_record_at) ? a.last_call : a.last_record_at) : (a.last_call || a.last_record_at);
-    return `<tr><td class="k" title="${esc(a.id)}">${esc(short(a.id))}</td><td class="a" style="max-width:220px" title="${esc(a.name || '')}">${esc(a.name || '')}</td><td>${kindTag(a)}</td>` +
+  const lastOf = a => a.last_call && a.last_record_at ? (new Date(a.last_call) > new Date(a.last_record_at) ? a.last_call : a.last_record_at) : (a.last_call || a.last_record_at);
+  // One group per account: the human, then their Ledger, then their agents; keys in no account last.
+  const groups = new Map();
+  for (const a of d.agents) { const g = a.human || ''; if (!groups.has(g)) groups.set(g, []); groups.get(g).push(a); }
+  const recent = rows => Math.max(...rows.map(a => +new Date(lastOf(a) || 0)));
+  const order = [...groups.entries()].sort(([ga, a], [gb, b]) => (ga === '') - (gb === '') || recent(b) - recent(a));
+  const row = (a, ind) => { const last = lastOf(a);
+    return `<tr><td class="a${ind ? ' ind' : ''}" style="max-width:220px" title="${esc(a.npub)}">${esc(a.name || shortNpub(a.id))}${a.role && a.role !== 'human' ? ` <span class="tag">${a.role}</span>` : ''}</td>` +
+      `<td class="k" title="${esc(a.npub)}">${esc(shortNpub(a.id))}${copyBtn(a.id)}</td><td>${kindTag(a)}</td>` +
       `<td class="t" title="${esc(last || '')}">${last ? ago(last) + ' ago' : '—'}</td><td class="sp">${spark(d.per_min[a.id])}</td>` +
       `<td class="n">${esc(a.calls)}</td><td class="n">${esc(a.writes)}</td><td class="n">${esc(a.reads)}</td>` +
-      `<td class="n" style="color:${a.errors ? 'var(--bad)' : 'var(--ink3)'}">${esc(a.errors)}</td><td class="n" style="color:var(--ink3)">${a.avg_ms != null ? esc(a.avg_ms) + 'ms' : '—'}</td>` +
-      `<td class="n">${esc(a.evidence)}</td><td class="n">${esc(a.claims)}</td><td class="n">${esc(a.links)}</td><td class="n">${esc(a.contradictions)}</td><td class="n">${esc(a.members)}</td></tr>`; }).join('')
-    : '<tr><td class="empty" colspan="15">no keys yet</td></tr>');
+      `<td class="n">${a.errors ? (d.errors[a.id] ? `<button class="errbtn" data-id="${a.id}" aria-expanded="${openErr.has(a.id)}" title="Why these calls failed">${esc(a.errors)}</button>` : `<span style="color:var(--bad)">${esc(a.errors)}</span>`) : '<span style="color:var(--ink3)">0</span>'}</td><td class="n" style="color:var(--ink3)">${a.avg_ms != null ? esc(a.avg_ms) + 'ms' : '—'}</td>` +
+      `<td class="n">${esc(a.evidence)}</td><td class="n">${esc(a.claims)}</td><td class="n">${esc(a.links)}</td><td class="n">${esc(a.contradictions)}</td><td class="n">${esc(a.members)}</td></tr>` +
+      (d.errors[a.id] ? `<tr class="errs" data-for="${a.id}"${openErr.has(a.id) ? '' : ' hidden'}><td colspan="15"><ul style="margin:2px 0;padding-left:18px">${d.errors[a.id].map(e =>
+        `<li><b>${esc(e.n)}×</b> ${esc(e.error)} <span class="muted">· last ${ago(e.last_at)} ago</span></li>`).join('')}</ul></td></tr>` : ''); };
+  $('atable').innerHTML = th + (d.agents.length ? order.map(([h, rows]) => {
+    rows.sort((x, y) => (ROLE[x.role] ?? 3) - (ROLE[y.role] ?? 3) || +new Date(lastOf(y) || 0) - +new Date(lastOf(x) || 0));
+    const head = rows.find(a => a.id === h);
+    return `<tr class="grp"><td colspan="15">${h ? `${esc(head?.name || shortNpub(h))}'s account <span>· ${rows.length} key${rows.length === 1 ? '' : 's'}</span>` : 'Keys in no account'}</td></tr>`
+      + rows.map(a => row(a, a.role && a.role !== 'human')).join('');
+  }).join('') : '<tr><td class="empty" colspan="15">no keys yet</td></tr>');
 }
+$('atable').addEventListener('click', e => {
+  const b = e.target.closest('.errbtn'); if (!b) return;
+  const open = !openErr.delete(b.dataset.id); if (open) openErr.add(b.dataset.id);
+  b.setAttribute('aria-expanded', String(open)); $('atable').querySelector(`tr.errs[data-for="${b.dataset.id}"]`).hidden = !open;
+});
+document.addEventListener('click', async e => {
+  const b = e.target.closest('.cp'); if (!b) return;
+  e.stopPropagation(); await navigator.clipboard.writeText(b.dataset.copy); b.textContent = '✓'; setTimeout(() => { b.textContent = '⧉'; }, 1200);
+}, true);
 
 // ---- npubs (admins and collection owners) ---------------------------------
 const slugs = (a, star) => a.map(s => `<span class="tag">${esc(s)}${star ? ' ★' : ''}</span>`).join(' ');
@@ -325,7 +366,7 @@ async function loadNpubs() {
   $('nnote').textContent = `${d.npubs.length} keys · ${d.admin ? 'every collection' : 'memberships in your collections only'} · ★ owner`;
   const th = '<tr><th>npub</th><th>name</th><th>about</th><th>approved</th><th>collections</th><th class="n">records</th><th>last active</th></tr>';
   $('ntable').innerHTML = th + (d.npubs.length ? d.npubs.map(n =>
-    `<tr><td class="k" title="${esc(n.npub)} (click to copy)" style="cursor:copy" onclick="navigator.clipboard.writeText('${esc(n.npub)}')">${esc(n.npub.slice(0, 16))}…</td>` +
+    `<tr><td class="k" title="${esc(n.npub)}">${esc(shortNpub(n.pubkey))}${copyBtn(n.pubkey)}</td>` +
     `<td class="a" style="max-width:200px">${esc(n.name || '')}${n.name == null ? '<span class="kindtag unreg">no profile</span>' : ''}</td>` +
     `<td class="s" style="max-width:360px" title="${esc(n.about || '')}">${esc((n.about || '').slice(0, 140))}</td>` +
     `<td>${n.approved ? '✓' : ''}</td><td>${slugs(n.owns, true)} ${slugs(n.member_of)}</td>` +
@@ -374,7 +415,7 @@ function renderRecord(r) {
   if (kind === 'members') h += `<p class="big">${esc((c.members || []).length)} members</p>` + (c.members || []).map(m => `<div class="li muted">${esc(m)}</div>`).join('');
   if (kind === 'admins') h += `<p class="big">${esc((c.admins || []).length)} admins</p>` + (c.admins || []).map(m => `<div class="li muted">${esc(m)}</div>`).join('');
   if (kind === 'found') h += `<p class="big">Opened for <span class="muted">${esc(c.owner)}</span></p>`;
-  h += kv('id', `<span class="muted">${esc(r.id)}</span>`) + kv('author', `${esc(r.author)} <span class="muted">${esc(r.pubkey)}</span>`) + kv('collection', esc(r.collection))
+  h += kv('id', `<span class="muted">${esc(r.id)}</span>`) + kv('author', `${esc(r.author || shortNpub(r.pubkey))} <span class="muted">${esc(npubOf(r.pubkey))}</span>${copyBtn(r.pubkey)}`) + kv('collection', esc(r.collection))
     + kv('created', unix(r.created_at) + ' <span class="muted">(signer-claimed)</span>') + kv('received', `${esc(r.received_at)} <span class="muted">· ${ago(r.received_at)} ago</span>`);
   if (kind === 'link' && r.target) h += `<h3>Target</h3><div class="li">${link(r.target.id)} <span class="tag">${esc(r.target.kind)}</span> ${esc(r.target.summary || '')}</div>`;
   if (kind === 'link' && r.evidence) h += `<h3>Evidence</h3><div class="li">${link(r.evidence.id)} ${esc(r.evidence.title || r.evidence.url || r.evidence.source || '')} <span class="muted">· ${esc(r.evidence.chars)} chars</span></div>`;

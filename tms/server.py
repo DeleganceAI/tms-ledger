@@ -104,6 +104,10 @@ def authenticate(conn, request, tool: str, check_allowed: bool = True) -> tuple[
     if not isinstance(request, dict) or request.get("kind") != E.REQUEST:
         raise E.Invalid("request must be a kind-4707 event")
     data = E.verify(request)
+    who = _who.get()  # the signature is good, so the key's errors from here on (stale, replayed) are its own
+    if who is not None:
+        col = (data.get("args") or {}).get("collection")
+        who.update(pubkey=request["pubkey"], collection=col if isinstance(col, str) and col else None)
     if data["tool"] != tool:
         raise E.Invalid(f"request was signed for tool '{data['tool']}', not '{tool}'")
     if abs(time.time() - request["created_at"]) > REQUEST_WINDOW:

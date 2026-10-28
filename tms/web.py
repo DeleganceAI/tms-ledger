@@ -437,7 +437,7 @@ def board(conn, pubkey: str, slug: str) -> dict:
     """One collection as a pin board: its newest evidence and claims, the links between them and its
     contradictions. Members only. The page lays it out; nothing about the layout is stored."""
     L.require_member(conn, pubkey, slug)
-    who = "coalesce((SELECT p.name FROM profiles p WHERE p.pubkey = x.pubkey), left(x.pubkey, 12)) AS author"
+    who = "coalesce((SELECT p.name FROM profiles p WHERE p.pubkey = x.pubkey), 'no profile') AS author"
     evidence = [L._clean(r) for r in conn.execute(f"""SELECT x.id, x.pubkey, {who}, x.title, x.source, x.url, x.received_at,
             left(x.text, 280) AS excerpt FROM evidence x WHERE x.collection = %s ORDER BY x.received_at DESC, x.id LIMIT %s""", (slug, BOARD_MAX))]
     claims = [L._clean(r) for r in conn.execute(f"""SELECT x.id, x.pubkey, {who}, x.text, x.received_at

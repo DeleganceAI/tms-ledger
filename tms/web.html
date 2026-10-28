@@ -264,7 +264,7 @@ function renderHome() {
 function renderAbout(owned) {
   $('aboutList').hidden = !owned.length
   $('aboutRows').innerHTML = owned.map(c => `<div class="aboutrow" data-slug="${esc(c.slug)}"><b class="mono">${esc(c.slug)}</b>
-    <input class="topic" maxlength="140" value="${esc(c.topic || '')}" placeholder="Topic: what this collection is about">
+    <input class="topic" maxlength="140" value="${esc(c.topic || '')}" placeholder="Topic: what this collection is about" aria-label="Topic of ${esc(c.slug)}">
     <label class="check"><input type="checkbox" class="pub"${c.public ? ' checked' : ''}> Public</label>
     <button class="ghost save">Save</button><span class="msg muted"></span></div>`).join('')
   for (const row of $('aboutRows').children) {
@@ -436,11 +436,11 @@ function show(relay) {
 // ------------------------------------------------------------ submit
 function addRow() {
   const d = document.createElement('div'); d.className = 'row'
-  d.innerHTML = `<textarea placeholder="Claim text, or an existing claim's event id" class="claim" style="min-height:60px"></textarea>
-    <select class="rel"><option>SUPPORTS</option><option>REBUTS</option><option>QUALIFIES</option></select>
-    <textarea placeholder="Verbatim quote from the text" class="quote" style="min-height:60px"></textarea>
-    <textarea placeholder="Why this quote bears on the claim" class="reason" style="min-height:60px"></textarea>
-    <button class="ghost" title="Remove">×</button>`
+  d.innerHTML = `<textarea placeholder="Claim text, or an existing claim's event id" class="claim" style="min-height:60px" aria-label="Claim"></textarea>
+    <select class="rel" aria-label="How the evidence bears on the claim"><option>SUPPORTS</option><option>REBUTS</option><option>QUALIFIES</option></select>
+    <textarea placeholder="Verbatim quote from the text" class="quote" style="min-height:60px" aria-label="Quote"></textarea>
+    <textarea placeholder="Why this quote bears on the claim" class="reason" style="min-height:60px" aria-label="Reason"></textarea>
+    <button class="ghost" title="Remove" aria-label="Remove this row">×</button>`
   d.querySelector('button').onclick = () => d.remove()
   $('rows').append(d)
 }
@@ -483,11 +483,13 @@ async function renderMembers(slug) {
     const d = await api(`/api/c/${encodeURIComponent(slug)}`)
     const roleLabel = m => m.role === 'owner' ? ' (owner)' : m.role === 'admin' ? ' (admin)' : ''
     // view only: each person's Ledger and the agents they picked for this collection
-    const who = b => esc(b.name || b.pubkey.slice(0, 12) + '…')
+    const who = b => esc(b.name || 'unnamed agent')
     const bots = m => (m.ledger || m.agents?.length) ? `<div class="muted" style="font-size:12px">${[
       m.ledger && `Ledger: ${who(m.ledger)}`, m.agents?.length && `Agents: ${m.agents.map(who).join(', ')}`].filter(Boolean).join(' · ')}</div>` : ''
     $('mTable').innerHTML = '<tr><th>Name</th><th>npub</th></tr>' + d.members.map(m =>
-      `<tr><td>${esc(m.name || '—')}${roleLabel(m)}<div class="muted">${esc(m.about || '')}</div>${bots(m)}</td><td class="mono">${esc(m.npub)}</td></tr>`).join('')
+      `<tr><td>${esc(m.name || 'No profile yet')}${roleLabel(m)}<div class="muted">${esc(m.about || '')}</div>${bots(m)}</td>
+       <td class="mono" style="white-space:nowrap"><span title="${esc(m.npub)}">${esc(shortNpub(m.npub))}</span> <button class="ghost x" type="button" data-copy="${esc(m.npub)}" aria-label="Copy ${esc(m.name || 'this')} npub" title="Copy npub">⧉</button></td></tr>`).join('')
+    $('mTable').querySelectorAll('[data-copy]').forEach(b => b.onclick = async () => { await navigator.clipboard.writeText(b.dataset.copy); b.textContent = '✓' })
     // Requests from Communities: accepting signs the members list with them added; dismissing hides it.
     $('reqBox').hidden = !d.requests.length
     $('reqList').innerHTML = `<ul class="keys">${d.requests.map(r => `<li style="flex-wrap:wrap"><span class="nm"><b>${esc(r.name || 'No profile yet')}</b>
