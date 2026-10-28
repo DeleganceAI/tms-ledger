@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Paranoy · Chat</title>
+<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/site.css?v=SITE_V">
+<style>
+*{box-sizing:border-box}html,body{height:100%}body{margin:0;font:14px/1.5 var(--sans);display:flex;flex-direction:column}
+a{color:var(--accent)}[hidden]{display:none!important}.muted{color:var(--ink3)}.mono{font-family:var(--mono)}
+.bar{display:flex;align-items:center;gap:6px 14px;flex-wrap:wrap;padding:8px 16px;border-bottom:1px solid var(--line2);font-size:12.5px}
+.bar h1{margin:0;font:600 15px var(--mono)}.bar .grow{flex:1}
+.ib{font:12px var(--mono);background:none;border:1px solid var(--line);color:var(--ink2);border-radius:6px;padding:3px 9px;cursor:pointer;text-decoration:none}.ib:hover{border-color:var(--ink3);color:var(--ink)}.ib:disabled{opacity:.4;cursor:default}
+#main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.25fr) minmax(300px,1fr)}
+/* left: the conversation */
+#chat{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--line2)}
+#log{flex:1;overflow:auto;padding:18px 20px;display:flex;flex-direction:column;gap:12px}
+.msg{max-width:760px;word-break:break-word}.msg.user{align-self:flex-end;background:var(--accent2);padding:8px 12px;border-radius:12px;white-space:pre-wrap;max-width:85%}
+.msg.err{color:var(--bad);font:12px var(--mono)}
+.md>:first-child{margin-top:0}.md>:last-child{margin-bottom:0}.md p,.md ul,.md ol,.md pre,.md blockquote,.md table{margin:0 0 10px}.md ul,.md ol{padding-left:22px}
+.md h1,.md h2,.md h3,.md h4{font-size:15px;margin:14px 0 6px}.md code{font:12.5px var(--mono);background:var(--bg2);padding:0 4px;border-radius:3px}.md pre code{display:block;padding:8px 10px;overflow:auto}
+.md blockquote{border-left:3px solid var(--line);padding-left:10px;color:var(--ink2)}.md table{border-collapse:collapse;font-size:13px}.md td,.md th{border:1px solid var(--line);padding:3px 7px}
+a.id{font:11.5px var(--mono);color:var(--accent);background:var(--accent2);padding:0 4px;border-radius:3px;text-decoration:none}
+.tool{align-self:flex-start;border:1px solid var(--line);border-radius:6px;padding:2px 9px;font:11.5px var(--mono);color:var(--ink3)}
+.intro{color:var(--ink2);max-width:620px}.intro ul{padding-left:20px;margin:6px 0}
+.intro button{font:inherit;font-size:13px;background:var(--panel);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:5px 10px;margin:4px 6px 0 0;cursor:pointer;text-align:left}
+form{display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--line2)}
+textarea{flex:1;min-height:48px;max-height:180px;resize:vertical;font:inherit;color:var(--ink);background:var(--bg2);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.go{font:600 14px var(--sans);background:var(--brand);color:var(--brand-ink);border:0;border-radius:8px;padding:0 18px;cursor:pointer}.go:disabled{opacity:.5;cursor:default}
+#locked{margin:0 16px 12px;padding:12px 14px;border-radius:8px;border:1px solid var(--line);background:var(--panel);font-size:13.5px}
+#chat.off #log,#chat.off form{opacity:.45;filter:grayscale(.6);pointer-events:none}
+/* right: what the agent pulled up */
+#refs{overflow:auto;padding:14px 16px;display:flex;flex-direction:column;gap:8px;min-height:0}
+#refs h2{margin:0 0 2px;font:600 11.5px var(--sans);letter-spacing:.06em;text-transform:uppercase;color:var(--ink3)}
+.rec{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--line);border-radius:8px;padding:9px 11px;font-size:13px;transition:box-shadow .2s}
+.rec.evidence{border-left-color:#fbf8f2}.rec.claim{border-left-color:#fdeeb2}.rec.link{border-left-color:var(--good)}.rec.contradiction{border-left-color:var(--bad)}
+.rec.cited{border-color:var(--brand)}.rec.flash{box-shadow:0 0 0 2px var(--brand)}
+.rec .k{display:flex;gap:6px;align-items:center;font:600 10.5px var(--mono);text-transform:uppercase;color:var(--ink3);margin-bottom:3px}
+.rec .k .c{color:var(--brand-ink);background:var(--brand);border-radius:999px;padding:0 6px}.rec .k a{margin-left:auto;text-transform:none;font-weight:400}
+.rec .q{font-style:italic;color:var(--ink2)}.rec .s{color:var(--ink3);font-size:12px}
+@media(max-width:860px){body{height:auto}#main{display:block}#chat{border-right:0;height:78dvh}#refs{border-top:1px solid var(--line2);max-height:none}}
+</style></head><body>
+<!--HEADER-->
+<div class="bar"><h1 id="slug"></h1><span class="muted">{{MODEL}} · reads only this collection</span><span class="grow"></span>
+  <a class="ib" id="toBoard" href="/">Board</a><button class="ib" id="new" type="button">New chat</button>
+  <button class="ib" id="xmd" type="button" title="Download as Markdown">.md</button><button class="ib" id="xjson" type="button" title="Download as JSON">.json</button></div>
+<div id="main">
+  <section id="chat" aria-label="Chat">
+    <div id="log" aria-live="polite"></div>
+    <div id="locked" hidden role="note"><b>The chat is for approved accounts.</b> Email <a href="mailto:{{CONTACT}}?subject=Paranoy%20chat%20access">{{CONTACT}}</a> for access to the chat. You can still browse this collection's records on its <a id="lockedBoard" href="/">board</a>.</div>
+    <form id="form"><textarea id="q" aria-label="Your question" placeholder="Ask about this collection… Enter sends, Shift+Enter for a new line"></textarea><button class="go" id="send">Send</button></form>
+  </section>
+  <section id="refs" aria-label="Records the agent pulled up"><h2>Records</h2><p class="muted" id="refsEmpty">The claims, evidence and links the agent reads show here as it works. Ones its answer cites are marked <b>cited</b> and come first.</p></section>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js" defer></script>
+<script>
+const $ = id => document.getElementById(id)
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]))
+const SLUG = decodeURIComponent(location.pathname.split('/')[2]), KEY = 'paranoy-chat:' + SLUG
+$('slug').textContent = SLUG; document.title = `Paranoy · Chat · ${SLUG}`
+$('toBoard').href = $('lockedBoard').href = '/?c=' + encodeURIComponent(SLUG)
+let C = {messages: [], log: [], recs: {}}, busy = false, locked = false
+try { Object.assign(C, JSON.parse(sessionStorage.getItem(KEY) || '{}')) } catch {}
+const save = () => { try { sessionStorage.setItem(KEY, JSON.stringify(C)) } catch {} }
+
+// Answers can echo uploaded text, so rendered markdown keeps only these tags and safe links.
+const MD_TAGS = new Set(['P', 'BR', 'HR', 'STRONG', 'B', 'EM', 'I', 'DEL', 'CODE', 'PRE', 'BLOCKQUOTE', 'UL', 'OL', 'LI',
+  'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'TABLE', 'THEAD', 'TBODY', 'TR', 'TH', 'TD', 'A'])
+const idLink = id => `<a class="id" href="#rec-${id}" data-id="${id}" title="${id}">${id.slice(0, 10)}</a>`
+function md(text) {
+  // a <template> is inert: nothing in it loads or runs (no <img onerror>) while it is cleaned
+  const tpl = document.createElement('template'), box = tpl.content
+  if (!window.marked) { const p = document.createElement('p'); p.textContent = text; box.append(p) } else tpl.innerHTML = marked.parse(text)
+  for (const el of [...box.querySelectorAll('*')].reverse()) {
+    if (!MD_TAGS.has(el.tagName)) { el.replaceWith(...el.childNodes); continue }
+    const href = el.tagName === 'A' ? el.getAttribute('href') || '' : ''
+    for (const a of [...el.attributes]) el.removeAttribute(a.name)
+    if (/^(https?:\/\/|\/(?!\/)|#)/i.test(href)) { el.setAttribute('href', href); if (/^https?:/i.test(href)) { el.target = '_blank'; el.rel = 'noopener noreferrer' } }
+  }
+  const walk = document.createTreeWalker(box, NodeFilter.SHOW_TEXT), nodes = []  // event ids become links to the record on the right
+  while (walk.nextNode()) if (/\b[0-9a-f]{64}\b/.test(walk.currentNode.data) && !walk.currentNode.parentElement.closest('a')) nodes.push(walk.currentNode)
+  for (const n of nodes) { const s = document.createElement('span'); s.innerHTML = esc(n.data).replace(/\b[0-9a-f]{64}\b/g, idLink); n.replaceWith(...s.childNodes) }
+  const out = document.createElement('div'); out.append(box); return out.innerHTML
+}
+
+const cited = () => new Set(C.log.filter(e => e.type === 'answer').flatMap(e => e.content.match(/\b[0-9a-f]{64}\b/g) || []))
+function render() {
+  $('log').innerHTML = C.log.length ? C.log.map(e =>
+    e.type === 'user' ? `<div class="msg user">${esc(e.content)}</div>`
+    : e.type === 'answer' ? `<div class="msg md">${md(e.content)}</div>`
+    : e.type === 'error' ? `<div class="msg err" role="alert">${esc(e.error)}</div>`
+    : `<div class="tool">${esc(e.name)}${e.result == null ? ' …' : ` · ${esc(e.ms)}ms`}</div>`).join('')
+    : `<div class="intro"><p>Ask anything about <b class="mono">${esc(SLUG)}</b>. The agent searches the claims, reads the evidence they cite and answers with links to the records it used. It only reads; it never writes, and it says when the collection doesn't cover something.</p>
+       <p class="muted">Try:</p><button type="button">What are the main claims, and what supports each?</button><button type="button">Where do the sources disagree?</button><button type="button">Which claims have no evidence yet?</button></div>`
+  $('log').querySelectorAll('.intro button').forEach(b => b.onclick = () => { $('q').value = b.textContent; $('form').requestSubmit() })
+  $('log').scrollTop = $('log').scrollHeight
+  $('send').disabled = busy || locked
+  renderRefs()
+}
+function renderRefs() {
+  const c = cited(), recs = Object.values(C.recs).sort((a, b) => (c.has(b.id) - c.has(a.id)) || (b.at - a.at))
+  $('refsEmpty').hidden = recs.length > 0
+  $('refs').querySelectorAll('.rec').forEach(r => r.remove())
+  $('refs').insertAdjacentHTML('beforeend', recs.map(r => `<article class="rec ${esc(r.kind)}${c.has(r.id) ? ' cited' : ''}" id="rec-${r.id}">
+    <div class="k">${esc(r.kind)}${c.has(r.id) ? '<span class="c">cited</span>' : ''}${r.relation ? ` · ${esc(r.relation)}` : ''}<a href="/dashboard#record=${r.id}" title="Open in the dashboard">${r.id.slice(0, 8)}</a></div>
+    ${r.kind === 'evidence' ? `<b>${esc(r.title || r.url || '(untitled)')}</b>${r.source || r.url ? `<div class="s">${esc(r.source || r.url)}</div>` : ''}`
+      : r.kind === 'link' ? `<div class="q">“${esc(r.quote)}”</div><div class="s">${esc(r.reason || '')}</div>`
+      : r.kind === 'contradiction' ? `<div>${esc(r.reason)}</div>` : `<div>${esc(r.text)}</div>`}
+    ${r.author ? `<div class="s">${esc(r.author)}</div>` : ''}</article>`).join(''))
+}
+$('log').addEventListener('click', e => {  // an id in an answer: show its record on the right
+  const a = e.target.closest('a.id'); if (!a) return
+  const r = $('rec-' + a.dataset.id); if (!r) return
+  e.preventDefault(); r.scrollIntoView({block: 'center', behavior: 'smooth'}); r.classList.add('flash'); setTimeout(() => r.classList.remove('flash'), 1200)
+})
+
+async function send(text) {
+  busy = true; C.log.push({type: 'user', content: text}); render()
+  try {
+    const r = await fetch(`/api/c/${encodeURIComponent(SLUG)}/chat`, {method: 'POST', headers: {'content-type': 'application/json'},
+      body: JSON.stringify({messages: [...C.messages, {role: 'user', content: text}]})})
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`)
+    const reader = r.body.getReader(), dec = new TextDecoder()
+    let buf = ''
+    for (;;) {
+      const {done, value} = await reader.read()
+      if (done) break
+      buf += dec.decode(value, {stream: true})
+      let i
+      while ((i = buf.indexOf('\n\n')) >= 0) {
+        const line = buf.slice(0, i); buf = buf.slice(i + 2)
+        if (!line.startsWith('data: ')) continue
+        const ev = JSON.parse(line.slice(6))
+        if (ev.type === 'tool_call') C.log.push({...ev, result: null})
+        else if (ev.type === 'tool_result') Object.assign(C.log.findLast(e => e.id === ev.id) || {}, {result: ev.result, ms: ev.ms})
+        else if (ev.type === 'records') for (const x of ev.records) C.recs[x.id] ??= {...x, at: Date.now()}
+        else if (ev.type === 'messages') C.messages = ev.messages
+        else C.log.push(ev)
+        render()
+      }
+    }
+  } catch (e) { C.log.push({type: 'error', error: String(e.message || e)}) }
+  busy = false; save(); render(); $('q').focus()
+}
+$('form').onsubmit = e => { e.preventDefault(); const t = $('q').value.trim(); if (t && !busy) { $('q').value = ''; send(t) } }
+$('q').onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('form').requestSubmit() } }
+$('new').onclick = () => { C = {messages: [], log: [], recs: {}}; save(); render(); $('q').focus() }
+function download(ext, text, type) {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], {type}))
+  a.download = `chat-${SLUG}-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.${ext}`; a.click(); URL.revokeObjectURL(a.href)
+}
+$('xmd').onclick = () => download('md', `# Chat over ${SLUG}\n\nModel: {{MODEL}} · exported ${new Date().toISOString()}\n\n` +
+  C.log.map(e => e.type === 'user' ? `**You:** ${e.content}` : e.type === 'answer' ? `**Agent:** ${e.content}` : e.type === 'error' ? `> Error: ${e.error}`
+    : `<details><summary>tool: ${e.name}</summary>\n\n\`\`\`json\n${JSON.stringify(e.args, null, 2)}\n\`\`\`\n\n\`\`\`json\n${e.result ?? ''}\n\`\`\`\n</details>`).join('\n\n') + '\n', 'text/markdown')
+$('xjson').onclick = () => download('json', JSON.stringify({collection: SLUG, model: '{{MODEL}}', exported_at: new Date().toISOString(), messages: C.messages, log: C.log}, null, 2), 'application/json')
+
+addEventListener('load', render)  // marked loads deferred
+render()
+fetch('/api/me').then(r => r.json()).then(me => {  // only approved accounts can chat; everyone else sees it greyed out
+  if (me.approved) return
+  locked = true; $('chat').classList.add('off'); $('locked').hidden = false; $('q').disabled = $('send').disabled = true
+  for (const b of ['new', 'xmd', 'xjson']) $(b).disabled = true
+}).catch(() => {})
+</script></body></html>
