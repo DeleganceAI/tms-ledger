@@ -109,6 +109,13 @@ def _mac(payload: str) -> str:
     return hmac.new(os.environ["TMS_SECRET"].encode(), payload.encode(), hashlib.sha256).hexdigest()
 
 
+def invite_token(slug: str) -> str:
+    """The token in a collection's invite link. It lets its holder ask to join, even when the collection
+    is private; the owner or an admin still accepts. ponytail: one fixed link per collection, so it can't
+    be revoked; rotating TMS_SECRET resets them all (and logs everyone out). A table of links if that bites."""
+    return _mac(f"invite:{slug}")[:32]
+
+
 def make_cookie(pubkey: str, now: float | None = None) -> str:
     payload = f"{pubkey}.{int(now or time.time()) + COOKIE_TTL}"
     return f"{payload}.{_mac(payload)}"
@@ -231,7 +238,7 @@ TITLES = {"/": "Collections", "/connect": "Account", "/submit": "Submit", "/comm
 def with_header(request: Request, html: str) -> str:
     """A page with the shared header (tms/site.py) filled in for this visitor, and its title."""
     path, signed_in = request.url.path, cookie_pubkey(request) is not None
-    title = "Members" if path.startswith("/c/") else TITLES.get(path, "")
+    title = ("Invite" if path.endswith("/invite") else "Members") if path.startswith("/c/") else TITLES.get(path, "")
     if path == "/connect" and not signed_in:
         title = "Log in"
     return (html.replace("<!--HEADER-->", site.header(signed_in, path)).replace("?v=SITE_V", f"?v={site.VERSION}")
@@ -367,13 +374,15 @@ async def collection(request: Request) -> JSONResponse:
         return _error(err)
     for m in members + requests:
         m["npub"] = E.bech32_encode("npub", m["pubkey"])
+    invite = f"{str(request.base_url).rstrip('/')}/c/{slug}/invite?t={invite_token(slug)}" if role in ("owner", "admin") else None
     return JSONResponse({"slug": slug, "owner": owner, "caller_role": role, "members": members, "requests": requests,
-                         "topic": about["topic"] if about else None, "public": bool(about and about["public"])})
+                         "topic": about["topic"] if about else None, "public": bool(about and about["public"]), "invite": invite})
 
 
 async def join(request: Request) -> JSONResponse:
-    """POST {note}: ask to join a public collection. The owner and admins see it on the members page,
-    and an owner who signed in by email gets an email. One request per key and collection."""
+    """POST {note, invite}: ask to join a public collection, or any collection with its invite token.
+    The owner and admins see it on the members page, and an owner who signed in by email gets an email.
+    One request per key and collection."""
     pubkey, slug = cookie_pubkey(request), request.path_params["slug"]
     if pubkey is None:
         return JSONResponse({"error": "log in first"}, status_code=401)
@@ -381,12 +390,14 @@ async def join(request: Request) -> JSONResponse:
         body = await request.json()
     except ValueError:
         body = {}
-    note = str((body or {}).get("note") or "").strip()[:280]
+    note = str((body or {}).get("note") or "").strip()
+    invited = hmac.compare_digest(str((body or {}).get("invite") or ""), invite_token(slug))
+    note = (f"Came from your invite link. {note}" if invited else note).strip()[:280]
 
     def run(conn):
         L.require_allowed(conn, pubkey)
         about = conn.execute("SELECT public FROM collection_about WHERE collection = %s", (slug,)).fetchone()
-        if not (about and about["public"]):
+        if not (invited or (about and about["public"])):
             raise L.Denied(f"'{slug}' is not open to requests")  # private collections stay unseen
         if conn.execute("SELECT 1 FROM members WHERE collection = %s AND pubkey = %s", (slug, pubkey)).fetchone():
             raise ValueError(f"you are already a member of '{slug}'")
@@ -410,6 +421,13 @@ async def join(request: Request) -> JSONResponse:
         except Exception as err:  # the request is saved either way
             print(f"join request email failed: {err}", file=sys.stderr)
     return JSONResponse({"ok": True, "status": "asked" if new else "already asked"})
+
+
+async def invite_page(request: Request):
+    """Where an invite link lands. Signed out: Login (or sign up), then back here."""
+    if cookie_pubkey(request) is None:
+        return to_login(request)
+    return await page(request)
 
 
 async def dismiss(request: Request) -> JSONResponse:
@@ -539,6 +557,7 @@ routes = [
     *[Route("/" + f.name, lambda r, f=f: FileResponse(f, headers={"Cache-Control": "public, max-age=86400"}))
       for f in Path(__file__).with_name("brand").iterdir()],  # favicon.svg, favicon.ico, apple-touch-icon.png, logo.png (emails)
     Route("/c/{slug}/members", members_page),
+    Route("/c/{slug}/invite", invite_page),
     Route("/c/{slug}/export.jsonl", export),
     Route("/login", login, methods=["POST"]),
     Route("/api/signup", signup, methods=["POST"]),

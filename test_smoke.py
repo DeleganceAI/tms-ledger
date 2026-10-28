@@ -986,6 +986,22 @@ def showcase() -> None:
             assert client.post(f"/api/c/smoke/join/{PK[OUTSIDER]}/dismiss").json() == {"ok": True}
             assert client.get("/api/c/smoke").json()["requests"] == [], "dismissed"
             assert not sent, "the smoke owner has no email account, so no email"
+            # Invite link: lets a signed-up key ask to join a private collection; the owner still accepts.
+            client.cookies.clear()
+            r = client.get("/c/other/invite?t=abc", follow_redirects=False)
+            assert r.status_code == 302 and r.headers["location"] == "/connect?next=/c/other/invite?t=abc"
+            client.cookies.set(W.COOKIE, W.make_cookie(PK[BOB]))
+            assert client.get("/api/c/smoke").json()["invite"] is None, "plain members see no invite link"
+            client.cookies.set(W.COOKIE, W.make_cookie(PK[OWNER]))
+            link = client.get("/api/c/other").json()["invite"]
+            assert link.endswith(f"/c/other/invite?t={W.invite_token('other')}"), link
+            client.cookies.set(W.COOKIE, W.make_cookie(PK[OUTSIDER]))
+            assert client.get(link.split("testserver", 1)[1]).status_code == 200
+            assert client.post("/api/c/other/join", json={"invite": W.invite_token("smoke")}).status_code == 403, "tokens are per collection"
+            assert client.post("/api/c/other/join", json={"invite": W.invite_token("other"), "note": "hi"}).json()["status"] == "asked"
+            client.cookies.set(W.COOKIE, W.make_cookie(PK[OWNER]))
+            reqs = client.get("/api/c/other").json()["requests"]
+            assert [(q["pubkey"], q["note"]) for q in reqs] == [(PK[OUTSIDER], "Came from your invite link. hi")], reqs
         finally:
             EL.send = real_send
             client.cookies.clear()
