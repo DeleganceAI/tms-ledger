@@ -430,26 +430,36 @@ async def dismiss(request: Request) -> JSONResponse:
     return JSONResponse({"ok": True})
 
 
-BOARD_MAX = 300  # per kind; ponytail: the newest 300 evidence and claims, paging if a board ever needs more
+BOARD_LINKS = 300  # ponytail: the board is the ends of the newest links; paging or zooming in if that ever falls short
+BOARD_LOOSE = 12   # per kind: the newest evidence and claims with no link yet, in a row under the board
 
 
 def board(conn, pubkey: str, slug: str) -> dict:
-    """One collection as a pin board: its newest evidence and claims, the links between them and its
-    contradictions. Members only. The page lays it out; nothing about the layout is stored."""
+    """One collection as a pin board: the evidence and claims at the ends of its newest links and
+    contradictions, every link between them, and a few of the newest records nothing links to yet.
+    Members only. The page lays it out; nothing about the layout is stored."""
     L.require_member(conn, pubkey, slug)
-    who = "coalesce((SELECT p.name FROM profiles p WHERE p.pubkey = x.pubkey), 'no profile') AS author"
-    evidence = [L._clean(r) for r in conn.execute(f"""SELECT x.id, x.pubkey, {who}, x.title, x.source, x.url, x.received_at,
-            left(x.text, 280) AS excerpt FROM evidence x WHERE x.collection = %s ORDER BY x.received_at DESC, x.id LIMIT %s""", (slug, BOARD_MAX))]
-    claims = [L._clean(r) for r in conn.execute(f"""SELECT x.id, x.pubkey, {who}, x.text, x.received_at
-            FROM claims x WHERE x.collection = %s ORDER BY x.received_at DESC, x.id LIMIT %s""", (slug, BOARD_MAX))]
-    shown = [r["id"] for r in evidence + claims]
-    links = [L._clean(r) for r in conn.execute("""SELECT x.id, x.from_id AS "from", x.to_id AS "to", x.relation
-            FROM links x WHERE x.collection = %s AND x.from_id = ANY(%s) AND x.to_id = ANY(%s)""", (slug, shown, shown))]
     contradictions = [L._clean(r) for r in conn.execute("""SELECT x.id, x.reason, x.claim_ids AS claims FROM contradictions x
-            WHERE x.collection = %s AND x.claim_ids && %s::text[] ORDER BY x.received_at DESC LIMIT %s""", (slug, shown, BOARD_MAX))]
-    totals = L._clean(conn.execute("""SELECT count(*) FILTER (WHERE kind = 4701) AS evidence, count(*) FILTER (WHERE kind = 4702) AS claims
-            FROM events WHERE collection = %s""", (slug,)).fetchone())
-    return {"slug": slug, "evidence": evidence, "claims": claims, "links": links, "contradictions": contradictions, "totals": totals}
+            WHERE x.collection = %s ORDER BY x.received_at DESC, x.id LIMIT 50""", (slug,))]
+    ends = conn.execute("""SELECT x.from_id, x.to_id FROM links x WHERE x.collection = %s
+            ORDER BY x.received_at DESC, x.id LIMIT %s""", (slug, BOARD_LINKS)).fetchall()
+    shown = list({r[k] for r in ends for k in ("from_id", "to_id")} | {i for k in contradictions for i in k["claims"]})
+    who = "coalesce((SELECT p.name FROM profiles p WHERE p.pubkey = x.pubkey), 'no profile') AS author"
+    ev = f"SELECT x.id, x.pubkey, {who}, x.title, x.source, x.url, x.received_at, left(x.text, 280) AS excerpt FROM evidence x"
+    cl = f"SELECT x.id, x.pubkey, {who}, x.text, x.received_at FROM claims x"
+    rows = lambda sql, *a: [L._clean(r) for r in conn.execute(sql, a)]
+    evidence = rows(ev + " WHERE x.collection = %s AND x.id = ANY(%s) ORDER BY x.received_at DESC, x.id", slug, shown)
+    claims = rows(cl + " WHERE x.collection = %s AND x.id = ANY(%s) ORDER BY x.received_at DESC, x.id", slug, shown)
+    links = rows("""SELECT x.id, x.from_id AS "from", x.to_id AS "to", x.relation
+            FROM links x WHERE x.collection = %s AND x.from_id = ANY(%s) AND x.to_id = ANY(%s)""", slug, shown, shown)
+    unlinked = " AND ".join(f"NOT EXISTS (SELECT 1 FROM links l WHERE l.{end} = x.id)" for end in ("from_id", "to_id"))  # both indexed
+    loose = {"evidence": rows(ev + f" WHERE x.collection = %s AND {unlinked} ORDER BY x.received_at DESC, x.id LIMIT %s", slug, BOARD_LOOSE),
+             "claims": rows(cl + f""" WHERE x.collection = %s AND {unlinked} AND NOT EXISTS
+                 (SELECT 1 FROM contradiction_claims k WHERE k.claim_id = x.id) ORDER BY x.received_at DESC, x.id LIMIT %s""", slug, BOARD_LOOSE)}
+    totals = L._clean(conn.execute("""SELECT count(*) FILTER (WHERE kind = 4701) AS evidence, count(*) FILTER (WHERE kind = 4702) AS claims,
+            count(*) FILTER (WHERE kind = 4703) AS links FROM events WHERE collection = %s""", (slug,)).fetchone())
+    return {"slug": slug, "evidence": evidence, "claims": claims, "links": links, "contradictions": contradictions,
+            "loose": loose, "totals": totals}
 
 
 async def board_json(request: Request) -> JSONResponse:

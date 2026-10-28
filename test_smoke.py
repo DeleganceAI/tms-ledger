@@ -669,6 +669,9 @@ def server(ids) -> None:
         pins = {r["id"] for r in b["evidence"] + b["claims"]}
         assert b["evidence"] and b["claims"] and b["links"] and all(x["from"] in pins and x["to"] in pins for x in b["links"]), b
         assert b["totals"]["evidence"] >= len(b["evidence"]) and all(len(e["excerpt"]) <= 280 for e in b["evidence"])
+        loose = {r["id"] for r in b["loose"]["evidence"] + b["loose"]["claims"]}
+        ends = {i for x in b["links"] for i in (x["from"], x["to"])} | {i for k in b["contradictions"] for i in k["claims"]}
+        assert pins <= ends and not loose & ends, b  # every pin on the board hangs on a string; the loose row has none
         assert client.get("/api/c/outside/board").status_code == 403
         assert client.get("/c/smoke/members").status_code == 403
         lines = client.get("/c/smoke/export.jsonl").text.splitlines()

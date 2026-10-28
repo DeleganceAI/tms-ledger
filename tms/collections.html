@@ -46,6 +46,7 @@ a{color:var(--accent)}[hidden]{display:none!important}
 .pin .s{color:#7a6f84;font-size:11px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .pin.claim span{overflow:hidden;display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical}
 .pin:hover,.pin.sel{box-shadow:0 0 0 2px var(--brand),2px 6px 14px rgba(20,10,10,.5);z-index:2}
+.loose-h{position:absolute;white-space:nowrap;font-size:15px;color:var(--ink3);border-top:1px dashed var(--line);padding-top:8px;width:400px}
 #world.focus .pin:not(.near){opacity:.25}#world.focus line:not(.near),#world.focus path:not(.near){opacity:.12}
 .empty{position:absolute;inset:0;display:grid;place-items:center;color:var(--ink2);text-align:center;padding:24px}
 /* the record a pin stands for */
@@ -144,8 +145,8 @@ async function select(slug, initial) {
   try {
     const d = await api(`/api/c/${encodeURIComponent(slug)}/board`)
     if (current !== slug) return
-    const more = d.totals.evidence > d.evidence.length || d.totals.claims > d.claims.length
-    $('bNote').textContent = more ? `newest ${d.evidence.length} of ${d.totals.evidence} evidence, ${d.claims.length} of ${d.totals.claims} claims` : ''
+    $('bNote').textContent = d.totals.links > d.links.length
+      ? `${d.evidence.length} of ${d.totals.evidence} evidence and ${d.claims.length} of ${d.totals.claims} claims, around the newest links` : ''
     draw(d)
   } catch (e) { $('bNote').textContent = e.message }
 }
@@ -192,9 +193,11 @@ function layout(nodes, edges) {
 let V = {x: 0, y: 0, k: 1}, NODES = [], byId = new Map()
 const COLOR = {SUPPORTS: 'var(--good)', QUALIFIES: 'var(--warn)', REBUTS: 'var(--crit)'}
 function draw(d) {
-  const world = $('world'); world.querySelectorAll('.pin').forEach(p => p.remove()); world.classList.remove('focus')
+  const world = $('world'); world.querySelectorAll('.pin, .loose-h').forEach(p => p.remove()); world.classList.remove('focus')
   $('board').querySelector('.empty')?.remove()
-  NODES = [...d.evidence.map(e => ({...e, kind: 'evidence'})), ...d.claims.map(c => ({...c, kind: 'claim'}))]
+  const loose = [...d.loose.evidence.map(e => ({...e, kind: 'evidence'})), ...d.loose.claims.map(c => ({...c, kind: 'claim'}))]
+  const linked = [...d.evidence.map(e => ({...e, kind: 'evidence'})), ...d.claims.map(c => ({...c, kind: 'claim'}))]
+  NODES = [...linked, ...loose]
   byId = new Map(NODES.map(v => [v.id, v]))
   const pairs = []
   for (const k of d.contradictions) for (let i = 0; i < k.claims.length; i++) for (let j = i + 1; j < k.claims.length; j++)
@@ -202,7 +205,13 @@ function draw(d) {
   const links = d.links.filter(l => byId.has(l.from) && byId.has(l.to))
   if (!NODES.length) { $('strings').innerHTML = ''; $('board').insertAdjacentHTML('beforeend',
     `<div class="empty"><div>Nothing pinned to <b class="mono">${esc(d.slug)}</b> yet.<br><span class="muted">Add evidence on <a href="/submit">Submit</a>, or let your agents work here.</span></div></div>`); return }
-  layout(NODES, [...links.map(l => ({a: l.from, b: l.to, len: 260})), ...pairs.map(p => ({a: p.a, b: p.b, len: 300}))])
+  layout(linked, [...links.map(l => ({a: l.from, b: l.to, len: 260})), ...pairs.map(p => ({a: p.a, b: p.b, len: 300}))])
+  if (loose.length) {  // nothing links these yet: a row under the board, out of the layout
+    const xs = linked.length ? linked.map(v => v.x) : [0], y0 = linked.length ? Math.max(...linked.map(v => v.y)) + 200 : 0
+    const cols = Math.max(4, Math.round((Math.max(...xs) - Math.min(...xs)) / 220) + 1), x0 = (Math.min(...xs) + Math.max(...xs)) / 2 - (cols - 1) * 110
+    loose.forEach((v, i) => { v.x = x0 + i % cols * 220; v.y = y0 + Math.floor(i / cols) * 130 })
+    world.insertAdjacentHTML('beforeend', `<div class="loose-h" style="left:${x0 - 95}px;top:${y0 - 100}px">Not linked yet · the newest ${loose.length}</div>`)
+  }
   const near = new Map(NODES.map(v => [v.id, new Set([v.id])]))
   for (const e of [...links.map(l => [l.from, l.to]), ...pairs.map(p => [p.a, p.b])]) { near.get(e[0]).add(e[1]); near.get(e[1]).add(e[0]) }
   const c = v => [v.x, v.y]
