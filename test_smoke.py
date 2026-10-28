@@ -800,7 +800,17 @@ def server(ids) -> None:
         rows = conn.execute("SELECT tool, pubkey, collection, ok FROM mcp_calls WHERE method = 'tools/call'").fetchall()
     assert any(r["tool"] == "search_claims" and r["pubkey"] == PK[BOB] and r["collection"] == "smoke" and r["ok"] for r in rows)
     assert any(r["tool"] == "publish" and r["pubkey"] == PK[BOB] for r in rows)
-    assert any(not r["ok"] and r["pubkey"] is None for r in rows), "failed auth logs no pubkey"
+    assert any(not r["ok"] and r["pubkey"] is None for r in rows), "a request whose signature fails logs no pubkey"
+    assert any(r["tool"] == "search_claims" and not r["ok"] and r["pubkey"] == PK[BOB] and r["collection"] == "smoke" for r in rows), \
+        "a replayed request is signed, so its error counts against its key"
+    from tms import ui as U  # the dashboard's Agents tab: keys by account, with why their calls failed
+    with L.connect() as conn:
+        d = U.agents(conn, PK[OWNER], L.my_collections(conn, PK[OWNER]))
+    assert all(a["npub"] == E.bech32_encode("npub", a["id"]) for a in d["agents"])
+    bob = d["errors"][PK[BOB]]
+    assert 0 < len(bob) <= 6 and [e["n"] for e in bob] == sorted((e["n"] for e in bob), reverse=True), "the commonest first"
+    assert not any(e["error"].startswith("Error executing tool") for es in d["errors"].values() for e in es)
+    assert all(a["role"] in (None, "human", "ledger", "agent") for a in d["agents"])
 
 
 class turnstile_on:

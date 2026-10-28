@@ -282,7 +282,9 @@ function focusPin(id, near) {
 }
 function unfocus() { $('world').classList.remove('focus'); $('world').querySelectorAll('.sel').forEach(p => p.classList.remove('sel')); closeDetail() }
 async function openDetail(id) {
-  const v = byId.get(id); $('detail').hidden = false; $('dTitle').textContent = v.kind === 'evidence' ? 'Evidence' : 'Claim'
+  const v = byId.get(id), fromKey = document.activeElement?.classList.contains('pin')
+  $('detail').hidden = false; $('dTitle').textContent = v.kind === 'evidence' ? 'Evidence' : 'Claim'
+  if (fromKey) $('dClose').focus()  // keyboard users land in the panel; Esc takes them back to the board
   $('dBody').innerHTML = '<p class="muted">Loading…</p>'
   try {
     const r = await api('/dashboard/api/record/' + id), c = r.content || {}
