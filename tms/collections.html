@@ -5,7 +5,7 @@
 <style>
 *{box-sizing:border-box}html,body{height:100%}body{margin:0;font:14px/1.45 var(--sans);display:flex;flex-direction:column}
 a{color:var(--accent)}[hidden]{display:none!important}
-.muted{color:var(--ink3)}.mono{font-family:var(--mono)}
+.muted{color:var(--ink3)}.mono{font-family:var(--mono)}.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
 #main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(260px,330px) 1fr}
 /* left: one card per collection */
 #side{border-right:1px solid var(--line2);overflow:auto;padding:14px;display:flex;flex-direction:column;gap:10px}
@@ -20,6 +20,12 @@ a{color:var(--accent)}[hidden]{display:none!important}
 .new{display:flex;align-items:center;justify-content:center;gap:8px;border:1px dashed var(--line);border-radius:10px;padding:14px;color:var(--ink3);text-decoration:none}
 .new:hover{color:var(--ink);border-color:var(--ink3)}.new b{font-size:22px;font-weight:300;color:var(--brand);line-height:1}
 .note{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;font-size:13px}
+.guide{background:var(--panel);border:1px solid var(--brand);border-radius:10px;padding:12px 14px;font-size:13px}.guide h2{margin:0 0 6px;font-size:14px}
+.guide ol{list-style:none;margin:0;padding:0;display:grid;gap:6px}.guide li{display:flex;gap:8px;align-items:baseline}
+.guide li i{flex:none;width:18px;height:18px;border-radius:50%;border:1.5px solid var(--line);font:600 11px/15px var(--sans);text-align:center;font-style:normal;color:var(--ink3)}
+.guide li.done i{background:var(--good);border-color:var(--good);color:#1d3b2e}.guide li.done a{color:var(--ink3);text-decoration:line-through}
+.guide .x{float:right;font:inherit;font-size:12px;background:none;border:0;color:var(--ink3);cursor:pointer}
+.use{font-size:12px;color:var(--ink3);display:grid;gap:4px}.use i{display:block;height:5px;border-radius:3px;background:var(--line2);overflow:hidden}.use i b{display:block;height:100%;background:var(--good)}.use i b.hi{background:var(--warn)}
 /* right: the pin board */
 #boardwrap{position:relative;min-width:0;min-height:0;display:flex;flex-direction:column}
 .bar{display:flex;align-items:center;gap:8px 14px;flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid var(--line2);font-size:12.5px}
@@ -91,13 +97,42 @@ function renderSide() {
       ${c.topic ? `<div class="topic">${esc(c.topic)}</div>` : '<div class="topic muted">No topic yet</div>'}
       <div class="counts">${n(c.evidence, 'evidence', 'evidence')} · ${n(c.claims, 'claim')} · ${n(c.links, 'link')} · ${n(c.contradictions, 'contradiction')} · ${n(c.members.length, 'member')}</div></button>
     <div class="acts"><a href="/c/${esc(c.slug)}/chat">Chat</a>${c.role === 'owner' || c.role === 'admin' ? `<a href="/c/${esc(c.slug)}/members">Members</a>` : ''}<a href="/c/${esc(c.slug)}/export.jsonl">Export</a></div></div>`).join('')
-  $('side').innerHTML = '<h1>Your collections</h1>' + (cs.length ? cards : '<div class="note">You are not in any collection yet. Create one, or ask an owner to add you.</div>')
-    + (ME.can_create ? '<a class="new" href="/connect#new"><b>+</b>New collection</a>' : '')
+  $('side').innerHTML = guide() + '<h1>Your collections</h1>' + (cs.length ? cards : '<div class="note">You are not in any collection yet. Create one, or ask an owner to add you.</div>')
+    + (!ME.can_create ? '' : ME.usage && ME.usage.collections >= ME.usage.collections_limit
+      ? `<div class="note muted">A free account owns ${ME.usage.collections_limit} collection. <a href="mailto:${esc(ME.contact)}?subject=Paranoy%20limits">Email ${esc(ME.contact)}</a> for more.</div>`
+      : '<a class="new" href="/connect#new"><b>+</b>New collection</a>')
     + (ME.terms_signed ? '' : '<div class="note">Before you write, read and sign the terms on your <a href="/connect">Account</a> page.</div>')
+    + usage()
   $('side').querySelectorAll('.ccard').forEach(b => b.onclick = () => select(b.dataset.slug))
+  $('guideX')?.addEventListener('click', () => { try { localStorage.setItem(GUIDE_KEY, '1') } catch {} $('side').querySelector('.guide').remove() })
   const first = cs.find(c => c.slug === pick) || cs[0]
   if (first) select(first.slug, true)
   else { $('bTitle').textContent = ''; $('board').insertAdjacentHTML('beforeend', '<div class="empty">Your collections show here as pin boards.</div>') }
+}
+
+// First run: the steps from a new account to agents at work. Each ticks itself off from the account
+// as it stands; the card goes once every step is done, or when dismissed.
+const GUIDE_KEY = 'paranoy-guide-dismissed'
+function guide() {
+  const A = ME.account
+  if (!A || A.role !== 'human') return ''
+  try { if (localStorage.getItem(GUIDE_KEY)) return '' } catch {}
+  const steps = [[ME.terms_signed, '/connect', 'Sign the terms'], [ME.collections.some(c => c.role === 'owner'), '/connect#new', 'Create a collection'],
+    [!!A.ledger, '/connect#agents', 'Connect your Ledger agent'], [A.agents.length > 0, '/connect#agents', 'Add your other agents'],
+    [Object.keys(A.collection_agents).length > 0, '/connect#agents', 'Pick where each agent works']]
+  if (steps.every(s => s[0])) return ''
+  return `<div class="guide" role="region" aria-label="Getting started"><button class="x" id="guideX" type="button">Hide</button><h2>Getting started</h2><ol>${steps.map(([done, href, text], i) =>
+    `<li class="${done ? 'done' : ''}"><i aria-hidden="true">${done ? '✓' : i + 1}</i><a href="${href}">${text}</a>${done ? '<span class="sr-only"> (done)</span>' : ''}</li>`).join('')}</ol>
+    <p class="muted" style="margin:8px 0 0">An agent is a program with its own key that reads and writes here for you. <a href="/connect#agents">Connect an agent</a> shows how.</p></div>`
+}
+// A free account's records and collections against its limits.
+function usage() {
+  const u = ME.usage
+  if (!u) return ''
+  const pct = Math.min(100, 100 * u.records / u.records_limit)
+  return `<div class="use"><span>Free account: <b>${u.records.toLocaleString('en-US')}</b> of ${u.records_limit.toLocaleString('en-US')} records · ${u.collections} of ${u.collections_limit} collection${u.collections_limit === 1 ? '' : 's'}</span>
+    <i role="progressbar" aria-label="Records used" aria-valuemin="0" aria-valuemax="${u.records_limit}" aria-valuenow="${u.records}"><b class="${pct >= 80 ? 'hi' : ''}" style="width:${pct}%"></b></i>
+    <span><a href="/connect">Usage and limits</a> · <a href="mailto:${esc(ME.contact)}?subject=Paranoy%20limits">Ask for more</a></span></div>`
 }
 
 async function select(slug, initial) {

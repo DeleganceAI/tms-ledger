@@ -27,7 +27,7 @@ from pathlib import Path
 import httpx
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
-from starlette.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
+from starlette.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, StreamingResponse
 from starlette.routing import Route
 
 from . import events as E
@@ -224,7 +224,16 @@ def with_header(request: Request, html: str) -> str:
             .replace("<title>Paranoy</title>", f"<title>Paranoy · {title}</title>" if title else "<title>Paranoy</title>"))
 
 
+def to_login(request: Request) -> RedirectResponse:
+    """Signed-out visitors to a signed-in page go to Login, which brings them back after (?next=)."""
+    from urllib.parse import quote
+    here = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+    return RedirectResponse(f"/connect?next={quote(here, safe='/?=&')}", status_code=302)
+
+
 async def page(request: Request):
+    if request.url.path == "/submit" and cookie_pubkey(request) is None:
+        return to_login(request)
     return HTMLResponse(with_header(request, PAGE_FILE.read_text(encoding="utf-8")  # re-read so edits show on refresh
                                     .replace("{{TURNSTILE_SITE_KEY}}", TURNSTILE_SITE_KEY)))
 
@@ -303,7 +312,7 @@ async def docs_md(request: Request) -> PlainTextResponse:
 async def members_page(request: Request):
     pubkey, slug = cookie_pubkey(request), request.path_params["slug"]
     if pubkey is None:
-        return HTMLResponse('<meta http-equiv="refresh" content="0;url=/">', status_code=401)
+        return to_login(request)
     role = await db(L.acting_role, pubkey, slug)
     if role not in ("owner", "admin"):
         return PlainTextResponse(f"Only an owner or admin of '{slug}' manages its members.", status_code=403)

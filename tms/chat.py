@@ -20,12 +20,12 @@ from pathlib import Path
 import httpx
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, StreamingResponse
+from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from starlette.routing import Route
 
 from . import events as E
 from . import ledger as L
-from .web import cookie_pubkey, db, with_header
+from .web import cookie_pubkey, db, to_login, with_header
 
 CHAT_URL = os.environ.get("CHAT_URL", "https://api.deepinfra.com/v1/openai").rstrip("/")
 CHAT_API_KEY = os.environ.get("CHAT_API_KEY") or L.EMBED_API_KEY  # one DeepInfra key for both
@@ -200,7 +200,7 @@ def page(request: Request):
     """The chat page. Members see it; for anyone not approved the chat is greyed out."""
     pk, slug = cookie_pubkey(request), request.path_params["slug"]
     if pk is None:
-        return RedirectResponse(f"/connect?next=/c/{slug}/chat", status_code=302)
+        return to_login(request)
     with L.connect() as conn:
         if not _member(conn, pk, slug):
             return PlainTextResponse(f"You are not a member of '{slug}'.", status_code=403)

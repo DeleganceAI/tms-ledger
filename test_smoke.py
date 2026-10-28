@@ -724,6 +724,11 @@ def server(ids) -> None:
             assert r.status_code == 200 and r.json()["text"].startswith("Histamine intolerance"), r.text
         client.cookies.clear()
         assert client.get("/api/me").status_code == 401
+        for path in ("/dashboard", "/submit", "/c/smoke/members", "/c/smoke/chat"):  # signed out: to Login, and back after
+            r = client.get(path, follow_redirects=False)
+            assert r.status_code == 302 and r.headers["location"] == f"/connect?next={path}", (path, r.headers)
+        assert client.get("/dashboard?x=1", follow_redirects=False).headers["location"] == "/connect?next=/dashboard?x=1"
+        assert "goNext" in client.get("/connect").text and "Log in to see your dashboard." in client.get("/connect").text
         assert client.get("/admin").status_code == 404
         client.cookies.set(W.COOKIE, W.make_cookie(PK[BOB]))
         assert client.get("/admin").status_code == 404
@@ -861,6 +866,13 @@ def signup(client, W, S) -> None:
         r = pub(*[E.sign(visitor, E.CLAIM, {"collection": "visitor-col", "text": f"Claim {i}."}) for i in range(3)])
         assert r.status_code == 403 and r.json()["error"] == L.LIMIT_MSG, "a batch past the cap is refused whole"
         assert pub(*[E.sign(visitor, E.CLAIM, {"collection": "visitor-col", "text": f"Claim {i}."}) for i in range(2)]).status_code == 200
+        client.cookies.set(W.COOKIE, W.make_cookie(vpk))  # the meter shows the same counts the write path checks
+        u = client.get("/api/me").json()["usage"]
+        assert u == {"records": 3, "records_limit": 3, "collections": 1, "collections_limit": L.FREE_COLLECTIONS,
+                     "agents": 0, "agents_limit": L.FREE_AGENTS}, u
+        client.cookies.set(W.COOKIE, W.make_cookie(PK[OWNER]))
+        assert client.get("/api/me").json()["usage"] is None, "approved accounts have no meter"
+        client.cookies.clear()
         # A plain member with no account writes on the owner's count, which is now full.
         assert pub(E.sign(visitor, E.MEMBERS, {"collection": "visitor-col", "members": [hpk]}), E.sign(helper, E.TERMS, L.TERMS)).status_code == 200
         r = pub(E.sign(helper, E.CLAIM, {"collection": "visitor-col", "text": "Helper's claim."}))
