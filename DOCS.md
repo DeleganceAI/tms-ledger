@@ -1,18 +1,18 @@
-# Using the TMS ledger
+# Using Paranoy
 
 Imagine you and an AI assistant are investigating whether a new pump uses less electricity than the old one. You find a test report, draw a conclusion from it, and later discover another report that seems to disagree. When you return to the question next week, you need more than the last answer. You need the documents, the exact passages you relied on, and an explanation of what the disagreement is about.
 
-TMS keeps that material together in a private collection shared by people and AI agents. It records what someone claimed, the evidence they cited, and the reasons someone else supported or challenged it. Earlier contributions stay in place when new information arrives, so you can revisit a conclusion without losing the work that led to it.
+Paranoy keeps that material together in a private collection shared by people and AI agents. It records what someone claimed, the evidence they cited, and the reasons someone else supported or challenged it. Earlier contributions stay in place when new information arrives, so you can revisit a conclusion without losing the work that led to it.
 
 This guide explains how those records fit together, how to contribute through the browser, and how to connect an agent. Start with the example below, or go straight to [For people](#for-people) or [For bots and agents](#for-bots-and-agents).
 
 ## Philosophy
 
-TMS stands for *truth maintenance system*. In this system, people and agents decide what to believe. The software's job is to preserve the material they used and make the reasons for their conclusions inspectable. It checks signatures, access permissions, record structure, and whether a quoted passage appears in the document cited. Judging what that passage establishes remains the reader's responsibility.
+Paranoy is a *truth maintenance system* (TMS). In this system, people and agents decide what to believe. The software's job is to preserve the material they used and make the reasons for their conclusions inspectable. It checks signatures, access permissions, record structure, and whether a quoted passage appears in the document cited. Judging what that passage establishes remains the reader's responsibility.
 
 ### Evidence: the document you read
 
-In our pump example, you start by adding the full text of the test report. TMS calls that an **evidence** record. It can hold a paper, article, post, or another document, along with its title, URL, and where you obtained it. Saving the full text gives later readers the surrounding explanation, rather than leaving them with a quotation whose context they cannot check. The word “evidence” identifies the record's role; putting a document here does not establish that its contents are correct.
+In our pump example, you start by adding the full text of the test report. Paranoy calls that an **evidence** record. It can hold a paper, article, post, or another document, along with its title, URL, and where you obtained it. Saving the full text gives later readers the surrounding explanation, rather than leaving them with a quotation whose context they cannot check. The word “evidence” identifies the record's role; putting a document here does not establish that its contents are correct.
 
 ### Claims: statements someone can examine
 
@@ -38,29 +38,29 @@ Before accepting a link, the server checks that its quote appears in the cited e
 
 Suppose someone records another claim: “In that same two-hour test, the new pump used more electricity than the old pump.” These claims conflict if they refer to the same pumps, test, and measurements. A **contradiction** record names the claims and explains why they cannot all hold. Someone has to make that judgment and record the reason. The server does not infer a contradiction from the text or choose which claim is wrong.
 
-Check the scope before recording a contradiction. A report about a different test, speed, or date might be compatible with the first report. A contradiction can involve more than two claims, and the problem may arise only when all of them are considered together. Later evidence may give a reason to reject one claim, narrow it, or reject the contradiction itself. Those are conclusions readers draw from the records; TMS does not mark a contradiction “resolved.”
+Check the scope before recording a contradiction. A report about a different test, speed, or date might be compatible with the first report. A contradiction can involve more than two claims, and the problem may arise only when all of them are considered together. Later evidence may give a reason to reject one claim, narrow it, or reject the contradiction itself. Those are conclusions readers draw from the records; Paranoy does not mark a contradiction “resolved.”
 
 ### Corrections preserve what came before
 
-TMS adds records without editing or deleting earlier ones. This is what **append-only** means here. If you discover a mistake in your pump claim, add a corrected claim and evidence-backed links explaining what the source supports and what was wrong with the earlier record. If the error was in a link's interpretation or a contradiction's reasoning, a new link can rebut that record. There is no direct claim-to-claim link: each link must cite an evidence document and a quote.
+Paranoy adds records without editing or deleting earlier ones. This is what **append-only** means here. If you discover a mistake in your pump claim, add a corrected claim and evidence-backed links explaining what the source supports and what was wrong with the earlier record. If the error was in a link's interpretation or a contradiction's reasoning, a new link can rebut that record. There is no direct claim-to-claim link: each link must cite an evidence document and a quote.
 
 This history matters because someone may already have relied on the original wording. Each reference points to a particular signed record, so correcting a claim does not change the text that earlier contributors saw. It also does not automatically invalidate supporting links or settle related disagreements. The next reader can inspect the correction alongside the original record and decide what follows from it.
 
 ### What readers decide
 
-TMS stores the assertions and their stated grounds. It has no confidence scores, credibility ratings, or verdict fields such as “verified” or “debunked.” Numbers inside a document or claim remain ordinary content, as the pump measurements illustrate. Search ranks, distances, and link counts help you locate material; they do not measure whether a claim is true. A list sorted as `contested`, for example, uses counts of rebuttals and contradiction findings to help direct attention. It does not decide the disagreement.
+Paranoy stores the assertions and their stated grounds. It has no confidence scores, credibility ratings, or verdict fields such as “verified” or “debunked.” Numbers inside a document or claim remain ordinary content, as the pump measurements illustrate. Search ranks, distances, and link counts help you locate material; they do not measure whether a claim is true. A list sorted as `contested`, for example, uses counts of rebuttals and contradiction findings to help direct attention. It does not decide the disagreement.
 
-Readers also judge whether two records repeat the same claim, whether sources are independent, and whether a source is reliable. TMS does not merge separately signed claims just because their text matches. Ten supporting links might all rely on the same report. A signature identifies the key that signed a contribution, but it cannot tell you whether the person or agent using that key is knowledgeable or honest. The record gives you material to examine, including disagreements and gaps, while leaving the judgment with you.
+Readers also judge whether two records repeat the same claim, whether sources are independent, and whether a source is reliable. Paranoy does not merge separately signed claims just because their text matches. Ten supporting links might all rely on the same report. A signature identifies the key that signed a contribution, but it cannot tell you whether the person or agent using that key is knowledgeable or honest. The record gives you material to examine, including disagreements and gaps, while leaving the judgment with you.
 
 ### Authorship and privacy
 
-People and agents sign their contributions with their own cryptographic keys. A public key identifies the signer; the corresponding private key is used to sign. TMS uses the signed event format from Nostr, so an exported record can be checked with a compatible library. Changing the signed content makes its signature fail verification, including if the server operator makes the change. This lets you check the records you hold. It does not by itself prove that a server or export has included every record. The server also records when each contribution arrived, separately from the timestamp supplied by its signer.
+People and agents sign their contributions with their own cryptographic keys. A public key identifies the signer; the corresponding private key is used to sign. Paranoy uses the signed event format from Nostr, so an exported record can be checked with a compatible library. Changing the signed content makes its signature fail verification, including if the server operator makes the change. This lets you check the records you hold. It does not by itself prove that a server or export has included every record. The server also records when each contribution arrived, separately from the timestamp supplied by its signer.
 
-A **collection** groups records and controls access to them. Through the service, only its owner and members can read, write, or export its contents. Adding a person or agent lets that key participate; removing a member ends that key's access through the service, but cannot retrieve copies they have already downloaded. Profiles and terms records are not private collection documents, and the public office view shows aggregate activity and anonymous shapes of work. Collection access is controlled by the server; signatures do not encrypt the uploaded text. TMS does not publish your collection to Nostr relays.
+A **collection** groups records and controls access to them. Through the service, only its owner and members can read, write, or export its contents. Adding a person or agent lets that key participate; removing a member ends that key's access through the service, but cannot retrieve copies they have already downloaded. Profiles and terms records are not private collection documents, and the public office view shows aggregate activity and anonymous shapes of work. Collection access is controlled by the server; signatures do not encrypt the uploaded text. Paranoy does not publish your collection to Nostr relays.
 
 ### How the work flows
 
-You could keep the pump reports and your conclusions in a shared folder. As people add more documents and change their minds, you would also need to keep track of which passage supports each statement, who made each interpretation, and which version a later comment refers to. TMS gives those contributions separate records and explicit connections, so the group can return to a question and inspect the work already done.
+You could keep the pump reports and your conclusions in a shared folder. As people add more documents and change their minds, you would also need to keep track of which passage supports each statement, who made each interpretation, and which version a later comment refers to. Paranoy gives those contributions separate records and explicit connections, so the group can return to a question and inspect the work already done.
 
 A useful research loop starts with gathering evidence, then extracting specific claims and linking the passages that bear on them. Reviewers can look for unsupported interpretations and genuine contradictions. Further research can address the disagreement or reveal that the collection does not yet contain enough information to answer. People and agents can take any of these roles, and finding nothing useful is a valid result. The ledger does not assign tasks or run this process; you organize the work outside it.
 
@@ -72,15 +72,15 @@ For more on the choice to keep the stored structure small, read [The Bitter Less
 
 ### 1. Log in
 
-Your signing key is how TMS recognizes your account. You use a Nostr browser extension that supports NIP-07, the interface that lets a website ask the extension to sign something. The extension handles your private key. Your public key can be shared, and its shareable form begins with `npub`. Never paste your private key, whose encoded form begins with `nsec`, into a form or member list.
+Your signing key is how Paranoy recognizes your account. You use a Nostr browser extension that supports NIP-07, the interface that lets a website ask the extension to sign something. The extension handles your private key. Your public key can be shared, and its shareable form begins with `npub`. Never paste your private key, whose encoded form begins with `nsec`, into a form or member list.
 
 Install a Nostr signing extension such as [Alby](https://getalby.com) or [nos2x](https://github.com/fiatjaf/nos2x), and create or import your key using the extension's instructions. Anyone can sign up: open [Login]({{BASE}}/connect), or click **Sign up** on the home page, and click **Log in**. A key with no account yet gets a **Sign up** button and a quick bot check; after that it's a free account at once, with no approval queue. A collection owner can also add your key to their collection without you signing up.
 
 To log in:
 
 1. Let the extension share your public key. The page looks for an existing Nostr profile on Damus and Primal.
-2. Sign the login request. TMS sets a browser cookie that lasts 12 hours, so you can browse without signing a new request for every page.
-3. If the page found your profile, click **Use this profile here** to save it in TMS. Otherwise, sign a short profile with a name and an “about” description saying whether the key belongs to a human or an agent. This description is self-reported.
+2. Sign the login request. Paranoy sets a browser cookie that lasts 12 hours, so you can browse without signing a new request for every page.
+3. If the page found your profile, click **Use this profile here** to save it in Paranoy. Otherwise, sign a short profile with a name and an “about” description saying whether the key belongs to a human or an agent. This description is self-reported.
 
 A **free account** can own one collection and write up to 10,000 evidence, claims, links and contradictions in total, counting the collections it was invited into. If you reach a limit, the write is refused with a message asking you to email {{CONTACT_EMAIL}}, who can lift the limits. Membership lets you work in the collections you have joined.
 
@@ -88,7 +88,7 @@ A **free account** can own one collection and write up to 10,000 evidence, claim
 
 If you'd rather not install an extension, enter your email address on [Login]({{BASE}}/connect) and click **Email me a code**. Type the 6-digit code from the email to sign in. Every sign-in sends a new code; there is no password. A code works once, expires after 10 minutes, and stops working after five wrong tries.
 
-Each code request runs a quick bot check, usually invisible. The first time you sign in, TMS creates a Nostr key for you, and the account is a free account at once. Your email address never appears in any record.
+Each code request runs a quick bot check, usually invisible. The first time you sign in, Paranoy creates a Nostr key for you, and the account is a free account at once. Your email address never appears in any record.
 
 With an email account, **the server holds your key** and signs your records with it, so you don't need an extension. That also means the operator could sign as you, unlike with a key you hold yourself. To take your key with you:
 
@@ -100,7 +100,7 @@ Your records, collections and memberships stay the same, because the key is the 
 
 ### 2. Sign the terms
 
-Before you write to a collection, the home page asks you to confirm that you have the right to upload the material you contribute. Read the terms and click **I agree** to sign them. TMS stores your agreement with the version and a hash, a fingerprint of the exact terms text. Agents sign the same agreement before contributing.
+Before you write to a collection, the home page asks you to confirm that you have the right to upload the material you contribute. Read the terms and click **I agree** to sign them. Paranoy stores your agreement with the version and a hash, a fingerprint of the exact terms text. Agents sign the same agreement before contributing.
 
 ### 3. Create a collection and add members
 
@@ -134,7 +134,7 @@ Quote matching ignores differences in case, whitespace, curly versus straight qu
 
 ### 5. Export a collection
 
-Any member can download the collection's events using **export** on the home page or `/c/<slug>/export.jsonl`. The file uses JSON Lines: each line contains one complete signed event. A compatible Nostr library can verify each event's signature independently of TMS. Keep an export when you need a local copy for inspection or further work.
+Any member can download the collection's events using **export** on the home page or `/c/<slug>/export.jsonl`. The file uses JSON Lines: each line contains one complete signed event. A compatible Nostr library can verify each event's signature independently of Paranoy. Keep an export when you need a local copy for inspection or further work.
 
 ### Browse activity and ask questions
 
@@ -167,13 +167,13 @@ Give the bot's npub to a collection owner. The owner can add it on the members p
 
 ### The MCP endpoint
 
-MCP, the Model Context Protocol, is the interface through which an agent discovers and calls TMS tools. The HTTP endpoint is:
+MCP, the Model Context Protocol, is the interface through which an agent discovers and calls Paranoy tools. The HTTP endpoint is:
 
 ```
 {{BASE}}/mcp
 ```
 
-The endpoint uses MCP's Streamable HTTP transport and accepts the direct JSON-RPC calls shown here without a session or a separate initialization request. Tool and prompt discovery is public. To use the tools, a client must produce the TMS signatures described below: `publish` takes signed records, and every other tool takes a signed request. A bearer token is not used for authorization.
+The endpoint uses MCP's Streamable HTTP transport and accepts the direct JSON-RPC calls shown here without a session or a separate initialization request. Tool and prompt discovery is public. To use the tools, a client must produce the Paranoy signatures described below: `publish` takes signed records, and every other tool takes a signed request. A bearer token is not used for authorization.
 
 Listing tools and prompts needs no signature. Each is a JSON-RPC POST to `/mcp` with the headers shown under [Signed requests](#signed-requests):
 
