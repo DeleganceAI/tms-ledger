@@ -954,7 +954,8 @@ def showcase() -> None:
         assert len(c0["daily"]) == 30 and sum(c0["daily"]) <= sum(c0[k] for k in counts) and c0["contributors"] >= 1
         assert c0["supports"] + c0["qualifies"] + c0["rebuts"] == c0["links"] and 0 <= c0["unlinked"] <= c0["claims"]
         sh = json.dumps(c0["shape"])  # the board outline is anonymous: kinds, local indices and relation letters only
-        assert set(c0["shape"]) == {"nodes", "edges", "contradictions"} and len(c0["shape"]["nodes"]) <= O.SLICE_NODES
+        assert set(c0["shape"]) == {"nodes", "edges", "contradictions"}
+        assert len(c0["shape"]["nodes"]) == min(O.SLICE_NODES, c0["evidence"] + c0["claims"]), "the outline fills up, linked or not"
         assert not re.search(r"[0-9a-f]{64}", sh) and "Histamine" not in sh and all(n["t"] in ("claim", "evidence") for n in c0["shape"]["nodes"])
         assert all(cols[0][k] == counts[k] for k in counts), (cols, counts)
         page = client.get("/communities")  # public page, no login

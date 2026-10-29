@@ -241,27 +241,49 @@ def shape(conn, slug: str) -> dict:
             links.append((r["from_id"], r["to_id"], REL[r["relation"]]))
     for r in conn.execute("SELECT claim_ids FROM contradictions WHERE collection = %s", (slug,)):
         groups.append(r["claim_ids"])
-    roots = sorted(recent, key=recent.get, reverse=True)[:1] or list(nodes)[:1]
-    sl = Graph(nodes, links, groups).slice(roots, random.Random(slug))[0]
+    # Start from the best-connected claims (the newest claim often has no links yet, which drew a
+    # single pin), then fill the board from the rest, best-connected first, up to SLICE_NODES.
+    g, rng = Graph(nodes, links, groups), random.Random(slug)
+    ranked = sorted(nodes, key=lambda n: (len(g.neighbours(n)), nodes[n] == "claim", recent[n].timestamp() if n in recent else 0), reverse=True)
+    sl, idx = g.slice(ranked[:2], rng)
+    if len(idx) < SLICE_NODES:
+        sl, _ = g.slice(list(idx) + [n for n in ranked if n not in idx], rng)
     return {k: sl[k] for k in ("nodes", "edges", "contradictions")}
 
 
+_showcase_lock = threading.Lock()
+
+
+def _refresh_showcase() -> None:
+    """Recompute the public collections and their outlines (outlines every six hours: they read
+    every node and link of the collection, seconds for a big one)."""
+    minute, period = int(time.time() // 60), int(time.time() // (6 * 3600))
+    try:
+        with L.connect() as conn:
+            rows = L.showcase(conn)
+            for r in rows:
+                key = (r["slug"], period)
+                if key not in _shapes:
+                    _shapes[key] = shape(conn, r["slug"])
+                r["shape"] = _shapes[key]
+        for k in [k for k in _shapes if k[1] != period]:
+            del _shapes[k]
+        _showcase.update(minute=minute, body=rows)
+    finally:
+        _showcase.pop("refreshing", None)
+
+
 def showcase() -> list[dict]:
-    """Collections their owners made public, at most a minute old; each with its board's shape,
-    redrawn hourly (it reads every node and link of the collection)."""
-    minute, hour = int(time.time() // 60), int(time.time() // 3600)
-    with _stats_lock:
-        if _showcase.get("minute") != minute:
-            with L.connect() as conn:
-                rows = L.showcase(conn)
-                for r in rows:
-                    key = (r["slug"], hour)
-                    if key not in _shapes:
-                        _shapes[key] = shape(conn, r["slug"])
-                    r["shape"] = _shapes[key]
-            for k in [k for k in _shapes if k[1] != hour]:
-                del _shapes[k]
-            _showcase.update(minute=minute, body=rows)
+    """Collections their owners made public, at most about a minute old. Only the first request
+    after a start waits; after that a stale minute is served at once and refreshed in a thread,
+    so nobody waits on the query, and it never holds the ticker's lock."""
+    with _showcase_lock:
+        if "body" not in _showcase:
+            _showcase["refreshing"] = True
+            _refresh_showcase()
+        elif _showcase["minute"] != int(time.time() // 60) and not _showcase.get("refreshing"):
+            _showcase["refreshing"] = True
+            threading.Thread(target=_refresh_showcase, daemon=True).start()
         return _showcase["body"]
 
 
