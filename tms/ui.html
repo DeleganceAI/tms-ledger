@@ -297,8 +297,7 @@ async function loadCollections() {
   let d; try { d = await api('collections'); } catch (e) { $('ccards').innerHTML = `<div class="empty">${esc(e)}</div>`; return; }
   $('ccards').innerHTML = d.collections.length ? d.collections.map(c =>
     `<div class="panel card" data-col="${esc(c.slug)}" title="browse ${esc(c.slug)}"><div class="ph"><h2>${esc(c.slug)}</h2><span class="muted">${c.last_at ? 'last event ' + ago(c.last_at) + ' ago' : 'empty'}</span></div>` +
-    `<div class="nm2" title="${esc(npubOf(c.owner))}">owner ${esc(c.owner_name || shortNpub(c.owner))}</div><div class="grid4">${cell('members', c.members)}${cell('evidence', c.evidence)}${cell('contributors', c.contributors, 'distinct signing keys on its events')}${cell('row data', fmtB(c.bytes), 'event bytes as stored: compressed, without indexes')}` +
-    `${cell('claims', c.claims)}${cell('links', c.links)}${cell('contradictions', c.contradictions)}${cell('created', ago(c.created_at) + ' ago', `${c.owner} · ${c.created_at}`)}</div></div>`).join('')
+    `<div class="nm2" title="${esc(npubOf(c.owner))}">owner ${esc(c.owner_name || shortNpub(c.owner))}</div><div class="grid4">${cell('members', c.members)}${cell('evidence', c.evidence)}${cell('claims', c.claims)}${cell('contradictions', c.contradictions)}</div></div>`).join('')
     : (d.can_create ? '' : '<div class="empty">you are not a member of any collection yet</div>');
   if (d.can_create) $('ccards').insertAdjacentHTML('beforeend', '<a class="panel card add" href="/connect#new" title="Create a collection"><b>+</b>New collection</a>');
   const tot = d.collections.reduce((a, c) => a + c.bytes + c.vector_bytes, 0);

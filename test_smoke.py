@@ -1148,7 +1148,7 @@ def chat_agent() -> None:
             assert 'class="subnav"' in client.get("/docs").text and 'aria-current="page">Docs' in client.get("/docs").text
             assert "<title>Paranoy · Submit</title>" in client.get("/submit").text
             page = client.get("/c/smoke/chat")
-            assert page.status_code == 200 and "The chat is for approved accounts" in page.text and L.CONTACT in page.text
+            assert page.status_code == 200 and "Chat is for approved accounts" in page.text and L.CONTACT in page.text
             assert C.CHAT_MODEL in page.text and "{{" not in page.text and "marked@15.0.12" in page.text
             r = client.post("/api/c/smoke/chat", json={"messages": [{"role": "user", "content": "hi"}]})
             assert r.status_code == 403 and L.CONTACT in r.json()["error"] and not seen, "no model call for an unapproved key"

@@ -213,7 +213,7 @@ async def chat(request: Request):
     if pk is None:
         return JSONResponse({"error": "log in first"}, status_code=401)
     if not await db(L.is_approved, pk):
-        return JSONResponse({"error": f"The chat is for approved accounts. Email {L.CONTACT} for access to the chat."}, status_code=403)
+        return JSONResponse({"error": f"Chat is for approved accounts. Email {L.CONTACT}."}, status_code=403)
     try:
         body = await request.json()
         messages = history(body.get("messages") if isinstance(body, dict) else None)

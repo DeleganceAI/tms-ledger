@@ -94,10 +94,10 @@ let ME = null, current = null
 function renderSide() {
   const cs = ME.collections, pick = new URLSearchParams(location.search).get('c')
   const cards = cs.map(c => `<div><button class="ccard" type="button" data-slug="${esc(c.slug)}" aria-pressed="false">
-      <span class="t"><b>${esc(c.slug)}</b>${c.role === 'owner' || c.role === 'admin' ? `<span class="tag">${c.role}</span>` : ''}${c.public ? '<span class="tag pub">public</span>' : ''}${c.requests ? `<span class="tag req">${c.requests} asking to join</span>` : ''}</span>
-      ${c.topic ? `<div class="topic">${esc(c.topic)}</div>` : '<div class="topic muted">No topic yet</div>'}
-      <div class="counts">${n(c.evidence, 'evidence', 'evidence')} · ${n(c.claims, 'claim')} · ${n(c.links, 'link')} · ${n(c.contradictions, 'contradiction')} · ${n(c.members.length, 'member')}</div></button>
-    <div class="acts"><a href="/c/${esc(c.slug)}/chat">Chat</a>${c.role === 'owner' || c.role === 'admin' ? `<a href="/c/${esc(c.slug)}/members">${c.requests ? `Members (${c.requests} asking)` : 'Members'}</a>` : ''}<a href="/c/${esc(c.slug)}/export.jsonl">Export</a></div></div>`).join('')
+      <span class="t"><b>${esc(c.slug)}</b>${c.role !== 'owner' ? `<span class="tag">${c.role}</span>` : ''}${c.public ? '<span class="tag pub">public</span>' : ''}${c.requests ? `<span class="tag req">${c.requests} asking to join</span>` : ''}</span>
+      ${c.topic ? `<div class="topic">${esc(c.topic)}</div>` : ''}
+      <div class="counts" title="${c.evidence} evidence · ${c.claims} claims · ${c.links} links · ${c.contradictions} contradictions">${n(c.evidence + c.claims + c.links + c.contradictions, 'item')}${c.contradictions ? ` · ${n(c.contradictions, 'contradiction')}` : ''}</div></button>
+    <div class="acts"><a href="/c/${esc(c.slug)}/chat">Chat</a>${c.role === 'owner' || c.role === 'admin' ? `<a href="/c/${esc(c.slug)}/members">${c.requests ? `Members (${c.requests} asking)` : 'Members'}</a>` : `<a href="/c/${esc(c.slug)}/export.jsonl">Export</a>`}</div></div>`).join('')
   $('side').innerHTML = guide() + '<h1>Your collections</h1>' + (cs.length ? cards : '<div class="note">You are not in any collection yet. Create one, or ask an owner to add you.</div>')
     + (!ME.can_create ? '' : ME.usage && ME.usage.collections >= ME.usage.collections_limit
       ? `<div class="note muted">A free account owns ${ME.usage.collections_limit} collection. <a href="mailto:${esc(ME.contact)}?subject=Paranoy%20limits">Email ${esc(ME.contact)}</a> for more.</div>`
