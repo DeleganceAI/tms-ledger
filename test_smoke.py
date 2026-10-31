@@ -660,8 +660,10 @@ def server(ids) -> None:
         from tms import web as W
         home = client.get("/").text  # signed in, home is your collections as pin boards
         assert 'id="boardwrap"' in home and "<title>Paranoy · Collections</title>" in home and client.get("/submit").status_code == 200
-        assert "Log in or sign up" in client.get("/connect").text
-        me = client.get("/api/me").json()
+        assert "Welcome to Paranoy" in client.get("/connect").text
+        r = client.get("/api/me")
+        assert "db;" in r.headers["server-timing"] and "total;dur=" in r.headers["server-timing"]
+        me = r.json()
         assert me["pubkey"] == PK[BOB] and [c["slug"] for c in me["collections"]] == ["smoke"] and "Version" in me["terms_text"]
         assert {m["name"] for m in client.get("/api/c/smoke").json()["members"]} == {"Owner", "Bob"}
         assert client.get("/api/c/outside").status_code == 403

@@ -369,6 +369,32 @@ def claims_pass(collection: str = "") -> str:
 
 # --------------------------------------------------------------------- main
 
+def _timing(app):
+    """ASGI middleware: a Server-Timing header on every response (the browser's Network tab shows
+    it under Timing) and one log line per request. Times run to the first byte."""
+    async def timed(scope, receive, send):
+        if scope["type"] != "http" or scope["path"] == "/healthz":
+            return await app(scope, receive, send)
+        t0, spent = time.perf_counter(), {"pool": 0.0, "db": 0.0}
+        token = L.timings.set(spent)  # worker threads get a copy of the context, so they fill in this dict
+
+        async def send_timed(msg):
+            if msg["type"] == "http.response.start":
+                total = (time.perf_counter() - t0) * 1000
+                value = (f'pool;desc="waiting for a connection";dur={spent["pool"]:.1f}, '
+                         f'db;desc="holding a connection";dur={spent["db"]:.1f}, total;dur={total:.1f}')
+                msg = {**msg, "headers": [*msg.get("headers", []), (b"server-timing", value.encode())]}
+                # the path only: query strings can carry invite tokens
+                print(f"timing {scope['method']} {scope['path']} {msg['status']} total={total:.0f}ms "
+                      f"pool={spent['pool']:.0f}ms db={spent['db']:.0f}ms", file=sys.stderr, flush=True)
+            await send(msg)
+        try:
+            await app(scope, receive, send_timed)
+        finally:
+            L.timings.reset(token)
+    return timed
+
+
 def http_app():
     """MCP at /mcp plus the web pages, in one Starlette app."""
     from mcp.server.transport_security import TransportSecuritySettings
@@ -379,6 +405,7 @@ def http_app():
         # The Host header is the deployment's own hostname; requests are signed, so no rebinding risk.
         transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False))
     app.router.routes.extend(web.routes + email_login.routes + ui.routes + chat.routes + admin.routes + office.routes)
+    app.add_middleware(_timing)
     return app
 
 

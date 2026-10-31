@@ -18,7 +18,9 @@ import subprocess
 import sys
 import tempfile
 import threading
-from contextlib import nullcontext
+import time
+from contextlib import contextmanager, nullcontext
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from math import ceil
@@ -78,6 +80,12 @@ _pool_lock = threading.Lock()
 TELEMETRY_WAIT = 2.0
 
 
+# Per-request totals in ms for Server-Timing (server.py sets the dict): pool = waiting for a
+# connection, including its ping; db = holding one, which covers whatever runs while it is held.
+timings: ContextVar[dict | None] = ContextVar("timings", default=None)
+
+
+@contextmanager
 def connect(timeout: float | None = None):
     """A pooled connection (context manager). Autocommit; batches open their own transaction.
     prepare_threshold=None because PgBouncer in transaction mode breaks prepared statements.
@@ -89,7 +97,15 @@ def connect(timeout: float | None = None):
             _pool = ConnectionPool(DB_URL, min_size=1, max_size=10, open=True, check=ConnectionPool.check_connection, kwargs={
                 "autocommit": True, "row_factory": dict_row, "prepare_threshold": None})
             atexit.register(_pool.close)
-    return _pool.connection(timeout=timeout)
+    spent, t0 = timings.get(), time.perf_counter()
+    with _pool.connection(timeout=timeout) as conn:
+        t1 = time.perf_counter()
+        try:
+            yield conn
+        finally:
+            if spent is not None:
+                spent["pool"] += (t1 - t0) * 1000
+                spent["db"] += (time.perf_counter() - t1) * 1000
 
 
 def _clean(row: dict | None) -> dict | None:
