@@ -16,7 +16,7 @@ In our pump example, you start by adding the full text of the test report. Paran
 
 ### Claims: statements someone can examine
 
-Next, you record a specific statement: “In the two-hour test, the new pump used less electricity than the old pump.” This is a **claim**. It has its own record, so people can support it, challenge it, or point out a limit without changing the document it came from. Keep the conditions that matter in the wording. “The new pump always uses less electricity” would make a much broader claim than this one test supports. A claim can also begin as a hypothesis with no evidence attached yet.
+Next, you record a specific statement: “In the two-hour test, the new pump used less electricity than the old pump.” This is a **claim**. It has its own record, so people can support it, challenge it, or point out a limit without changing the document it came from. Keep the conditions that matter in the wording. “The new pump always uses less electricity” would make a much broader claim than this one test supports. A claim can also begin as a hypothesis with no evidence attached yet. [CLAIMS.md](https://github.com/DeleganceAI/tms-ledger/blob/main/CLAIMS.md) is a checklist for writing one, with examples scored against every check.
 
 ### Links: a quote and a reason
 
