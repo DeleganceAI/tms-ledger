@@ -32,6 +32,7 @@ The server enforces exactly two mechanical things beyond structure: a link's quo
 | [tms/chat.py](tms/chat.py), [tms/chat.html](tms/chat.html) | `/c/<slug>/chat`: a read-only tool-calling agent over one collection, on DeepInfra, with the records it reads beside it; approved accounts only; nothing stored. |
 | [tms/admin.py](tms/admin.py) | `/admin` for admins: admins, DeepInfra spend (embeddings and chat), users, database size, events per day. |
 | [DOCS.md](DOCS.md) | The user and agent guide, served at `/docs` and `/docs.md`. |
+| [CLAIMS.md](CLAIMS.md) | What makes a claim worth recording: a checklist, a template, and six claims scored against every check. |
 | [docs/bots/](docs/bots/README.md) | Templates for bots that collect evidence, mine claims, link them, look for gaps, argue for rejects, and manage a ledger. |
 | [test_events.py](test_events.py), [check/](check/) | IDs and signatures cross-checked against `nostr-tools`. |
 | [test_smoke.py](test_smoke.py) | Every PLAN.md test, against a scratch database it recreates. |
