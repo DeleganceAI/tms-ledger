@@ -71,8 +71,8 @@ details.connect{margin-top:14px;border-top:1px solid var(--line);padding-top:10p
     <div class="actions" id="eCodeRow" hidden><input id="eCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6-digit code" style="max-width:140px"><button id="eVerify">Sign in</button></div>
     <span id="eMsg" class="muted"></span></section>
   <section id="keyBox" hidden><h2>Your key</h2>
-    <p class="muted" style="margin-top:0">You signed in with email, so the server holds this account's Nostr key and signs your records with it. Export it to keep a copy, or to sign with your own Nostr extension instead.</p>
-    <div class="actions"><button id="kSend" class="ghost">Email me a code to export my key</button><input id="kCode" inputmode="numeric" maxlength="6" placeholder="6-digit code" style="max-width:140px" hidden><button id="kShow" hidden>Show my key</button></div>
+    <p class="muted" style="margin-top:0">The server holds your key. Export it any time.</p>
+    <div class="actions"><button id="kSend" class="ghost">Export my key</button><input id="kCode" inputmode="numeric" maxlength="6" placeholder="6-digit code" style="max-width:140px" hidden><button id="kShow" hidden>Show my key</button></div>
     <div id="kOut"></div><span id="kMsg" class="muted"></span></section>
   <section id="profileBox" hidden><h2>Profile</h2><div id="profile"></div></section>
   <section id="termsBox" hidden><h2>Terms</h2><pre id="termsText"></pre>
@@ -81,63 +81,57 @@ details.connect{margin-top:14px;border-top:1px solid var(--line);padding-top:10p
     <p class="muted" style="margin:10px 0 0">Need more? Email <a id="usageMail" href="#"></a> to lift your limits.</p></section>
   <section id="home" hidden><h2>Your collections</h2><div id="collections"></div>
     <div id="aboutList" hidden><h2 style="margin-top:16px">Topic and visibility</h2>
-      <p class="muted" style="margin-top:0">For collections you own. A <b>public</b> collection shows its name, topic, record counts, how active it is and how many keys write there, and an outline of its board with no text, on <a href="/communities">Communities</a>; its records and members stay private. Change either at any time.</p>
-      <div id="aboutRows"></div></div>
+            <div id="aboutRows"></div></div>
     <div id="newCol" hidden style="margin-top:12px"><div class="grid2"><label>New collection<input id="newSlug" placeholder="new-collection-slug"></label>
-      <label>Topic (one line, up to 140 characters)<input id="newTopic" maxlength="140" placeholder="What this collection is about"></label></div>
-      <label class="check"><input type="checkbox" id="newPublic"> Public: show its name, topic, record counts, activity and an anonymous outline of its board on Communities (its records and members stay private)</label>
+      <label>Topic<input id="newTopic" maxlength="140" placeholder="What this collection is about"></label></div>
+      <label class="check" title="Communities shows its name, topic, counts and an outline of its board. Records and members stay private."><input type="checkbox" id="newPublic"> Public on Communities</label>
       <div id="newAgents" class="actions"></div>
       <div class="actions"><button id="newBtn" class="ghost">Create collection</button><span id="newMsg"></span></div></div>
     <div id="stewardsBox" hidden style="margin-top:16px"><h2>Agents who may create collections for you</h2>
-      <p class="muted" style="margin-top:0">Opening a collection makes that agent its admin. It does not make them an admin of collections you already have — do that on the collection's members page. Removing one stops it opening new collections for you.</p>
+      <p class="muted" style="margin-top:0">They become admin of what they open.</p>
       <div id="sList"></div></div></section>
   <section id="agentsBox" hidden><h2>Your agents</h2>
-    <p class="muted" style="margin-top:0">Your account is you, one <b>Ledger</b> agent that acts for you (it can create collections, manage members and pick agents, but cannot change which key is the Ledger), and your other agents. Each key belongs to one account. Agents work only in the collections you pick for them below.</p>
+    <p class="muted" style="margin-top:0">Your <b>Ledger</b> acts for you. Other agents work only in the collections you tick.</p>
     <label>Ledger<div class="addkey"><input id="acLedger" placeholder="npub1… or hex; empty for none" aria-label="Your Ledger's npub"><button id="acSave" class="ghost">Save Ledger</button></div></label><span id="acMsg"></span>
     <h2 style="margin-top:16px">Agents</h2>
     <div class="panes"><div id="acAgents"></div><div id="acPlaces" aria-live="polite"></div></div>
     <details class="connect" id="connectAgent"><summary>Connect an agent</summary>
-      <p class="muted">An agent is any program that holds its own Nostr key and calls Paranoy's MCP tools, signing each call. Your Ledger is one; add others for each job.</p>
-      <ol><li>Make the agent a key: <code>uv run tms-sign keygen</code> in a checkout of <a href="https://github.com/DeleganceAI/tms-ledger" target="_blank" rel="noopener">the repo</a>, or any Nostr library. Keep its <code>nsec</code> in the agent's own config; never paste it here.</li>
-        <li>Add its <code>npub</code> above with <b>+ Add</b> (or as your Ledger), then tick the collections it works in.</li>
-        <li>Point the agent at the MCP endpoint. Most MCP clients take a config like this:<pre class="copy" id="mcpConfig"></pre></li>
-        <li>Give it instructions. This starter prompt names your collections; the <a href="https://github.com/DeleganceAI/tms-ledger/tree/main/docs/bots" target="_blank" rel="noopener">bot templates</a> have fuller ones for each job:<pre class="copy" id="starter"></pre></li></ol>
-      <p class="muted">Listing tools needs no signature. Every other call carries a signed request; <a href="/docs#for-bots-and-agents">the docs</a> show how, with Python and JavaScript examples.</p></details></section>
+      <ol><li>Add the agent's <code>npub</code> above with <b>+ Add</b>, and tick its collections.</li>
+        <li>Give it this MCP config:<pre class="copy" id="mcpConfig"></pre></li>
+        <li>And this starter prompt:<pre class="copy" id="starter"></pre></li></ol>
+      <p class="muted">No key yet, or writing your own client? See <a href="/docs#for-bots-and-agents">the docs</a>.</p></details></section>
   <section id="submit" hidden><h2>Submit evidence</h2>
     <div class="grid2"><label>Collection<select id="sCol"></select></label>
       <label>URL<div style="display:flex;gap:6px"><input id="sUrl" placeholder="https://..."><button id="fetchBtn" class="ghost">Fetch</button></div></label>
       <label>Title<input id="sTitle"></label><label>Source (publisher or site)<input id="sSource" placeholder="Journal of Allergy"></label></div>
-    <label style="margin-top:10px">Full text you are vouching for<textarea id="sText" style="min-height:200px"></textarea></label>
+    <label style="margin-top:10px">Full text<textarea id="sText" style="min-height:200px"></textarea></label>
     <h2 style="margin-top:16px">Claims and links from this evidence</h2>
-    <p class="muted" style="margin-top:0">Each row signs a link from this evidence to a claim. Write the claim's text to sign a new claim, or paste an existing claim's event id. The quote must appear in the text above.</p>
+    <p class="muted" style="margin-top:0">The quote must appear in the text above.</p>
     <div id="rows"></div>
     <div class="actions"><button id="addRow" class="ghost">Add row</button><button id="submitBtn">Sign and publish</button><span id="submitMsg"></span></div></section>
   <section id="aboutBox" hidden><h2>About this collection</h2>
-    <label>Topic (one line, up to 140 characters)<input id="aTopic" maxlength="140" placeholder="What this collection is about"></label>
-    <label class="check"><input type="checkbox" id="aPublic"> Public: show its name, topic, record counts, activity and an anonymous outline of its board on Communities (its records and members stay private)</label>
-    <div class="actions"><button id="aSave">Sign and save</button><span id="aMsg"></span></div></section>
+    <label>Topic<input id="aTopic" maxlength="140" placeholder="What this collection is about"></label>
+    <label class="check" title="Communities shows its name, topic, counts and an outline of its board. Records and members stay private."><input type="checkbox" id="aPublic"> Public on Communities</label>
+    <div class="actions"><button id="aSave">Save</button><span id="aMsg"></span></div></section>
   <section id="communities" hidden>
-    <div class="hero"><h1>See what people and their agents are investigating</h1>
-      <p>Collections whose owners chose to show them. Each card shows a collection's shape and how busy it is; its records and members stay private. Ask to join one and its owner decides.</p></div>
+    <div class="hero"><h1>Communities</h1></div>
     <div class="ctools"><input id="cSearch" type="search" placeholder="Search topics" aria-label="Search collections by topic or name">
       <select id="cSort" aria-label="Sort collections"><option value="active">Most active</option><option value="big">Biggest</option><option value="new">Newest</option></select>
       <span class="muted" id="cNote"></span></div>
     <div id="cList" class="cgrid"></div></section>
   <section id="invite" hidden><h2>Join <span id="iSlug" class="mono"></span></h2>
-    <p class="muted" style="margin-top:0">You were sent an invite to this collection. Ask to join, and its owner or an admin lets you in.</p>
+    <p class="muted" style="margin-top:0">Ask to join; the owner lets you in.</p>
     <div id="iBox"><label>A note for the owner (optional)<textarea id="iNote" maxlength="250" placeholder="Who you are" style="min-height:60px;font-family:var(--sans)"></textarea></label>
       <div class="actions"><button id="iAsk">Ask to join</button><span id="iMsg"></span></div></div></section>
   <section id="members" hidden><h2>Members of <span id="mSlug"></span></h2><table id="mTable"></table>
     <div id="invBox" hidden><h2 style="margin-top:18px">Invite link</h2>
-      <p class="muted" style="margin:0">Anyone with this link can sign up and ask to join, even though the collection is private. You still accept each request below.</p>
+      <p class="muted" style="margin:0">Anyone with this link can ask to join.</p>
       <div class="actions"><code id="invLink" style="word-break:break-all"></code><button class="ghost" id="invCopy" type="button">Copy</button></div></div>
     <div id="reqBox" hidden><h2 style="margin-top:18px">Asking to join</h2><div id="reqList"></div></div>
     <h2 style="margin-top:18px">People</h2>
-    <p class="muted" style="margin:0">Add people, not their bots: each person picks which of their own agents work here. Removing someone removes their agents with them. The owner always stays, and admins stay members.</p>
-    <div id="mList"></div>
+        <div id="mList"></div>
     <div id="adminBox" hidden><h2 style="margin-top:18px">Admins</h2>
-      <p class="muted" style="margin:0">Admins can change members and the topic, but not this list. The owner is never an admin. Someone removed here keeps access only if they are still on the list of people above.</p>
-      <div id="admList"></div></div>
+            <div id="admList"></div></div>
     <div class="actions"><a id="mExport" href="#">Download export (JSONL)</a><span id="mMsg"></span></div></section>
 </main>
 <script>
@@ -662,7 +656,7 @@ function drawCommunities() {
       <div class="note">${c.claims ? (c.unlinked ? `${c.unlinked.toLocaleString('en-US')} claim${c.unlinked === 1 ? '' : 's'} with no evidence yet` : 'Every claim has evidence') : c.evidence ? 'Evidence collected; no claims yet' : 'Just getting started'}</div>
       <div class="join">${join(c)}</div></div></article>`
   }).join('') : SHOW.length ? '<p class="muted">No collection matches that search.</p>'
-    : '<p class="muted">No collections are public yet. Owners can make theirs public under Topic and visibility on their <a href="/connect">Account</a> page.</p>'
+    : '<p class="muted">Nothing public yet.</p>'
   $('cList').querySelectorAll('button.ask').forEach(b => b.onclick = () => {
     const box = b.parentNode, slug = b.dataset.slug
     box.innerHTML = `<label>A note for the owner (optional)<textarea maxlength="280" placeholder="Who you are and why you'd like to join" style="min-height:60px;font-family:var(--sans)"></textarea></label>

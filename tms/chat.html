@@ -38,16 +38,16 @@ textarea{flex:1;min-height:48px;max-height:180px;resize:vertical;font:inherit;co
 @media(max-width:860px){body{height:auto}#main{display:block}#chat{border-right:0;height:78dvh}#refs{border-top:1px solid var(--line2);max-height:none}}
 </style></head><body>
 <!--HEADER-->
-<div class="bar"><h1 id="slug"></h1><span class="muted">{{MODEL}} · reads only this collection</span><span class="grow"></span>
+<div class="bar"><h1 id="slug"></h1><span class="muted">{{MODEL}}</span><span class="grow"></span>
   <a class="ib" id="toBoard" href="/">Board</a><button class="ib" id="new" type="button">New chat</button>
   <button class="ib" id="xmd" type="button" title="Download as Markdown">.md</button><button class="ib" id="xjson" type="button" title="Download as JSON">.json</button></div>
 <div id="main">
   <section id="chat" aria-label="Chat">
     <div id="log" aria-live="polite"></div>
-    <div id="locked" hidden role="note"><b>The chat is for approved accounts.</b> Email <a href="mailto:{{CONTACT}}?subject=Paranoy%20chat%20access">{{CONTACT}}</a> for access to the chat. You can still browse this collection's records on its <a id="lockedBoard" href="/">board</a>.</div>
+    <div id="locked" hidden role="note">Chat is for approved accounts. Email <a href="mailto:{{CONTACT}}?subject=Paranoy%20chat%20access">{{CONTACT}}</a>. <a id="lockedBoard" href="/">See the board</a></div>
     <form id="form"><textarea id="q" aria-label="Your question" placeholder="Ask about this collection… Enter sends, Shift+Enter for a new line"></textarea><button class="go" id="send">Send</button></form>
   </section>
-  <section id="refs" aria-label="Records the agent pulled up"><h2>Records</h2><p class="muted" id="refsEmpty">The claims, evidence and links the agent reads show here as it works. Ones its answer cites are marked <b>cited</b> and come first.</p></section>
+  <section id="refs" aria-label="Records the agent pulled up"><h2>Records</h2><p class="muted" id="refsEmpty">Cited records appear here.</p></section>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js" defer></script>
 <script>
@@ -87,7 +87,7 @@ function render() {
     : e.type === 'answer' ? `<div class="msg md">${md(e.content)}</div>`
     : e.type === 'error' ? `<div class="msg err" role="alert">${esc(e.error)}</div>`
     : `<div class="tool">${esc(e.name)}${e.result == null ? ' …' : ` · ${esc(e.ms)}ms`}</div>`).join('')
-    : `<div class="intro"><p>Ask anything about <b class="mono">${esc(SLUG)}</b>. The agent searches the claims, reads the evidence they cite and answers with links to the records it used. It only reads; it never writes, and it says when the collection doesn't cover something.</p>
+    : `<div class="intro"><p>Ask anything about <b class="mono">${esc(SLUG)}</b>.</p>
        <p class="muted">Try:</p><button type="button">What are the main claims, and what supports each?</button><button type="button">Where do the sources disagree?</button><button type="button">Which claims have no evidence yet?</button></div>`
   $('log').querySelectorAll('.intro button').forEach(b => b.onclick = () => { $('q').value = b.textContent; $('form').requestSubmit() })
   $('log').scrollTop = $('log').scrollHeight
