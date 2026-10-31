@@ -39,6 +39,7 @@ COOKIE_TTL = 12 * 3600
 PAGE_FILE = Path(__file__).with_name("web.html")
 COLLECTIONS_FILE = Path(__file__).with_name("collections.html")
 OFFICE_FILE = Path(__file__).with_name("office.html")
+PRICING_FILE = Path(__file__).with_name("pricing.html")
 DOCS_FILE = Path(__file__).resolve().parent.parent / "DOCS.md"
 # Extra docs pages, served at /docs/<name> with the same template.
 DOCS_PAGES = {"bitter-lesson": Path(__file__).resolve().parent.parent / "BITTER_LESSON.md",
@@ -232,7 +233,7 @@ async def logout(request: Request) -> JSONResponse:
     return resp
 
 
-TITLES = {"/": "Collections", "/connect": "Account", "/submit": "Submit", "/communities": "Communities"}
+TITLES = {"/": "Collections", "/connect": "Account", "/submit": "Submit", "/communities": "Communities", "/pricing": "Pricing"}
 
 
 def with_header(request: Request, html: str) -> str:
@@ -293,6 +294,11 @@ def _rate_limited(ip: str) -> bool:
             return True
         q.append(now)
         return False
+
+
+async def pricing(request: Request) -> HTMLResponse:
+    """Plans. ponytail: no checkout yet, the paid buttons email CONTACT_EMAIL; Stripe when someone wants to pay."""
+    return HTMLResponse(with_header(request, PRICING_FILE.read_text(encoding="utf-8").replace("{{CONTACT_EMAIL}}", CONTACT_EMAIL)))
 
 
 async def office(request: Request) -> HTMLResponse:
@@ -561,6 +567,7 @@ routes = [
     Route("/submit", page),
     Route("/communities", page),
     Route("/office", office),
+    Route("/pricing", pricing),
     *[Route("/" + f.name, lambda r, f=f: FileResponse(f, headers={"Cache-Control": "public, max-age=86400"}))
       for f in (Path(__file__).with_name("site.css"), Path(__file__).with_name("site.js"))],  # the shared header and styles; pages add ?v=
 

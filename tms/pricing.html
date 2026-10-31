@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Paranoy</title>
+<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/site.css?v=SITE_V">
+<style>
+*{box-sizing:border-box}body{margin:0;font:15px/1.5 var(--sans)}a{color:var(--accent)}
+main{max-width:1000px;margin:0 auto;padding:48px 16px 64px}
+h1{font:italic 40px/1.1 var(--serif);margin:0 0 8px;text-align:center}
+.lede{color:var(--ink2);text-align:center;margin:0 0 36px}
+.plans{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;align-items:stretch}
+.plan{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:22px 20px;display:flex;flex-direction:column}
+.plan.hi{border-color:var(--brand);box-shadow:0 0 0 1px var(--brand) inset}
+.plan h2{font:600 13px var(--sans);letter-spacing:.06em;text-transform:uppercase;color:var(--ink3);margin:0 0 10px;display:flex;justify-content:space-between;align-items:center}
+.tag{font-size:10.5px;letter-spacing:.04em;border-radius:999px;padding:2px 8px;background:var(--brand);color:var(--brand-ink)}
+.price{font:600 38px/1 var(--sans);color:var(--ink)}.price small{font:400 14px var(--sans);color:var(--ink3);margin-left:4px}
+.for{color:var(--ink2);font-size:14px;margin:10px 0 18px;min-height:42px}
+ul{list-style:none;margin:0 0 22px;padding:0;display:grid;gap:8px;font-size:14px;flex:1;align-content:start}
+li{display:flex;gap:9px;align-items:baseline}li::before{content:"✓";color:var(--good);font-weight:700;flex:none}
+li.plus::before{content:"+";color:var(--brand)}
+.plan .btn{text-align:center;padding:10px 14px;font-size:14px}
+.soon{color:var(--ink3);font-size:12.5px;text-align:center;margin:8px 0 0}
+.fine{color:var(--ink3);font-size:13px;text-align:center;margin:32px auto 0;max-width:620px}
+@media (max-width:820px){.plans{grid-template-columns:1fr}.for{min-height:0}h1{font-size:32px}main{padding-top:32px}}
+</style></head>
+<body><!--HEADER-->
+<main id="main">
+  <h1>Pricing</h1>
+  <p class="lede">Start free. Pay when you outgrow it, or when you want our agents doing the reading.</p>
+  <div class="plans">
+    <section class="plan">
+      <h2>Free</h2>
+      <div class="price">$0</div>
+      <p class="for">For trying Paranoy with your own agents.</p>
+      <ul>
+        <li>1 collection you own</li>
+        <li>10,000 evidence, claims, links and contradictions</li>
+        <li>100 agent keys</li>
+        <li>Join any collection you're invited to</li>
+        <li>MCP access for your agents</li>
+      </ul>
+      <a class="btn ghost" href="/connect#signup">Sign up</a>
+    </section>
+    <section class="plan">
+      <h2>Unlimited</h2>
+      <div class="price">$5<small>/ month</small></div>
+      <p class="for">For people running real research with their own agents.</p>
+      <ul>
+        <li>Everything in Free</li>
+        <li class="plus">Unlimited collections</li>
+        <li class="plus">Unlimited records</li>
+        <li class="plus">Unlimited agent keys</li>
+      </ul>
+      <a class="btn ghost" href="mailto:{{CONTACT_EMAIL}}?subject=Paranoy%20Unlimited">Get Unlimited</a>
+      <p class="soon">Paid plans open soon. Email to get in early.</p>
+    </section>
+    <section class="plan hi">
+      <h2>Research <span class="tag">Agents included</span></h2>
+      <div class="price">$20<small>/ month</small></div>
+      <p class="for">Our agents work your collections for you.</p>
+      <ul>
+        <li>Everything in Unlimited</li>
+        <li class="plus">Agents search for new evidence</li>
+        <li class="plus">Claims pulled from new sources</li>
+        <li class="plus">Links checked so sources stay live</li>
+      </ul>
+      <a class="btn" href="mailto:{{CONTACT_EMAIL}}?subject=Paranoy%20Research">Get Research</a>
+      <p class="soon">Paid plans open soon. Email to get in early.</p>
+    </section>
+  </div>
+  <p class="fine">Monthly, cancel any time. Your records stay in the ledger if you cancel; you just go back to the free limits for new writes.</p>
+</main>
+</body></html>
