@@ -55,21 +55,22 @@ main button.x{padding:0 8px;line-height:22px;font-size:15px}.addkey{display:flex
 pre.copy{position:relative;white-space:pre-wrap;word-break:break-word;padding-right:70px}pre.copy button{position:absolute;top:6px;right:6px;padding:2px 8px;font-size:12px}
 details.connect{margin-top:14px;border-top:1px solid var(--line);padding-top:10px}details.connect summary{cursor:pointer;font-weight:600}details.connect ol{padding-left:20px}details.connect li{margin:6px 0}
 #why:empty{display:none}#why{background:var(--accent2);border-radius:6px;padding:6px 10px;margin:0 0 10px}
+#connect{max-width:380px;width:100%;justify-self:center;margin-top:8vh;padding:28px 28px 24px;border-radius:14px}
+#connect h1{margin:0 0 20px;font:italic 28px/1.15 var(--serif);text-align:center}
+#connect input,#connect button{width:100%;max-width:none!important;padding:10px 12px;font-size:15px}#connect .stack{display:grid;gap:10px}
+#connect .or{display:flex;align-items:center;gap:10px;margin:18px 0;color:var(--ink3);font-size:12.5px}#connect .or::before,#connect .or::after{content:"";flex:1;border-top:1px solid var(--line)}
+#eMsg:empty,#connectMsg:empty{display:none}#eMsg,#connectMsg{font-size:13px;text-align:center}
 [hidden]{display:none!important}
 </style></head><body>
 <!--HEADER-->
 <main id="main">
-  <section id="connect" hidden><h2>Log in or sign up</h2><p id="why"></p>
-    <p>Every record here is signed by its author's Nostr key. Log in with a NIP-07 browser extension (Alby, nos2x, Keys.band) to read and write the collections you belong to. New here? Logging in with a new key, or a new email address below, creates a free account.</p>
-    <button id="connectBtn">Log in</button> <span id="connectMsg" class="muted"></span>
-    <div id="signupBox" hidden><p>This key has no account yet. Sign up to get a free account: one collection of your own, and 10,000 records.</p>
-      <div id="signupCheck"></div><div class="actions"><button id="signupBtn">Sign up</button></div></div>
-    <h2 style="margin-top:18px">Or sign in with email</h2>
-    <p class="muted" style="margin-top:0">No extension needed. We email you a code each time; there's no password. On your first sign-in we create a Nostr key for you and hold it, so the site can sign your records. You can export it at any time and switch to signing with it yourself.</p>
-    <div class="actions"><input id="eAddr" type="email" autocomplete="email" placeholder="you@example.com" style="max-width:280px"><button id="eSend" class="ghost">Email me a code</button></div>
-    <div id="eCheck"></div>
-    <div class="actions" id="eCodeRow" hidden><input id="eCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6-digit code" style="max-width:140px"><button id="eVerify">Sign in</button></div>
-    <span id="eMsg" class="muted"></span></section>
+  <section id="connect" hidden><h1>Welcome to Paranoy</h1><p id="why"></p>
+    <div class="stack"><input id="eAddr" type="email" autocomplete="email" placeholder="you@example.com" aria-label="Email"><div id="eCheck"></div><button id="eSend">Continue with email</button>
+    <div class="stack" id="eCodeRow" hidden><input id="eCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6-digit code" aria-label="Code"><button id="eVerify">Log in</button></div>
+    <span id="eMsg" class="muted"></span></div>
+    <div class="or">or</div>
+    <div class="stack"><button id="connectBtn" class="ghost">Continue with Nostr</button><span id="connectMsg" class="muted"></span>
+    <div class="stack" id="signupBox" hidden><div id="signupCheck"></div><button id="signupBtn">Create free account</button></div></div></section>
   <section id="keyBox" hidden><h2>Your key</h2>
     <p class="muted" style="margin-top:0">The server holds your key. Export it any time.</p>
     <div class="actions"><button id="kSend" class="ghost">Export my key</button><input id="kCode" inputmode="numeric" maxlength="6" placeholder="6-digit code" style="max-width:140px" hidden><button id="kShow" hidden>Show my key</button></div>
@@ -417,7 +418,7 @@ $('termsBtn').onclick = async () => {
 }
 
 async function connect() {
-  if (!window.nostr) return say('connectMsg', 'No NIP-07 extension found. Install one (Alby, nos2x, Keys.band) and reload.', 'err')
+  if (!window.nostr) return say('connectMsg', 'No Nostr extension found. Try Alby or nos2x.', 'err')
   try {
     say('connectMsg', 'Asking your extension for your public key…')
     const pk = await window.nostr.getPublicKey()
@@ -430,7 +431,7 @@ async function connect() {
     show(relay)
   } catch (e) {
     if (e.status !== 403) return say('connectMsg', e.message, 'err')
-    say('connectMsg', '')
+    say('connectMsg', 'No account for this key yet.')
     $('signupBox').hidden = false; botCheck('signupCheck')
   }
 }
@@ -448,7 +449,7 @@ $('signupBtn').onclick = async () => {
 
 $('eSend').onclick = async () => {
   try { say('eMsg', 'Sending…'); await post('/api/email/start', {email: $('eAddr').value, turnstile: await checkToken('eCheck')}); $('eCodeRow').hidden = false; $('eCode').focus()
-        say('eMsg', 'Check your inbox for a 6-digit code. It expires in 10 minutes.') }
+        say('eMsg', 'Code sent. Check your inbox.') }
   catch (e) { say('eMsg', e.message, 'err') }
   finally { resetCheck('eCheck') }  // tokens work once
 }
