@@ -35,7 +35,7 @@ def header(signed_in: bool, path: str) -> str:
                  + f'<span class="end"><a id="who-name" href="/connect" title="Your account">Account</a>'
                    f'<button class="btn ghost" id="logout" type="button">Log out</button>{GITHUB}</span>')
     else:
-        links = (link("/communities", "Communities") + link("/docs", "Docs") + link("/office", "Office")
+        links = (link("/communities", "Communities") + link("/docs", "Docs") + link("/pricing", "Pricing") + link("/office", "Office")
                  + f'<span class="end">{GITHUB}<a class="btn ghost" href="/connect">Log in</a><a class="btn" href="/connect#signup">Sign up</a></span>')
     subnav = (f'<nav class="subnav{" pinned" if on_dash else ""}" id="subnav" aria-label="Dashboard sections">{sub}</nav>'
               if signed_in else "")
